@@ -1,0 +1,2877 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<title>VoxelCraft — Minecraft di Browser</title>
+<style>
+  @font-face {
+    font-family: 'Minecraft Ten';
+    src: url('./VoxelCraft/font/minecraft-ten.ttf') format('truetype');
+    font-display: swap;
+  }
+  :root { color-scheme: light; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #88c5ff; font-family: 'Minecraft Ten', 'Segoe UI', system-ui, -apple-system, sans-serif; user-select: none; }
+  #game { position: fixed; inset: 0; display: block; }
+
+  /* Crosshair */
+  #crosshair {
+    position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%);
+    width: 22px; height: 22px; pointer-events: none; z-index: 5;
+    mix-blend-mode: difference;
+  }
+  #crosshair::before, #crosshair::after {
+    content: ""; position: absolute; background: #fff;
+  }
+  #crosshair::before { left: 50%; top: 0; width: 2px; height: 100%; transform: translateX(-50%); }
+  #crosshair::after { top: 50%; left: 0; height: 2px; width: 100%; transform: translateY(-50%); }
+
+  /* Night vignette: subtle darkening of screen edges after sunset.
+     Opacity is driven by the day/night factor in animate(). z-index 4 sits
+     above the 3D canvas but below the HUD/hotbar (5) and overlays (10). */
+  #vignette {
+    position: fixed; inset: 0; z-index: 4; pointer-events: none;
+    background: radial-gradient(ellipse at center, rgba(0,0,0,0) 40%, rgba(0,0,8,0.6) 100%);
+    opacity: 0; transition: opacity 0.4s linear;
+  }
+
+  /* Hotbar */
+  #hotbar {
+    position: fixed; left: 50%; bottom: 14px; transform: translateX(-50%);
+    display: flex; gap: 4px; padding: 4px; background: rgba(0,0,0,0.45);
+    border: 2px solid rgba(255,255,255,0.25); border-radius: 6px; z-index: 5;
+    backdrop-filter: blur(2px);
+  }
+  .slot {
+    width: 52px; height: 52px; background: rgba(20,20,20,0.55);
+    border: 2px solid rgba(255,255,255,0.18); border-radius: 4px;
+    display: flex; align-items: center; justify-content: center; position: relative;
+    cursor: pointer;
+  }
+  .slot.active { border-color: #fff; box-shadow: 0 0 0 2px rgba(255,255,255,0.4); }
+  .slot canvas { width: 36px; height: 36px; image-rendering: pixelated; }
+  .slot .num { position: absolute; top: 1px; left: 3px; font-size: 10px; color: #fff; text-shadow: 1px 1px 0 #000; }
+  .slot .name { position: absolute; bottom: -18px; left: 50%; transform: translateX(-50%); font-size: 11px; color: #fff; text-shadow: 1px 1px 0 #000; white-space: nowrap; opacity: 0; transition: opacity .15s; }
+  .slot.active .name { opacity: 1; }
+
+  /* HUD */
+  #hud {
+    position: fixed; top: 10px; left: 10px; z-index: 5; color: #fff;
+    font-size: 12px; line-height: 1.5; text-shadow: 1px 1px 0 #000;
+    background: rgba(0,0,0,0.35); padding: 6px 10px; border-radius: 4px;
+    font-variant-numeric: tabular-nums; pointer-events: none;
+  }
+  #hud b { color: #ffe082; }
+
+  /* Overlay */
+  #overlay {
+    position: fixed; inset: 0; z-index: 10; background: rgba(0,0,0,0.55);
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    color: #fff; text-align: center; cursor: pointer; backdrop-filter: blur(3px);
+  }
+  #overlay h1 { font-size: 42px; margin-bottom: 6px; letter-spacing: 1px; text-shadow: 3px 3px 0 #000; }
+  #overlay h1 span { color: #7ee76a; }
+  #overlay p { font-size: 15px; opacity: 0.92; margin: 4px 0; text-shadow: 1px 1px 0 #000; max-width: 540px; }
+  #overlay .cta { margin-top: 18px; font-size: 18px; padding: 12px 26px; background: #4a9a3a; border: 2px solid #fff; border-radius: 6px; box-shadow: 0 4px 0 #2c5e22; }
+  #overlay .keys { margin-top: 22px; display: grid; grid-template-columns: auto auto; gap: 4px 18px; font-size: 13px; text-align: left; }
+  #overlay .keys b { display: inline-block; min-width: 78px; color: #ffe082; }
+  #overlay.hidden { display: none; }
+  #loading { position: fixed; inset: 0; z-index: 20; background: #1a1a2e; display: flex; flex-direction: column; align-items: center; justify-content: center; color: #fff; }
+  #loading.hidden { display: none; }
+  .spinner { width: 48px; height: 48px; border: 4px solid rgba(255,255,255,0.2); border-top-color: #7ee76a; border-radius: 50%; animation: spin 1s linear infinite; margin-bottom: 14px; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  #toast {
+    position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    background: rgba(0,0,0,0.8); color: #fff; padding: 10px 18px; border-radius: 6px;
+    font-size: 14px; z-index: 8; opacity: 0; transition: opacity .2s; pointer-events: none;
+    text-shadow: 1px 1px 0 #000;
+  }
+  #toast.show { opacity: 1; }
+
+  /* Minecraft-inspired main menu */
+  #overlay {
+    background: linear-gradient(180deg, rgba(0,0,0,.22), rgba(0,0,0,.42));
+    backdrop-filter: none; cursor: default; padding: 24px; overflow-y: auto;
+  }
+  #overlay .menu-wrap { width: min(440px, 94vw); display:flex; flex-direction:column; align-items:center; margin:auto; }
+  /* Browser adaptation of VoxelCraftResourcePack/ui/main_menu.json branding. */
+  #overlay .brand { position:relative; margin-bottom:26px; transform:none; }
+  #overlay h1 { font-family:'Segoe UI', system-ui, sans-serif; font-size:clamp(36px, 6vw, 54px); font-weight:800; line-height:1; letter-spacing:1px; color:#bfff7a; -webkit-text-stroke:0; text-shadow:2px 2px 0 #252525, 4px 4px 0 rgba(0,0,0,.45); margin:0; }
+  #overlay h1 span { color:#bfff7a; }
+  #overlay .edition { font-size:12px; letter-spacing:3px; margin-top:8px; color:#fff; text-shadow:2px 2px #222; }
+  #overlay .splash { display:none; }
+  #overlay .menu-buttons { width:100%; display:grid; gap:8px; }
+  #overlay .menu-buttons.hidden { display:none; }
+  #overlay .help-options-panel {
+    display:none;
+    width:100%;
+    margin-top:2px;
+    padding:14px;
+    color:#262626;
+    background-color:#c6c6c6;
+    background-image:url('./VoxelCraft/textures/ui/background_panel.png');
+    background-size:100% 100%;
+    border:4px solid transparent;
+    border-image:url('./VoxelCraft/textures/ui/background_with_border.png') 1 fill / 4px / 0 stretch;
+    box-shadow:0 5px 0 rgba(0,0,0,.35);
+  }
+  #overlay .help-options-panel.open { display:grid; gap:8px; }
+  #overlay .help-options-panel h2 {
+    margin:0 0 4px;
+    color:#262626;
+    font-size:17px;
+    text-align:left;
+    letter-spacing:0;
+    text-shadow:1px 1px rgba(255,255,255,.55);
+  }
+  #overlay .help-options-panel .menu-panel-note {
+    margin:3px 0 4px;
+    color:#444;
+    font-size:11px;
+    line-height:1.45;
+    text-align:left;
+    text-shadow:none;
+  }
+  #overlay .help-options-panel .menu-back {
+    margin-top:3px;
+    background-color:#5a5a5a;
+  }
+  #overlay button { width:100%; min-height:42px; padding:9px 14px; border:2px solid #171717; border-radius:2px; color:#fff; font-size:15px; font-weight:600; letter-spacing:.2px; text-shadow:2px 2px #333; background:linear-gradient(#777,#555); box-shadow:inset 2px 2px rgba(255,255,255,.28), inset -2px -3px rgba(0,0,0,.25), 0 2px 0 rgba(0,0,0,.4); cursor:pointer; }
+  #overlay button:hover, #overlay button:focus-visible { outline:none; background:linear-gradient(#91b5c9,#66899c); border-color:#fff; }
+  #overlay .button-row { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+  #overlay .menu-foot { display:flex; justify-content:space-between; gap:12px; width:100%; margin-top:22px; font-size:11px; color:#eee; text-shadow:1px 1px #222; }
+  #overlay .menu-foot span:last-child { text-align:right; }
+  #overlay .menu-subtitle { font-size:12px; color:#f1f1f1; margin:0 0 18px; text-shadow:1px 2px #222; }
+  #overlay .keys { display:none; }
+  #overlay .cta { display:none; }
+  #overlay .settings-panel { display:none; width:100%; margin-top:12px; padding:14px; background:rgba(0,0,0,.8); border:2px solid #777; }
+  #overlay .settings-panel.open { display:block; }
+  #overlay .settings-panel h2 { font-size:17px; margin-bottom:12px; text-shadow:2px 2px #222; }
+  #overlay .settings-panel label { display:flex; justify-content:space-between; align-items:center; gap:12px; font-size:13px; margin:10px 0; }
+  #overlay .settings-panel select { max-width:58%; padding:5px; background:#333; color:#fff; border:1px solid #aaa; }
+  #overlay .settings-panel .settings-close { margin-top:8px; }
+  #overlay p { max-width:none; }
+  @media (max-width:560px) {
+    #overlay { padding:16px; }
+    #overlay .brand { margin-bottom:26px; }
+    #overlay .splash { right:-56px; top:4px; font-size:12px; }
+    #overlay .menu-foot { font-size:10px; }
+  }
+
+  /* Mobile touch hint */
+  @media (hover: none) and (pointer: coarse) {
+    #overlay .mobile-hint { display: block; }
+  }
+
+  /* Inventory panel (press E) */
+  #inventory {
+    position: fixed; inset: 0; z-index: 11; background: rgba(0,0,0,0.65);
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    color: #fff; backdrop-filter: blur(3px); padding: 20px;
+  }
+  #inventory.hidden { display: none; }
+  #inventory h2 { font-size: 18px; margin-bottom: 12px; text-shadow: 2px 2px 0 #000; letter-spacing: 1px; }
+  .inv-grid {
+    display: grid; grid-template-columns: repeat(8, 54px); gap: 4px; padding: 14px;
+    background: rgba(0,0,0,0.7); border: 2px solid #555; border-radius: 6px;
+    max-height: 70vh; overflow-y: auto;
+  }
+  .inv-slot {
+    width: 54px; height: 54px; background: rgba(30,30,30,0.7);
+    border: 2px solid #444; border-radius: 4px; cursor: pointer;
+    display: flex; align-items: center; justify-content: center; position: relative;
+  }
+  .inv-slot:hover { border-color: #fff; background: rgba(60,60,60,0.85); }
+  .inv-slot canvas { width: 40px; height: 40px; image-rendering: pixelated; }
+  .inv-slot .lbl { position: absolute; bottom: -14px; font-size: 9px; opacity: 0; pointer-events: none; white-space: nowrap; }
+  .inv-slot:hover .lbl { opacity: 1; }
+  .inv-hint { margin-top: 14px; font-size: 12px; opacity: 0.8; text-shadow: 1px 1px 0 #000; }
+  #invClose { margin-top: 16px; padding: 8px 22px; background: #4a9a3a; border: 2px solid #fff; color: #fff; border-radius: 4px; cursor: pointer; font-size: 14px; }
+  #invClose:hover { background: #5cb84a; }
+
+
+  /* Vanilla Bedrock UI skin: use the repository's original Resource Pack sprites. */
+  #hotbar {
+    position: fixed;
+    gap: 0;
+    padding: 4px 6px;
+    background-color: rgba(16, 16, 16, .82);
+    background-image: url('./VoxelCraft/textures/ui/background_panel.png');
+    background-size: 100% 100%;
+    image-rendering: pixelated;
+    border: 4px solid transparent;
+    border-image: url('./VoxelCraft/textures/ui/background_with_border.png') 1 fill / 4px / 0 stretch;
+    border-radius: 0;
+    backdrop-filter: none;
+    box-shadow: 0 2px 0 rgba(0,0,0,.65);
+  }
+  #hotbar::before, #hotbar::after {
+    content: "";
+    position: absolute;
+    top: 3px;
+    bottom: 3px;
+    width: 4px;
+    pointer-events: none;
+    background-size: 100% 100%;
+    image-rendering: pixelated;
+  }
+  #hotbar::before { left: -2px; background-image: url('./VoxelCraft/textures/ui/hotbar_start_cap.png'); }
+  #hotbar::after { right: -2px; background-image: url('./VoxelCraft/textures/ui/hotbar_end_cap.png'); }
+  /* Bedrock hud_screen.json defines a 20x22 slot; at 2x UI scale use 40x44. */
+  .slot {
+    width: 40px;
+    height: 44px;
+    background-color: rgba(0,0,0,.38);
+    background-image: url('./VoxelCraft/textures/ui/item_cell.png');
+    background-size: 100% 100%;
+    border: 1px solid rgba(0,0,0,.6);
+    border-radius: 0;
+    box-shadow: inset 1px 1px rgba(255,255,255,.08), inset -1px -1px rgba(0,0,0,.45);
+    image-rendering: pixelated;
+  }
+  .slot.active {
+    background-color: rgba(255,255,255,.12);
+    background-image: url('./VoxelCraft/textures/ui/highlight_slot.png');
+    background-size: 100% 100%;
+    border: 0;
+    box-shadow: none;
+    /* Bedrock selected slot is 24x24 over a 20x22 slot. */
+    transform: translateY(-2px) scaleX(1.2) scaleY(1.09);
+    z-index: 1;
+  }
+  .slot .num { top: 2px; left: 4px; font-size: 10px; color: #fff; text-shadow: 2px 2px #252525; }
+  .slot .name { bottom: -20px; padding: 3px 6px; background: rgba(16,16,16,.82); border: 1px solid #373737; font-size: 11px; }
+
+  #hud {
+    top: 10px;
+    left: 10px;
+    padding: 7px 10px;
+    color: #fff;
+    background-color: rgba(16,16,16,.78);
+    background-image: url('./VoxelCraft/textures/ui/hud_tip_text_background.png');
+    background-size: 100% 100%;
+    border: 0;
+    border-radius: 0;
+    box-shadow: 2px 2px 0 rgba(0,0,0,.3);
+    text-shadow: 2px 2px #222;
+    image-rendering: pixelated;
+  }
+  #hud b { color: #fff; }
+  #crosshair { width: 16px; height: 16px; mix-blend-mode: difference; }
+  #crosshair::before { width: 2px; }
+  #crosshair::after { height: 2px; }
+
+  #toast {
+    min-width: 180px;
+    max-width: min(90vw, 520px);
+    padding: 12px 18px;
+    background-color: rgba(16,16,16,.94);
+    background-image: url('./VoxelCraft/textures/ui/dialog_background_opaque.png');
+    background-size: 100% 100%;
+    border: 3px solid transparent;
+    border-image: url('./VoxelCraft/textures/ui/background_with_border.png') 1 fill / 3px / 0 stretch;
+    border-radius: 0;
+    text-align: center;
+    text-shadow: 2px 2px #222;
+  }
+
+  #overlay .menu-buttons { gap: 6px; }
+  #overlay button {
+    min-height: 42px;
+    padding: 9px 14px;
+    background-color: #454545;
+    background-image: url('./VoxelCraft/textures/ui/button_borderless_dark.png');
+    background-size: 100% 100%;
+    border: 2px solid transparent;
+    border-image: url('./VoxelCraft/textures/ui/background_with_border.png') 1 fill / 2px / 0 stretch;
+    border-radius: 0;
+    box-shadow: inset 1px 1px rgba(255,255,255,.08), 0 2px 0 rgba(0,0,0,.55);
+    image-rendering: pixelated;
+  }
+  #overlay button:hover, #overlay button:focus-visible {
+    background-color: #666;
+    background-image: url('./VoxelCraft/textures/ui/button_borderless_darkhover.png');
+    border-image: url('./VoxelCraft/textures/ui/background_with_border.png') 1 fill / 2px / 0 stretch;
+  }
+  #overlay button:active {
+    background-image: url('./VoxelCraft/textures/ui/button_borderless_darkpressed.png');
+    transform: translateY(1px);
+    box-shadow: inset 1px 1px rgba(0,0,0,.25);
+  }
+  #overlay .settings-panel {
+    background-color: rgba(16,16,16,.95);
+    background-image: url('./VoxelCraft/textures/ui/background_panel.png');
+    background-size: 100% 100%;
+    border: 4px solid transparent;
+    border-image: url('./VoxelCraft/textures/ui/background_with_border.png') 1 fill / 4px / 0 stretch;
+    border-radius: 0;
+  }
+  #overlay .settings-panel select {
+    background-color: #292929;
+    border: 2px solid #111;
+    border-radius: 0;
+  }
+
+  #inventory {
+    background: rgba(0,0,0,.58);
+    backdrop-filter: none;
+    padding: 18px;
+  }
+  #inventory h2 {
+    width: min(100%, 620px);
+    margin: 0;
+    padding: 12px 14px 8px;
+    color: #262626;
+    background-color: #c6c6c6;
+    background-image: url('./VoxelCraft/textures/ui/background_panel.png');
+    background-size: 100% 100%;
+    border: 4px solid transparent;
+    border-image: url('./VoxelCraft/textures/ui/background_with_border.png') 1 fill / 4px / 0 stretch;
+    text-align: left;
+    letter-spacing: 0;
+    text-shadow: 1px 1px rgba(255,255,255,.55);
+    font-size: 16px;
+  }
+  .inv-grid {
+    /* Bedrock inventory uses nine columns, matching the nine-slot hotbar. */
+    grid-template-columns: repeat(9, minmax(38px, 52px));
+    gap: 3px;
+    width: min(100%, 620px);
+    padding: 12px;
+    background-color: #c6c6c6;
+    background-image: url('./VoxelCraft/textures/ui/background_panel.png');
+    background-size: 100% 100%;
+    border: 4px solid transparent;
+    border-image: url('./VoxelCraft/textures/ui/background_with_border.png') 1 fill / 4px / 0 stretch;
+    border-radius: 0;
+    box-shadow: 0 6px 0 rgba(0,0,0,.3);
+  }
+  .inv-slot {
+    width: 100%;
+    height: auto;
+    aspect-ratio: 1;
+    background-color: rgba(0,0,0,.12);
+    background-image: url('./VoxelCraft/textures/ui/item_cell.png');
+    background-size: 100% 100%;
+    border: 1px solid rgba(0,0,0,.35);
+    border-radius: 0;
+    box-shadow: inset 1px 1px rgba(255,255,255,.18), inset -1px -1px rgba(0,0,0,.2);
+  }
+  .inv-slot:hover {
+    background-color: rgba(255,255,255,.16);
+    background-image: url('./VoxelCraft/textures/ui/highlight_slot.png');
+    border-color: transparent;
+  }
+  .inv-slot canvas { width: 80%; height: 80%; }
+  .inv-hint {
+    width: min(100%, 590px);
+    margin: 0;
+    padding: 9px 12px;
+    color: #eee;
+    background: rgba(0,0,0,.8);
+    text-align: center;
+  }
+  #invClose {
+    min-width: 160px;
+    margin-top: 10px;
+    padding: 10px 24px;
+    background-color: #454545;
+    background-image: url('./VoxelCraft/textures/ui/button_borderless_dark.png');
+    background-size: 100% 100%;
+    border: 2px solid transparent;
+    border-image: url('./VoxelCraft/textures/ui/background_with_border.png') 1 fill / 2px / 0 stretch;
+    border-radius: 0;
+    box-shadow: 0 2px 0 rgba(0,0,0,.5);
+  }
+  #invClose:hover { background-image: url('./VoxelCraft/textures/ui/button_borderless_darkhover.png'); }
+  @media (max-width: 600px) {
+    #hotbar { bottom: 8px; padding: 3px 4px; }
+    .slot { width: min(10vw, 38px); height: min(11vw, 42px); }
+    .slot canvas { width: 82%; height: 82%; }
+    .inv-grid { grid-template-columns: repeat(6, minmax(34px, 1fr)); max-height: 56vh; overflow-y: auto; }
+    .inv-slot { min-width: 0; }
+    #inventory { padding: 10px; }
+    #hud { max-width: 65vw; font-size: 10px; }
+  }
+
+
+  /* Browser adaptation of the Behavior Pack's ActionFormData menu. */
+  #vcGuide {
+    position: fixed; inset: 0; z-index: 35;
+    display: flex; align-items: center; justify-content: center;
+    padding: 18px; background: rgba(0,0,0,.62); backdrop-filter: none;
+  }
+  #vcGuide.hidden { display: none; }
+  #vcGuide .vc-form {
+    width: min(100%, 440px); max-height: min(88vh, 650px); overflow-y: auto;
+    padding: 18px; color: #262626;
+    background-color: #c6c6c6;
+    background-image: url('./VoxelCraft/textures/ui/background_panel.png'); background-size: 100% 100%;
+    border: 4px solid transparent;
+    border-image: url('./VoxelCraft/textures/ui/background_with_border.png') 1 fill / 4px / 0 stretch;
+    box-shadow: 0 8px 0 rgba(0,0,0,.4);
+  }
+  #vcGuide .vc-title { margin: 0 0 8px; color: #262626; font-size: 20px; letter-spacing: 0; text-shadow: 1px 1px rgba(255,255,255,.45); }
+  #vcGuide .vc-body { margin: 0 0 14px; padding: 10px; background: rgba(0,0,0,.08); border: 2px solid rgba(0,0,0,.12); font-size: 13px; line-height: 1.5; white-space: pre-line; }
+  /* Bedrock ActionFormData stacks its action buttons vertically. */
+  #vcGuide .vc-actions { display: grid; grid-template-columns: 1fr; gap: 7px; }
+  #vcGuide button {
+    min-height: 48px; padding: 8px 10px; color: #fff; font-size: 13px; text-align: left;
+    background-color: #454545; background-image: url('./VoxelCraft/textures/ui/button_borderless_dark.png'); background-size: 100% 100%;
+    border: 2px solid transparent; border-image: url('./VoxelCraft/textures/ui/background_with_border.png') 1 fill / 2px / 0 stretch;
+    border-radius: 0; box-shadow: 0 2px 0 rgba(0,0,0,.45); text-shadow: 2px 2px #222;
+  }
+  #vcGuide button:hover, #vcGuide button:focus-visible { background-image: url('./VoxelCraft/textures/ui/button_borderless_darkhover.png'); }
+  #vcGuide button:active { background-image: url('./VoxelCraft/textures/ui/button_borderless_darkpressed.png'); transform: translateY(1px); }
+  #vcGuide button:disabled { opacity: .55; cursor: not-allowed; }
+  #vcGuide button .vc-small { display: block; margin-top: 3px; color: #ddd; font-size: 10px; font-weight: normal; }
+  #vcGuide .vc-footer { display: flex; justify-content: flex-end; margin-top: 12px; }
+  #vcGuide .vc-close { min-height: 38px; min-width: 116px; text-align: center; }
+  @media (max-width: 460px) { #vcGuide .vc-actions { grid-template-columns: 1fr; } #vcGuide .vc-form { padding: 12px; } }
+
+
+  /* ActionForm button icons use the same item sprites referenced by the Bedrock Behavior Pack. */
+  #vcGuide .vc-actions button {
+    display: grid;
+    grid-template-columns: 30px minmax(0, 1fr);
+    grid-template-rows: auto auto;
+    align-content: center;
+    align-items: center;
+    column-gap: 8px;
+    min-height: 58px;
+    padding: 8px 10px;
+  }
+  #vcGuide .vc-actions button::before {
+    content: "";
+    grid-column: 1;
+    grid-row: 1 / span 2;
+    width: 28px;
+    height: 28px;
+    justify-self: center;
+    background-position: center;
+    background-repeat: no-repeat;
+    background-size: contain;
+    image-rendering: pixelated;
+    filter: drop-shadow(1px 1px 0 rgba(0,0,0,.35));
+  }
+  #vcGuide .vc-action-label {
+    grid-column: 2;
+    grid-row: 1;
+    min-width: 0;
+    align-self: end;
+  }
+  #vcGuide .vc-actions button .vc-small {
+    grid-column: 2;
+    grid-row: 2;
+    align-self: start;
+  }
+  #vcGuide [data-vc-action="kit"]::before { background-image: url('./VoxelCraft/textures/items/book_writable.png'); }
+  #vcGuide [data-vc-action="heal"]::before { background-image: url('./VoxelCraft/textures/items/apple.png'); }
+  #vcGuide [data-vc-action="fly"]::before { background-image: url('./VoxelCraft/textures/items/feather.png'); }
+  #vcGuide [data-vc-action="day"]::before { background-image: url('./VoxelCraft/textures/items/clock_item.png'); }
+  #vcGuide [data-vc-action="night"]::before { background-image: url('./VoxelCraft/textures/items/bed_red.png'); }
+  #vcGuide [data-vc-action="weather"]::before { background-image: url('./VoxelCraft/textures/items/compass_item.png'); }
+  #vcGuide [data-vc-action="stats"]::before { background-image: url('./VoxelCraft/textures/items/book_normal.png'); }
+  #vcGuide .vc-close::before {
+    content: "";
+    display: inline-block;
+    width: 16px;
+    height: 16px;
+    margin-right: 7px;
+    vertical-align: middle;
+    background: url('./VoxelCraft/textures/ui/cancel.png') center / contain no-repeat;
+    image-rendering: pixelated;
+  }
+  @media (max-width: 460px) {
+    #vcGuide .vc-actions button { min-height: 54px; grid-template-columns: 26px minmax(0, 1fr); column-gap: 6px; padding: 7px; }
+    #vcGuide .vc-actions button::before { width: 24px; height: 24px; }
+  }
+
+
+  /* Main menu backdrop from the original Bedrock Resource Pack. */
+  #overlay {
+    background-color: #202020;
+    background-image:
+      linear-gradient(rgba(0, 0, 0, .30), rgba(0, 0, 0, .56)),
+      url('./VoxelCraft/textures/ui/menubackground.png');
+    background-position: center;
+    background-size: cover;
+    background-repeat: no-repeat;
+    image-rendering: pixelated;
+  }
+  #overlay .menu-wrap {
+    padding: 18px;
+    background: rgba(20, 20, 20, .18);
+  }
+  @media (max-width: 560px) {
+    #overlay { background-position: center; }
+    #overlay .menu-wrap { padding: 10px; }
+  }
+
+
+  /* Use the exact inventory glyph from the original Bedrock Resource Pack. */
+  #inventory h2 {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: min(100%, 590px);
+    padding: 10px 12px;
+    color: #262626;
+    background-color: #c6c6c6;
+    background-image: url('./VoxelCraft/textures/ui/background_panel.png');
+    background-size: 100% 100%;
+    border: 4px solid transparent;
+    border-image: url('./VoxelCraft/textures/ui/background_with_border.png') 1 fill / 4px / 0 stretch;
+    font-size: 15px;
+    letter-spacing: 0;
+    text-align: left;
+    text-shadow: 1px 1px rgba(255,255,255,.5);
+  }
+  #inventory h2::before {
+    content: "";
+    display: inline-block;
+    flex: 0 0 22px;
+    width: 22px;
+    height: 22px;
+    background: url('./VoxelCraft/textures/ui/inventory_icon.png') center / contain no-repeat;
+    image-rendering: pixelated;
+  }
+
+
+
+  /* Compact action-bar layout adapted from Bedrock's Behavior Pack HUD. */
+  #hud {
+    top: auto;
+    left: 50%;
+    bottom: 82px;
+    transform: translateX(-50%);
+    width: max-content;
+    max-width: min(94vw, 920px);
+    padding: 6px 12px;
+    text-align: center;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    line-height: 1.45;
+    font-size: 11px;
+    color: #f5f5f5;
+    background-color: rgba(16,16,16,.82);
+    background-image: url('./VoxelCraft/textures/ui/hud_tip_text_background.png');
+    background-size: 100% 100%;
+    border: 0;
+    border-radius: 0;
+    box-shadow: 2px 2px 0 rgba(0,0,0,.3);
+    text-shadow: 2px 2px #222;
+  }
+  #hud .hud-brand { color: #8de35f; font-weight: 800; }
+  #hud .hud-sep { color: #9b9b9b; padding: 0 3px; }
+  #hud b { color: #fff; }
+  @media (max-width: 600px) {
+    #hud {
+      bottom: 60px;
+      width: max-content;
+      max-width: 96vw;
+      padding: 4px 7px;
+      font-size: 9px;
+      line-height: 1.35;
+    }
+    #hud .hud-sep { padding: 0 1px; }
+  }
+
+
+
+  /* Bedrock pause-screen adaptation, based on VoxelCraft/ui/pause_screen.json. */
+  #pauseOverlay {
+    position: fixed;
+    inset: 0;
+    z-index: 34;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 18px;
+    background: rgba(0,0,0,.64);
+    color: #fff;
+    backdrop-filter: none;
+  }
+  #pauseOverlay.hidden { display: none; }
+  #pauseOverlay .pause-wrap {
+    width: min(100%, 430px);
+    padding: 18px;
+    color: #262626;
+    background-color: #c6c6c6;
+    background-image: url('./VoxelCraft/textures/ui/background_panel.png');
+    background-size: 100% 100%;
+    border: 4px solid transparent;
+    border-image: url('./VoxelCraft/textures/ui/background_with_border.png') 1 fill / 4px / 0 stretch;
+    box-shadow: 0 8px 0 rgba(0,0,0,.4);
+  }
+  #pauseOverlay h2 {
+    margin: 0 0 5px;
+    color: #262626;
+    font-size: 20px;
+    letter-spacing: 0;
+    text-align: center;
+    text-shadow: 1px 1px rgba(255,255,255,.5);
+  }
+  #pauseOverlay .pause-subtitle {
+    margin: 0 0 14px;
+    color: #4b4b4b;
+    font-size: 12px;
+    text-align: center;
+    text-shadow: none;
+  }
+  #pauseOverlay .pause-buttons { display: grid; grid-template-columns: 1fr; gap: 7px; }
+  #pauseOverlay .pause-buttons button {
+    width: 100%;
+    min-height: 44px;
+    padding: 9px 12px;
+    color: #fff;
+    font-size: 14px;
+    font-weight: 600;
+    text-align: center;
+    text-shadow: 2px 2px #222;
+    background-color: #454545;
+    background-image: url('./VoxelCraft/textures/ui/button_borderless_dark.png');
+    background-size: 100% 100%;
+    border: 2px solid transparent;
+    border-image: url('./VoxelCraft/textures/ui/background_with_border.png') 1 fill / 2px / 0 stretch;
+    border-radius: 0;
+    box-shadow: 0 2px 0 rgba(0,0,0,.45);
+  }
+  #pauseOverlay .pause-buttons button:hover,
+  #pauseOverlay .pause-buttons button:focus-visible {
+    background-image: url('./VoxelCraft/textures/ui/button_borderless_darkhover.png');
+  }
+  #pauseOverlay .pause-buttons button:active {
+    background-image: url('./VoxelCraft/textures/ui/button_borderless_darkpressed.png');
+    transform: translateY(1px);
+  }
+  @media (max-width: 600px) {
+    #pauseOverlay { padding: 12px; }
+    #pauseOverlay .pause-wrap { padding: 12px; }
+  }
+
+
+
+  /* Inventory category tabs follow the vanilla Bedrock panel/button treatment. */
+  #inventory .inv-tabs {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 4px;
+    width: min(100%, 620px);
+    padding: 8px 10px 0;
+    background-color: #c6c6c6;
+    background-image: url('./VoxelCraft/textures/ui/background_panel.png');
+    background-size: 100% 100%;
+    border-left: 4px solid transparent;
+    border-right: 4px solid transparent;
+    border-image: url('./VoxelCraft/textures/ui/background_with_border.png') 1 fill / 4px / 0 stretch;
+  }
+  #inventory .inv-tabs button {
+    min-width: 0;
+    min-height: 34px;
+    padding: 6px 3px;
+    color: #fff;
+    font-size: 11px;
+    font-weight: 700;
+    text-shadow: 2px 2px #222;
+    background-color: #454545;
+    background-image: url('./VoxelCraft/textures/ui/button_borderless_dark.png');
+    background-size: 100% 100%;
+    border: 2px solid transparent;
+    border-image: url('./VoxelCraft/textures/ui/background_with_border.png') 1 fill / 2px / 0 stretch;
+    border-radius: 0;
+    cursor: pointer;
+  }
+  #inventory .inv-tabs button:hover,
+  #inventory .inv-tabs button:focus-visible {
+    background-image: url('./VoxelCraft/textures/ui/button_borderless_darkhover.png');
+  }
+  #inventory .inv-tabs button.active,
+  #inventory .inv-tabs button[aria-selected="true"] {
+    color: #fff;
+    background-image: url('./VoxelCraft/textures/ui/button_borderless_darkpressed.png');
+    box-shadow: inset 0 0 0 1px rgba(255,255,255,.24);
+  }
+  #inventory .inv-grid {
+    border-top: 0;
+    border-top-left-radius: 0;
+    border-top-right-radius: 0;
+  }
+  @media (max-width: 600px) {
+    #inventory .inv-tabs { gap: 3px; padding: 6px 6px 0; }
+    #inventory .inv-tabs button { min-height: 32px; font-size: 10px; }
+  }
+
+
+  /* Original Bedrock item sprites identify the inventory categories. */
+  #inventory .inv-tabs button {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+  }
+  #inventory .inv-tabs button::before {
+    content: "";
+    display: inline-block;
+    flex: 0 0 16px;
+    width: 16px;
+    height: 16px;
+    background-position: center;
+    background-repeat: no-repeat;
+    background-size: contain;
+    image-rendering: pixelated;
+    filter: drop-shadow(1px 1px 0 rgba(0,0,0,.35));
+  }
+  #inventory .inv-tabs button[data-inv-filter="all"]::before {
+    background-image: url('./VoxelCraft/textures/ui/inventory_icon.png');
+  }
+  #inventory .inv-tabs button[data-inv-filter="nature"]::before {
+    background-image: url('./VoxelCraft/textures/items/apple.png');
+  }
+  #inventory .inv-tabs button[data-inv-filter="building"]::before {
+    background-image: url('./VoxelCraft/textures/items/brick.png');
+  }
+  #inventory .inv-tabs button[data-inv-filter="minerals"]::before {
+    background-image: url('./VoxelCraft/textures/items/diamond.png');
+  }
+  @media (max-width: 460px) {
+    #inventory .inv-tabs button {
+      flex-direction: column;
+      gap: 2px;
+      min-height: 44px;
+      padding: 4px 2px;
+      font-size: 10px;
+      line-height: 1.1;
+    }
+    #inventory .inv-tabs button::before {
+      flex-basis: 16px;
+    }
+  }
+
+
+  /* Match the original VoxelCraft JsonUI branding anchors: title at top-middle. */
+  #overlay .brand {
+    position: absolute;
+    top: 12px;
+    left: 50%;
+    z-index: 2;
+    width: max-content;
+    max-width: 96vw;
+    margin: 0;
+    transform: translateX(-50%);
+    text-align: center;
+    pointer-events: none;
+  }
+  #overlay h1 {
+    font-size: clamp(26px, 4vw, 38px);
+    line-height: 1;
+    letter-spacing: 1px;
+  }
+  #overlay .edition {
+    margin-top: 2px;
+    font-size: 10px;
+    line-height: 1.2;
+    letter-spacing: 3px;
+  }
+  #overlay .menu-subtitle { display: none; }
+  @media (max-width: 560px) {
+    #overlay .brand { top: 10px; }
+    #overlay h1 { font-size: clamp(24px, 7vw, 32px); }
+    #overlay .edition { font-size: 9px; letter-spacing: 2px; }
+  }
+
+
+  /* Use Bedrock's actual tab sprites, not CSS-painted tab approximations. */
+  #inventory .inv-tabs {
+    gap: 0;
+    padding: 8px 10px 0;
+    border-image: none;
+    border: 0;
+    background: url('./VoxelCraft/textures/ui/background_panel.png') center / 100% 100% repeat;
+  }
+  #inventory .inv-tabs button {
+    min-height: 36px;
+    margin: 0;
+    border: 0;
+    border-radius: 0;
+    background-color: transparent;
+    background-image: url('./VoxelCraft/textures/ui/TabTopBack.png');
+    background-size: 100% 100%;
+    box-shadow: none;
+    text-shadow: 1px 1px #333;
+  }
+  #inventory .inv-tabs button:hover,
+  #inventory .inv-tabs button:focus-visible {
+    background-image: url('./VoxelCraft/textures/ui/TabTopBackHover.png');
+    outline: 1px solid rgba(255,255,255,.55);
+    outline-offset: -2px;
+  }
+  #inventory .inv-tabs button.active,
+  #inventory .inv-tabs button[aria-selected="true"] {
+    background-image: url('./VoxelCraft/textures/ui/TabTopFront.png');
+    box-shadow: none;
+    color: #262626;
+    text-shadow: 1px 1px rgba(255,255,255,.45);
+  }
+  #inventory .inv-tabs button.active:hover,
+  #inventory .inv-tabs button[aria-selected="true"]:hover {
+    background-image: url('./VoxelCraft/textures/ui/TabTopFrontHover.png');
+  }
+  @media (max-width: 460px) {
+    #inventory .inv-tabs { padding: 6px 6px 0; }
+    #inventory .inv-tabs button { min-height: 44px; }
+  }
+
+
+  /* Main-menu controls use the original Resource Pack's newgui button states. */
+  #overlay .menu-buttons > button,
+  #overlay .button-row > button {
+    background-color: transparent;
+    background-image: url('./VoxelCraft/textures/gui/newgui/ButtonWithBorder.png');
+    background-size: 100% 100%;
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+    text-shadow: 1px 1px #222;
+    image-rendering: pixelated;
+  }
+  #overlay .menu-buttons > button:hover,
+  #overlay .menu-buttons > button:focus-visible,
+  #overlay .button-row > button:hover,
+  #overlay .button-row > button:focus-visible {
+    background-image: url('./VoxelCraft/textures/gui/newgui/ButtonWithBorderHover.png');
+    outline: none;
+  }
+  #overlay .menu-buttons > button:active,
+  #overlay .button-row > button:active {
+    background-image: url('./VoxelCraft/textures/gui/newgui/ButtonWithBorderPressed.png');
+    transform: translateY(1px);
+  }
+
+
+
+  /* Use the original Resource Pack pointer outside the locked 3D viewport. */
+  body { cursor: url('./VoxelCraft/textures/ui/cursor_pc.png') 4 4, auto; }
+  #game { cursor: none; }
+  #overlay button, .slot, .inv-slot, #invClose {
+    cursor: url('./VoxelCraft/textures/ui/cursor_pc.png') 4 4, pointer;
+  }
+
+</style>
+</head>
+<body>
+  <canvas id="game"></canvas>
+  <div id="vignette"></div>
+  <div id="crosshair"></div>
+  <div id="hud"></div>
+  <div id="hotbar"></div>
+  <div id="toast"></div>
+
+  <div id="inventory" class="hidden" role="dialog" aria-modal="true" aria-labelledby="inventoryTitle">
+    <h2 id="inventoryTitle">Inventaris — pilih blok untuk slot hotbar aktif</h2>
+    <div class="inv-tabs" role="tablist" aria-label="Kategori inventaris">
+      <button type="button" id="inventoryTabAll" role="tab" aria-selected="true" aria-controls="invGrid" class="active" data-inv-filter="all">Semua</button>
+      <button type="button" id="inventoryTabNature" role="tab" aria-selected="false" aria-controls="invGrid" tabindex="-1" data-inv-filter="nature">Alam</button>
+      <button type="button" id="inventoryTabBuilding" role="tab" aria-selected="false" aria-controls="invGrid" tabindex="-1" data-inv-filter="building">Bangunan</button>
+      <button type="button" id="inventoryTabMinerals" role="tab" aria-selected="false" aria-controls="invGrid" tabindex="-1" data-inv-filter="minerals">Mineral</button>
+    </div>
+    <div class="inv-grid" id="invGrid" role="tabpanel" aria-labelledby="inventoryTabAll" tabindex="0"></div>
+    <p class="inv-hint">Klik salah satu blok untuk memasukkannya ke slot hotbar terpilih. Tutup dengan E atau tombol di bawah.</p>
+    <button id="invClose">Tutup (E)</button>
+  </div>
+
+
+  <div id="vcGuide" class="hidden" role="dialog" aria-modal="true" aria-labelledby="vcGuideTitle">
+    <div class="vc-form">
+      <h2 class="vc-title" id="vcGuideTitle">VoxelCraft Menu</h2>
+      <p class="vc-body" id="vcGuideBody">Selamat datang di VoxelCraft.</p>
+      <div class="vc-actions">
+        <button type="button" data-vc-action="kit"><span class="vc-action-label">Kit Starter</span><span class="vc-small">Atur blok awal di hotbar</span></button>
+        <button type="button" data-vc-action="heal" disabled><span class="vc-action-label">Pulihkan HP</span><span class="vc-small">Fitur health belum ada di browser</span></button>
+        <button type="button" data-vc-action="fly"><span class="vc-action-label">Mode Terbang</span><span class="vc-small" id="vcFlyStatus">ON / OFF</span></button>
+        <button type="button" data-vc-action="day"><span class="vc-action-label">Waktu: Siang</span><span class="vc-small">Atur siklus siang</span></button>
+        <button type="button" data-vc-action="night"><span class="vc-action-label">Waktu: Malam</span><span class="vc-small">Atur siklus malam</span></button>
+        <button type="button" data-vc-action="weather" disabled><span class="vc-action-label">Cuaca: Cerah</span><span class="vc-small">Cuaca belum didukung browser</span></button>
+        <button type="button" data-vc-action="stats"><span class="vc-action-label">Lihat Statistik</span><span class="vc-small">Status sesi saat ini</span></button>
+      </div>
+      <div class="vc-footer"><button type="button" class="vc-close" data-vc-action="close">Tutup Menu</button></div>
+    </div>
+  </div>
+
+  <div id="loading">
+    <div class="spinner"></div>
+    <div>Memuat dunia VoxelCraft...</div>
+    <div id="loadingDetail" style="margin-top:8px;font-size:12px;opacity:0.7">menyiapkan tekstur</div>
+  </div>
+
+  <div id="overlay" class="hidden">
+    <div class="menu-wrap">
+      <div class="brand">
+        <h1>VOXEL<span>CRAFT</span></h1>
+        <div class="edition">BROWSER EDITION</div>
+      </div>
+      <p class="menu-subtitle">A world of blocks awaits.</p>
+      <div id="mainMenuButtons" class="menu-buttons">
+        <button id="playButton">Play Game</button>
+        <button id="helpOptionsButton">Help &amp; Options</button>
+      </div>
+      <div id="helpOptionsPanel" class="help-options-panel">
+        <h2>Help &amp; Options</h2>
+        <button id="guideButton">How to Play</button>
+        <button id="optionsButton">Game Options</button>
+        <p class="menu-panel-note">Controls, graphics, and world settings for this browser game.</p>
+        <button id="helpBackButton" class="menu-back">Back</button>
+      </div>
+      <div id="settingsPanel" class="settings-panel">
+        <h2>Game Options</h2>
+        <label for="renderQuality">Render Quality
+          <select id="renderQuality"><option value="high">High</option><option value="balanced" selected>Balanced</option><option value="low">Low</option></select>
+        </label>
+        <label for="menuFov">Field of View
+          <select id="menuFov"><option value="70">70</option><option value="80" selected>80</option><option value="90">90</option><option value="100">100</option></select>
+        </label>
+        <button id="saveOptionsButton" class="settings-close">Done</button>
+      </div>
+      <div class="menu-foot"><span>VoxelCraft 3D · Browser Edition</span><span>Not an official Minecraft product.</span></div>
+    </div>
+  </div>
+
+  <div id="pauseOverlay" class="hidden" role="dialog" aria-modal="true" aria-labelledby="pauseTitle">
+    <div class="pause-wrap">
+      <h2 id="pauseTitle">Game Menu</h2>
+      <p class="pause-subtitle">Permainan dijeda</p>
+      <div class="pause-buttons">
+        <button id="resumeGameButton" type="button">Resume Game</button>
+        <button id="saveWorldButton" type="button">Save World</button>
+        <button id="returnTitleButton" type="button">Save &amp; Return to Title</button>
+      </div>
+    </div>
+  </div>
+
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js"
+    }
+  }
+  </script>
+
+  <script type="module">
+    import * as THREE from 'three';
+
+    // ============================================================
+    //  CONFIG
+    // ============================================================
+    const CHUNK_X = 16, CHUNK_Z = 16, CHUNK_Y = 40;
+    const WATER_LEVEL = 16;
+    const RENDER_RADIUS = 4;        // chunks around player
+    const SEA_BASE = 14;            // base terrain height
+    const SEA_AMP = 14;
+    const SEED = 1337;
+    const SAVE_KEY = 'voxelcraft-world-v1';
+
+    // Texture tile indices (order MUST match TEXTURE_FILES)
+    const TILE = {
+      GRASS_TOP: 0, GRASS_SIDE: 1, DIRT: 2, STONE: 3, COBBLE: 4,
+      LOG_TOP: 5, LOG_SIDE: 6, PLANKS: 7, LEAVES: 8, SAND: 9,
+      GRAVEL: 10, GLASS: 11, BEDROCK: 12, BRICK: 13, GOLD: 14,
+      DIAMOND: 15, IRON: 16, COAL: 17, CRAFT_TOP: 18, CRAFT_SIDE: 19,
+      CRAFT_FRONT: 20, FURNACE_FRONT: 21, FURNACE_SIDE: 22, WATER: 23,
+      COAL_ORE: 24, IRON_ORE: 25, GOLD_ORE: 26, DIAMOND_ORE: 27,
+      // === Phase 1A: more ores + mineral blocks (28-37) ===
+      LAPIS_ORE: 28, LAPIS_BLOCK: 29, REDSTONE_ORE: 30, REDSTONE_BLOCK: 31,
+      EMERALD_ORE: 32, EMERALD_BLOCK: 33, COPPER_ORE: 34, QUARTZ_ORE: 35,
+      OBSIDIAN: 36, GLOWSTONE: 37,
+      // === Phase 1B: wood variants (38-52) ===
+      LOG_BIRCH: 38, LOG_BIRCH_TOP: 39, PLANKS_BIRCH: 40, LEAVES_BIRCH: 41,
+      LOG_SPRUCE: 42, PLANKS_SPRUCE: 43, LEAVES_SPRUCE: 44,
+      LOG_JUNGLE: 45, PLANKS_JUNGLE: 46, LEAVES_JUNGLE: 47,
+      LOG_ACACIA: 48, PLANKS_ACACIA: 49, LEAVES_ACACIA: 50,
+      LOG_DARK_OAK: 51, PLANKS_DARK_OAK: 52,
+      // === Phase 1C: stone variants (53-59) ===
+      GRANITE: 53, GRANITE_SMOOTH: 54, DIORITE: 55, DIORITE_SMOOTH: 56,
+      ANDESITE: 57, ANDESITE_SMOOTH: 58, STONEBRICK: 59,
+      // === Phase 1D: nature + decorative (60-67) ===
+      SNOW: 60, ICE: 61, NETHERRACK: 62, SOUL_SAND: 63,
+      BOOKSHELF: 64, PUMPKIN_TOP: 65, PUMPKIN_SIDE: 66, SPONGE: 67,
+      // === Phase 1E: wool colors (68-72) ===
+      WOOL_WHITE: 68, WOOL_BLACK: 69, WOOL_RED: 70, WOOL_BLUE: 71, WOOL_GREEN: 72,
+      // Missing log end-grain textures, appended to preserve existing tile indices.
+      LOG_SPRUCE_TOP: 73, LOG_JUNGLE_TOP: 74, LOG_ACACIA_TOP: 75, LOG_DARK_OAK_TOP: 76,
+      FURNACE_TOP: 77, PUMPKIN_FACE: 78,
+    };
+    const TEXTURE_FILES = [
+      // 0-23: original 24 textures
+      'grass_top','grass_side_carried','dirt','stone','cobblestone',
+      'log_oak_top','log_oak','planks_oak','leaves_oak_opaque','sand',
+      'gravel','glass','bedrock','brick','gold_block','diamond_block',
+      'iron_block','coal_block','crafting_table_top','crafting_table_side',
+      'crafting_table_front','furnace_front_off','furnace_side','water_still',
+      // 24-27: original 4 ores (procedurally generated in atlas)
+      'coal_ore','iron_ore','gold_ore','diamond_ore',
+      // 28-37: more ores + mineral blocks
+      'lapis_ore','lapis_block','redstone_ore','redstone_block',
+      'emerald_ore','emerald_block','copper_ore','quartz_ore',
+      'obsidian','glowstone',
+      // 38-52: wood variants
+      'log_birch','log_birch_top','planks_birch','leaves_birch_opaque',
+      'log_spruce','planks_spruce','leaves_spruce_opaque',
+      'log_jungle','planks_jungle','leaves_jungle_opaque',
+      'log_acacia','planks_acacia','leaves_acacia_opaque',
+      'log_big_oak','planks_big_oak',
+      // 53-59: stone variants
+      'stone_granite','stone_granite_smooth','stone_diorite','stone_diorite_smooth',
+      'stone_andesite','stone_andesite_smooth','stonebrick',
+      // 60-67: nature + decorative
+      'snow','ice','netherrack','soul_sand',
+      'bookshelf','pumpkin_top','pumpkin_side','sponge',
+      // 68-72: wool colors
+      'wool_colored_white','wool_colored_black','wool_colored_red','wool_colored_blue','wool_colored_green',
+      // Missing end-grain textures for non-oak logs.
+      'log_spruce_top','log_jungle_top','log_acacia_top','log_big_oak_top',
+      // Correct face textures verified against VoxelCraft/blocks.json + terrain_texture.json.
+      'furnace_top','pumpkin_face_off',
+    ];
+    const TEXTURE_DIR = './VoxelCraft/textures/blocks/';
+
+    // Block definitions: id -> {name, top, bottom, side, solid, transparent, noCollide}
+    const BLOCKS = {
+      0: null, // air
+      1:  { name:'Rumput',        top:TILE.GRASS_TOP,  bottom:TILE.DIRT,  side:TILE.GRASS_SIDE, solid:true },
+      2:  { name:'Tanah',         top:TILE.DIRT,       bottom:TILE.DIRT,  side:TILE.DIRT,       solid:true },
+      3:  { name:'Batu',          top:TILE.STONE,      bottom:TILE.STONE, side:TILE.STONE,      solid:true },
+      4:  { name:'Cobblestone',   top:TILE.COBBLE,     bottom:TILE.COBBLE, side:TILE.COBBLE,     solid:true },
+      5:  { name:'Kayu Ek',       top:TILE.LOG_TOP,    bottom:TILE.LOG_TOP, side:TILE.LOG_SIDE,  solid:true },
+      6:  { name:'Papan Ek',      top:TILE.PLANKS,     bottom:TILE.PLANKS, side:TILE.PLANKS,     solid:true },
+      7:  { name:'Daun Ek',       top:TILE.LEAVES,     bottom:TILE.LEAVES, side:TILE.LEAVES,     solid:true },
+      8:  { name:'Pasir',         top:TILE.SAND,       bottom:TILE.SAND,   side:TILE.SAND,       solid:true },
+      9:  { name:'Kerakal',       top:TILE.GRAVEL,     bottom:TILE.GRAVEL, side:TILE.GRAVEL,     solid:true },
+      10: { name:'Kaca',          top:TILE.GLASS,      bottom:TILE.GLASS,  side:TILE.GLASS,       solid:true, transparent:true },
+      11: { name:'Bedrock',       top:TILE.BEDROCK,    bottom:TILE.BEDROCK, side:TILE.BEDROCK,   solid:true },
+      12: { name:'Bata',          top:TILE.BRICK,      bottom:TILE.BRICK,  side:TILE.BRICK,       solid:true },
+      13: { name:'Emas',          top:TILE.GOLD,       bottom:TILE.GOLD,   side:TILE.GOLD,        solid:true },
+      14: { name:'Berlian',       top:TILE.DIAMOND,    bottom:TILE.DIAMOND, side:TILE.DIAMOND,   solid:true },
+      15: { name:'Besi',          top:TILE.IRON,       bottom:TILE.IRON,   side:TILE.IRON,        solid:true },
+      16: { name:'Batubara',      top:TILE.COAL,       bottom:TILE.COAL,   side:TILE.COAL,        solid:true },
+      17: { name:'Meja Kerja', top:TILE.CRAFT_TOP, bottom:TILE.PLANKS, side:TILE.CRAFT_SIDE, front:TILE.CRAFT_FRONT, frontBothZ:true, solid:true },
+      18: { name:'Tungku', top:TILE.FURNACE_TOP, bottom:TILE.FURNACE_TOP, side:TILE.FURNACE_SIDE, front:TILE.FURNACE_FRONT, solid:true },
+      19: { name:'Air',           top:TILE.WATER,      bottom:TILE.WATER, side:TILE.WATER,      solid:false, transparent:true, noCollide:true },
+      20: { name:'Bijih Batubara', top:TILE.COAL_ORE,  bottom:TILE.COAL_ORE,  side:TILE.COAL_ORE,  solid:true },
+      21: { name:'Bijih Besi',     top:TILE.IRON_ORE,  bottom:TILE.IRON_ORE,  side:TILE.IRON_ORE,  solid:true },
+      22: { name:'Bijih Emas',     top:TILE.GOLD_ORE,  bottom:TILE.GOLD_ORE,  side:TILE.GOLD_ORE,  solid:true },
+      23: { name:'Bijih Berlian',  top:TILE.DIAMOND_ORE, bottom:TILE.DIAMOND_ORE, side:TILE.DIAMOND_ORE, solid:true },
+      // === Phase 1A: more ores + mineral blocks (24-33) ===
+      24: { name:'Bijih Lapis',    top:TILE.LAPIS_ORE, bottom:TILE.LAPIS_ORE, side:TILE.LAPIS_ORE, solid:true },
+      25: { name:'Blok Lapis',    top:TILE.LAPIS_BLOCK, bottom:TILE.LAPIS_BLOCK, side:TILE.LAPIS_BLOCK, solid:true },
+      26: { name:'Bijih Redstone', top:TILE.REDSTONE_ORE, bottom:TILE.REDSTONE_ORE, side:TILE.REDSTONE_ORE, solid:true },
+      27: { name:'Blok Redstone', top:TILE.REDSTONE_BLOCK, bottom:TILE.REDSTONE_BLOCK, side:TILE.REDSTONE_BLOCK, solid:true },
+      28: { name:'Bijih Zamrud',  top:TILE.EMERALD_ORE, bottom:TILE.EMERALD_ORE, side:TILE.EMERALD_ORE, solid:true },
+      29: { name:'Blok Zamrud',   top:TILE.EMERALD_BLOCK, bottom:TILE.EMERALD_BLOCK, side:TILE.EMERALD_BLOCK, solid:true },
+      30: { name:'Bijih Tembaga',  top:TILE.COPPER_ORE, bottom:TILE.COPPER_ORE, side:TILE.COPPER_ORE, solid:true },
+      31: { name:'Bijih Kuarsa',   top:TILE.QUARTZ_ORE, bottom:TILE.QUARTZ_ORE, side:TILE.QUARTZ_ORE, solid:true },
+      32: { name:'Obsidian',      top:TILE.OBSIDIAN, bottom:TILE.OBSIDIAN, side:TILE.OBSIDIAN, solid:true },
+      33: { name:'Batu Bersinar', top:TILE.GLOWSTONE, bottom:TILE.GLOWSTONE, side:TILE.GLOWSTONE, solid:true },
+      // === Phase 1B: wood variants (34-47) ===
+      34: { name:'Kayu Birch',    top:TILE.LOG_BIRCH_TOP, bottom:TILE.LOG_BIRCH_TOP, side:TILE.LOG_BIRCH, solid:true },
+      35: { name:'Papan Birch',   top:TILE.PLANKS_BIRCH, bottom:TILE.PLANKS_BIRCH, side:TILE.PLANKS_BIRCH, solid:true },
+      36: { name:'Daun Birch',    top:TILE.LEAVES_BIRCH, bottom:TILE.LEAVES_BIRCH, side:TILE.LEAVES_BIRCH, solid:true },
+      37: { name:'Kayu Spruce',   top:TILE.LOG_SPRUCE_TOP, bottom:TILE.LOG_SPRUCE_TOP, side:TILE.LOG_SPRUCE, solid:true },
+      38: { name:'Papan Spruce',  top:TILE.PLANKS_SPRUCE, bottom:TILE.PLANKS_SPRUCE, side:TILE.PLANKS_SPRUCE, solid:true },
+      39: { name:'Daun Spruce',   top:TILE.LEAVES_SPRUCE, bottom:TILE.LEAVES_SPRUCE, side:TILE.LEAVES_SPRUCE, solid:true },
+      40: { name:'Kayu Jungle',   top:TILE.LOG_JUNGLE_TOP, bottom:TILE.LOG_JUNGLE_TOP, side:TILE.LOG_JUNGLE, solid:true },
+      41: { name:'Papan Jungle',  top:TILE.PLANKS_JUNGLE, bottom:TILE.PLANKS_JUNGLE, side:TILE.PLANKS_JUNGLE, solid:true },
+      42: { name:'Daun Jungle',   top:TILE.LEAVES_JUNGLE, bottom:TILE.LEAVES_JUNGLE, side:TILE.LEAVES_JUNGLE, solid:true },
+      43: { name:'Kayu Acacia',   top:TILE.LOG_ACACIA_TOP, bottom:TILE.LOG_ACACIA_TOP, side:TILE.LOG_ACACIA, solid:true },
+      44: { name:'Papan Acacia',  top:TILE.PLANKS_ACACIA, bottom:TILE.PLANKS_ACACIA, side:TILE.PLANKS_ACACIA, solid:true },
+      45: { name:'Daun Acacia',   top:TILE.LEAVES_ACACIA, bottom:TILE.LEAVES_ACACIA, side:TILE.LEAVES_ACACIA, solid:true },
+      46: { name:'Kayu Dark Oak', top:TILE.LOG_DARK_OAK_TOP, bottom:TILE.LOG_DARK_OAK_TOP, side:TILE.LOG_DARK_OAK, solid:true },
+      47: { name:'Papan Dark Oak', top:TILE.PLANKS_DARK_OAK, bottom:TILE.PLANKS_DARK_OAK, side:TILE.PLANKS_DARK_OAK, solid:true },
+      // === Phase 1C: stone variants (48-54) ===
+      48: { name:'Granit',        top:TILE.GRANITE, bottom:TILE.GRANITE, side:TILE.GRANITE, solid:true },
+      49: { name:'Granit Pole',   top:TILE.GRANITE_SMOOTH, bottom:TILE.GRANITE_SMOOTH, side:TILE.GRANITE_SMOOTH, solid:true },
+      50: { name:'Diorit',        top:TILE.DIORITE, bottom:TILE.DIORITE, side:TILE.DIORITE, solid:true },
+      51: { name:'Diorit Pole',   top:TILE.DIORITE_SMOOTH, bottom:TILE.DIORITE_SMOOTH, side:TILE.DIORITE_SMOOTH, solid:true },
+      52: { name:'Andesit',       top:TILE.ANDESITE, bottom:TILE.ANDESITE, side:TILE.ANDESITE, solid:true },
+      53: { name:'Andesit Pole',  top:TILE.ANDESITE_SMOOTH, bottom:TILE.ANDESITE_SMOOTH, side:TILE.ANDESITE_SMOOTH, solid:true },
+      54: { name:'Batu Bata',     top:TILE.STONEBRICK, bottom:TILE.STONEBRICK, side:TILE.STONEBRICK, solid:true },
+      // === Phase 1D: nature + decorative (55-61) ===
+      55: { name:'Salju',         top:TILE.SNOW, bottom:TILE.SNOW, side:TILE.SNOW, solid:true },
+      56: { name:'Es',            top:TILE.ICE, bottom:TILE.ICE, side:TILE.ICE, solid:true, transparent:true },
+      57: { name:'Netherrack',    top:TILE.NETHERRACK, bottom:TILE.NETHERRACK, side:TILE.NETHERRACK, solid:true },
+      58: { name:'Soul Sand',     top:TILE.SOUL_SAND, bottom:TILE.SOUL_SAND, side:TILE.SOUL_SAND, solid:true },
+      59: { name:'Rak Buku',      top:TILE.PLANKS, bottom:TILE.PLANKS, side:TILE.BOOKSHELF, solid:true },
+      60: { name:'Labu', top:TILE.PUMPKIN_TOP, bottom:TILE.PUMPKIN_TOP, side:TILE.PUMPKIN_SIDE, front:TILE.PUMPKIN_FACE, solid:true },
+      61: { name:'Spons',         top:TILE.SPONGE, bottom:TILE.SPONGE, side:TILE.SPONGE, solid:true },
+      // === Phase 1E: wool (62-66) ===
+      62: { name:'Wol Putih',     top:TILE.WOOL_WHITE, bottom:TILE.WOOL_WHITE, side:TILE.WOOL_WHITE, solid:true },
+      63: { name:'Wol Hitam',     top:TILE.WOOL_BLACK, bottom:TILE.WOOL_BLACK, side:TILE.WOOL_BLACK, solid:true },
+      64: { name:'Wol Merah',     top:TILE.WOOL_RED, bottom:TILE.WOOL_RED, side:TILE.WOOL_RED, solid:true },
+      65: { name:'Wol Biru',      top:TILE.WOOL_BLUE, bottom:TILE.WOOL_BLUE, side:TILE.WOOL_BLUE, solid:true },
+      66: { name:'Wol Hijau',     top:TILE.WOOL_GREEN, bottom:TILE.WOOL_GREEN, side:TILE.WOOL_GREEN, solid:true },
+    };
+
+    // Hotbar block ids (9 slots) — Phase 1: more variety
+    const HOTBAR = [1, 3, 5, 6, 12, 32, 14, 62, 33]; // grass, stone, oak log, planks, brick, obsidian, diamond, wool white, glowstone
+
+    // ============================================================
+    //  NOISE
+    // ============================================================
+    function hash2(x, z) {
+      let h = x * 374761393 + z * 668265263 + SEED * 362437;
+      h = (h ^ (h >> 13)) * 1274126177;
+      h = h ^ (h >> 16);
+      return ((h >>> 0) % 100000) / 100000;
+    }
+    function fade(t) { return t * t * t * (t * (t * 6 - 15) + 10); }
+    function lerp(a, b, t) { return a + (b - a) * t; }
+    function valueNoise2D(x, z) {
+      const xi = Math.floor(x), zi = Math.floor(z);
+      const xf = x - xi, zf = z - zi;
+      const u = fade(xf), v = fade(zf);
+      const a = hash2(xi, zi), b = hash2(xi + 1, zi);
+      const c = hash2(xi, zi + 1), d = hash2(xi + 1, zi + 1);
+      return lerp(lerp(a, b, u), lerp(c, d, u), v);
+    }
+    function fbm2D(x, z) {
+      let v = 0, amp = 1, freq = 1, max = 0;
+      v += valueNoise2D(x * 0.018 * freq, z * 0.018 * freq) * amp; max += amp; amp *= 0.5; freq *= 2;
+      v += valueNoise2D(x * 0.045 * freq, z * 0.045 * freq) * amp; max += amp; amp *= 0.5; freq *= 2;
+      v += valueNoise2D(x * 0.11 * freq, z * 0.11 * freq) * amp; max += amp;
+      return v / max;
+    }
+    function terrainHeight(x, z) {
+      const n = fbm2D(x, z);
+      return SEA_BASE + n * SEA_AMP;
+    }
+
+    // ============================================================
+    //  WORLD
+    // ============================================================
+    function chunkKey(cx, cz) { return cx + ',' + cz; }
+
+    class Chunk {
+      constructor(cx, cz) {
+        this.cx = cx; this.cz = cz;
+        this.data = new Uint8Array(CHUNK_X * CHUNK_Y * CHUNK_Z);
+        this.opaqueMesh = null;
+        this.transparentMesh = null;
+        this.dirty = true;
+      }
+      idx(x, y, z) { return y * CHUNK_X * CHUNK_Z + z * CHUNK_X + x; }
+      get(x, y, z) {
+        if (y < 0 || y >= CHUNK_Y) return 0;
+        return this.data[this.idx(x, y, z)];
+      }
+      set(x, y, z, v) {
+        if (y < 0 || y >= CHUNK_Y) return;
+        this.data[this.idx(x, y, z)] = v;
+        this.dirty = true;
+      }
+    }
+
+    // World holds all chunks; getBlock/setBlock operate in world coords.
+    class World {
+      constructor() {
+        this.chunks = new Map();
+        this.overrides = new Map();
+        try {
+          const saved = JSON.parse(localStorage.getItem(SAVE_KEY) || 'null');
+          if (saved && saved.version === 1 && saved.blocks && typeof saved.blocks === 'object' && !Array.isArray(saved.blocks)) {
+            const validKey = /^-?\d+,-?\d+,-?\d+$/;
+            const maxBlockId = Math.max(...Object.keys(BLOCKS).map(Number));
+            for (const [key, id] of Object.entries(saved.blocks)) {
+              if (!validKey.test(key) || !Number.isInteger(id) || id < 0 || id > maxBlockId ||
+                  !Object.prototype.hasOwnProperty.call(BLOCKS, id)) continue;
+              const [x, y, z] = key.split(',').map(Number);
+              if (!Number.isSafeInteger(x) || !Number.isSafeInteger(z) || !Number.isInteger(y) || y < 0 || y >= CHUNK_Y) continue;
+              this.overrides.set(key, id);
+            }
+          }
+        } catch (err) { console.warn('Save VoxelCraft tidak dapat dibaca:', err); }
+      }
+      save() {
+        try {
+          localStorage.setItem(SAVE_KEY, JSON.stringify({ version: 1, blocks: Object.fromEntries(this.overrides) }));
+          return true;
+        } catch (err) {
+          console.warn('Save VoxelCraft gagal:', err);
+          toast('Penyimpanan gagal: ruang browser mungkin penuh');
+          return false;
+        }
+      }
+      ensureChunk(cx, cz) {
+        const k = chunkKey(cx, cz);
+        let c = this.chunks.get(k);
+        if (!c) { c = new Chunk(cx, cz); this.generate(c); this.chunks.set(k, c); }
+        return c;
+      }
+      getChunk(cx, cz) { return this.chunks.get(chunkKey(cx, cz)); }
+      getBlock(x, y, z) {
+        if (![x, y, z].every(Number.isFinite)) return 0;
+        x = Math.floor(x); y = Math.floor(y); z = Math.floor(z);
+        if (!Number.isSafeInteger(x) || !Number.isSafeInteger(z)) return 0;
+        if (y < 0) return 11; // bedrock below
+        if (y >= CHUNK_Y) return 0;
+        const cx = Math.floor(x / CHUNK_X), cz = Math.floor(z / CHUNK_Z);
+        const c = this.ensureChunk(cx, cz);
+        const lx = x - cx * CHUNK_X, lz = z - cz * CHUNK_Z;
+        return c.get(lx, y, lz);
+      }
+      setBlock(x, y, z, v) {
+        if (![x, y, z].every(Number.isFinite)) return false;
+        x = Math.floor(x); y = Math.floor(y); z = Math.floor(z);
+        if (!Number.isSafeInteger(x) || !Number.isSafeInteger(z) ||
+            y < 0 || y >= CHUNK_Y || !Number.isInteger(v) ||
+            !Object.prototype.hasOwnProperty.call(BLOCKS, v)) return false;
+
+        const cx = Math.floor(x / CHUNK_X), cz = Math.floor(z / CHUNK_Z);
+        const c = this.ensureChunk(cx, cz);
+        const lx = x - cx * CHUNK_X, lz = z - cz * CHUNK_Z;
+        c.set(lx, y, lz, v);
+
+        // A face at a chunk edge may become visible/hidden in both chunks.
+        // Rebuild only already-loaded neighbors; unloaded chunks will mesh
+        // from the latest world data when they are generated again.
+        if (lx === 0) this.invalidateChunk(cx - 1, cz);
+        if (lx === CHUNK_X - 1) this.invalidateChunk(cx + 1, cz);
+        if (lz === 0) this.invalidateChunk(cx, cz - 1);
+        if (lz === CHUNK_Z - 1) this.invalidateChunk(cx, cz + 1);
+
+        this.overrides.set(x + ',' + y + ',' + z, v);
+        this.save();
+        return true;
+      }
+      invalidateChunk(cx, cz) {
+        const neighbor = this.getChunk(cx, cz);
+        if (neighbor) neighbor.dirty = true;
+      }
+      generate(c) {
+        const baseX = c.cx * CHUNK_X, baseZ = c.cz * CHUNK_Z;
+        for (let lx = 0; lx < CHUNK_X; lx++) {
+          for (let lz = 0; lz < CHUNK_Z; lz++) {
+            const wx = baseX + lx, wz = baseZ + lz;
+            const h = terrainHeight(wx, wz);
+            const hf = Math.floor(h);
+            const beachy = hf <= WATER_LEVEL + 1;
+            for (let y = 0; y <= hf; y++) {
+              let b = 3; // stone
+              if (y === 0) b = 11; // bedrock
+              else if (y === hf) b = beachy ? 8 : 1; // grass/sand top
+              else if (y > hf - 4) b = beachy ? 8 : 2; // dirt/sand
+              c.set(lx, y, lz, b);
+            }
+            // ores in stone layer (depth-based) — Phase 1: more ore types
+            for (let y = 1; y < hf - 4; y++) {
+              if (c.get(lx, y, lz) !== 3) continue; // only stone
+              const oreNoise = hash2(wx * 31 + 7, wz * 19 + y * 3);
+              const oreNoise2 = hash2(wx * 53 + 17, wz * 29 + y * 5);
+              if (y <= 10 && oreNoise < 0.0018) c.set(lx, y, lz, 23);       // diamond (deep, rare)
+              else if (y <= 10 && oreNoise2 < 0.0022) c.set(lx, y, lz, 28);  // lapis (deep)
+              else if (y <= 12 && oreNoise2 < 0.0028) c.set(lx, y, lz, 32);  // emerald (very rare)
+              else if (y <= 14 && oreNoise < 0.005) c.set(lx, y, lz, 22);    // gold
+              else if (y <= 16 && oreNoise2 < 0.006) c.set(lx, y, lz, 26);   // redstone
+              else if (y <= 18 && oreNoise2 < 0.008) c.set(lx, y, lz, 30);   // copper
+              else if (y <= 22 && oreNoise < 0.015) c.set(lx, y, lz, 21);   // iron
+              else if (y <= 30 && oreNoise < 0.025) c.set(lx, y, lz, 20);   // coal
+              // === Phase 1C: stone variant patches (rare blobs) ===
+              else if (y > 5 && y < 25) {
+                const stoneNoise = hash2(wx * 73 + 3, wz * 41 + y * 11);
+                if (stoneNoise < 0.008) c.set(lx, y, lz, 48);    // granite
+                else if (stoneNoise < 0.016) c.set(lx, y, lz, 50); // diorite
+                else if (stoneNoise < 0.024) c.set(lx, y, lz, 52); // andesite
+              }
+            }
+            // water fill
+            if (hf < WATER_LEVEL) {
+              for (let y = hf + 1; y <= WATER_LEVEL; y++) c.set(lx, y, lz, 19);
+            }
+            // snow caps on high terrain
+            if (hf >= WATER_LEVEL + 10) {
+              c.set(lx, hf, lz, 55); // snow on top of mountains
+            }
+            // trees on grass — Phase 1: random wood type per tree
+            if (!beachy && hf > WATER_LEVEL + 1) {
+              const th = hash2(wx * 7 + 13, wz * 11 + 5);
+              if (th > 0.985) {
+                const woodType = hash2(wx * 91, wz * 83) ;
+                // pick a wood type: 0=oak (default), 1=birch, 2=spruce, 3=jungle, 4=acacia, 5=dark_oak
+                const wt = Math.floor(woodType * 6);
+                this.plantTree(c, lx, hf + 1, lz, wt);
+              }
+            }
+          }
+        }
+        for (const [key, id] of this.overrides) {
+          const [wx, wy, wz] = key.split(',').map(Number);
+          if (Math.floor(wx / CHUNK_X) === c.cx && Math.floor(wz / CHUNK_Z) === c.cz && wy >= 0 && wy < CHUNK_Y) {
+            c.set(wx - c.cx * CHUNK_X, wy, wz - c.cz * CHUNK_Z, id);
+          }
+        }
+        c.dirty = true;
+      }
+      plantTree(c, lx, ly, lz, woodType = 0) {
+        // woodType: 0=oak, 1=birch, 2=spruce, 3=jungle, 4=acacia, 5=dark_oak
+        const logIds = [5, 34, 37, 40, 43, 46];
+        const leavesIds = [7, 36, 39, 42, 45, 45]; // dark oak uses oak-like (we don't have dark_oak leaves tile, use acacia)
+        const logId = logIds[woodType] || 5;
+        const leavesId = leavesIds[woodType] || 7;
+        const h = 4 + Math.floor(hash2(lx * 31, lz * 17) * 3);
+        for (let i = 0; i < h; i++) {
+          if (ly + i < CHUNK_Y) c.set(lx, ly + i, lz, logId);
+        }
+        const topY = ly + h - 1;
+        for (let dy = -2; dy <= 1; dy++) {
+          const r = dy < 0 ? 2 : 1;
+          for (let dx = -r; dx <= r; dx++) {
+            for (let dz = -r; dz <= r; dz++) {
+              if (dx === 0 && dz === 0 && dy < 1) continue;
+              const x = lx + dx, y = topY + dy, z = lz + dz;
+              if (x < 0 || x >= CHUNK_X || z < 0 || z >= CHUNK_Z || y < 0 || y >= CHUNK_Y) continue;
+              if (c.get(x, y, z) === 0) c.set(x, y, z, leavesId);
+            }
+          }
+        }
+      }
+    }
+
+    // ============================================================
+    //  MESHING
+    // ============================================================
+    const ATLAS_COLS = 16, ATLAS_ROWS = 6, TILE_PX = 16;
+    const ATLAS_W = ATLAS_COLS * TILE_PX, ATLAS_H = ATLAS_ROWS * TILE_PX;
+
+    // Fail fast if a future edit adds a tile without its matching atlas image,
+    // reuses an index, or silently exceeds the fixed atlas dimensions.
+    const TILE_ENTRIES = Object.entries(TILE);
+    const TILE_INDICES = TILE_ENTRIES.map(([, index]) => index);
+    if (TEXTURE_FILES.length > ATLAS_COLS * ATLAS_ROWS) {
+      throw new Error('[VoxelCraft] Texture atlas capacity exceeded: ' + TEXTURE_FILES.length);
+    }
+    if (TILE_INDICES.length !== TEXTURE_FILES.length ||
+        new Set(TILE_INDICES).size !== TILE_INDICES.length ||
+        TILE_INDICES.some((index, position) => index !== position)) {
+      throw new Error('[VoxelCraft] TILE declaration order/indices and TEXTURE_FILES are out of sync.');
+    }
+
+    // Face definitions: dir, corners (CCW from outside), uv mapping
+    // face index: 0=+X 1=-X 2=+Y 3=-Y 4=+Z 5=-Z
+    const FACES = [
+      { dir:[1,0,0],  c:[[1,0,0],[1,0,1],[1,1,1],[1,1,0]], uv:[[0,1],[1,1],[1,0],[0,0]] }, // +X
+      { dir:[-1,0,0], c:[[0,0,1],[0,0,0],[0,1,0],[0,1,1]], uv:[[0,1],[1,1],[1,0],[0,0]] }, // -X
+      { dir:[0,1,0],  c:[[0,1,1],[1,1,1],[1,1,0],[0,1,0]], uv:[[0,1],[1,1],[1,0],[0,0]] }, // +Y
+      { dir:[0,-1,0], c:[[0,0,0],[1,0,0],[1,0,1],[0,0,1]], uv:[[0,1],[1,1],[1,0],[0,0]] }, // -Y
+      { dir:[0,0,1],  c:[[1,0,1],[0,0,1],[0,1,1],[1,1,1]], uv:[[0,1],[1,1],[1,0],[0,0]] }, // +Z
+      { dir:[0,0,-1], c:[[0,0,0],[1,0,0],[1,1,0],[0,1,0]], uv:[[0,1],[1,1],[1,0],[0,0]] }, // -Z
+    ];
+
+    function tileUV(tile) {
+      const col = tile % ATLAS_COLS;
+      const row = Math.floor(tile / ATLAS_COLS);
+      // UV insets must be normalized against their own axis. The old V inset
+      // divided by the atlas aspect ratio, leaving it far below half a texel
+      // and allowing edge samples to pick up pixels from the neighboring row.
+      const insetU = 0.51 / ATLAS_W;
+      const insetV = 0.51 / ATLAS_H;
+      return {
+        u0: col / ATLAS_COLS + insetU,
+        u1: (col + 1) / ATLAS_COLS - insetU,
+        v0: 1 - (row + 1) / ATLAS_ROWS + insetV,
+        v1: 1 - row / ATLAS_ROWS - insetV
+      };
+    }
+
+    function buildChunkGeometry(world, chunk, atlas) {
+      const opaquePos = [], opaqueNorm = [], opaqueUv = [], opaqueIdx = [];
+      const transPos = [], transNorm = [], transUv = [], transIdx = [];
+      let opaqueVert = 0, transVert = 0;
+
+      const baseX = chunk.cx * CHUNK_X, baseZ = chunk.cz * CHUNK_Z;
+
+      for (let y = 0; y < CHUNK_Y; y++) {
+        for (let z = 0; z < CHUNK_Z; z++) {
+          for (let x = 0; x < CHUNK_X; x++) {
+            const id = chunk.data[chunk.idx(x, y, z)];
+            if (!id || !BLOCKS[id]) continue;
+            const def = BLOCKS[id];
+            const isTrans = !!def.transparent;
+
+            for (let f = 0; f < 6; f++) {
+              const face = FACES[f];
+              const nx = x + face.dir[0], ny = y + face.dir[1], nz = z + face.dir[2];
+              const nId = world.getBlock(baseX + nx, ny, baseZ + nz);
+
+              // Draw face if neighbor is air, or neighbor is transparent and different type
+              let draw = false;
+              if (!nId) draw = true;
+              else if (BLOCKS[nId] && BLOCKS[nId].transparent && nId !== id) draw = true;
+              // Water: only draw top face when neighbor is air (skip side faces against water)
+              if (id === 19 && nId === 19) draw = false;
+              if (!draw) continue;
+
+              // Face order follows FACES: +X, -X, +Y, -Y, +Z, -Z.
+              // Bedrock's crafting table has its front on both Z faces; furnace
+              // and pumpkin use the front on +Z only in this browser's fixed orientation.
+              const tile = (f === 2) ? def.top
+                : (f === 3) ? def.bottom
+                : (f === 4 && def.front != null) ? def.front
+                : (f === 5 && def.frontBothZ && def.front != null) ? def.front
+                : def.side;
+              const { u0, u1, v0, v1 } = tileUV(tile);
+              const P = isTrans ? transPos : opaquePos;
+              const N = isTrans ? transNorm : opaqueNorm;
+              const U = isTrans ? transUv : opaqueUv;
+              const I = isTrans ? transIdx : opaqueIdx;
+              let v = isTrans ? transVert : opaqueVert;
+
+              for (let i = 0; i < 4; i++) {
+                const cx = face.c[i][0], cy = face.c[i][1], cz = face.c[i][2];
+                P.push(x + cx, y + cy, z + cz);
+                N.push(face.dir[0], face.dir[1], face.dir[2]);
+                const uu = face.uv[i][0], vv = face.uv[i][1];
+                U.push(uu ? u1 : u0, vv ? v1 : v0);
+              }
+              I.push(v, v + 1, v + 2, v, v + 2, v + 3);
+              if (isTrans) transVert += 4; else opaqueVert += 4;
+            }
+          }
+        }
+      }
+
+      function makeGeom(pos, norm, uv, idx) {
+        if (pos.length === 0) return null;
+        const g = new THREE.BufferGeometry();
+        g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+        g.setAttribute('normal', new THREE.Float32BufferAttribute(norm, 3));
+        g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+        g.setIndex(idx);
+        return g;
+      }
+
+      return {
+        opaque: makeGeom(opaquePos, opaqueNorm, opaqueUv, opaqueIdx),
+        transparent: makeGeom(transPos, transNorm, transUv, transIdx),
+      };
+    }
+
+    // ============================================================
+    //  GAME
+    // ============================================================
+    const canvas = document.getElementById('game');
+    const vignetteEl = document.getElementById('vignette');
+    const overlay = document.getElementById('overlay');
+    const loadingEl = document.getElementById('loading');
+    const loadingDetail = document.getElementById('loadingDetail');
+    const hudEl = document.getElementById('hud');
+    const hotbarEl = document.getElementById('hotbar');
+    const toastEl = document.getElementById('toast');
+
+    const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setClearColor(0x88c5ff);
+
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x88c5ff);
+    scene.fog = new THREE.Fog(0x9ad0ff, 30, 78);
+
+    const camera = new THREE.PerspectiveCamera(72, window.innerWidth / window.innerHeight, 0.1, 1000);
+
+    scene.add(new THREE.HemisphereLight(0xbfdfff, 0x506033, 0.7));
+    const sun = new THREE.DirectionalLight(0xfff4e0, 0.95);
+    sun.position.set(60, 100, 40);
+    scene.add(sun);
+    scene.add(new THREE.AmbientLight(0xffffff, 0.15));
+
+    // Celestial bodies (visible sun & moon disks + stars)
+    const sunMesh = new THREE.Mesh(
+      new THREE.SphereGeometry(8, 16, 12),
+      new THREE.MeshBasicMaterial({ color: 0xfff4b0, fog: false })
+    );
+    const moonMesh = new THREE.Mesh(
+      new THREE.SphereGeometry(5, 16, 12),
+      new THREE.MeshBasicMaterial({ color: 0xe8e8f0, fog: false })
+    );
+    sunMesh.frustumCulled = false;
+    moonMesh.frustumCulled = false;
+    scene.add(sunMesh, moonMesh);
+
+    // Stars (upper hemisphere, hidden during day)
+    const starCount = 250;
+    const starPos = new Float32Array(starCount * 3);
+    for (let i = 0; i < starCount; i++) {
+      const theta = Math.random() * Math.PI * 2;
+      const phi = Math.acos(Math.random());
+      const r = 400;
+      starPos[i*3]   = r * Math.sin(phi) * Math.cos(theta);
+      starPos[i*3+1] = r * Math.cos(phi);
+      starPos[i*3+2] = r * Math.sin(phi) * Math.sin(theta);
+    }
+    const starGeom = new THREE.BufferGeometry();
+    starGeom.setAttribute('position', new THREE.Float32BufferAttribute(starPos, 3));
+    const starMat = new THREE.PointsMaterial({ color: 0xffffff, size: 2, sizeAttenuation: false, transparent: true, opacity: 0, fog: false });
+    const stars = new THREE.Points(starGeom, starMat);
+    stars.frustumCulled = false;
+    scene.add(stars);
+
+    // Drifting cloud layer: a single horizontal plane high above the world.
+    // The cloud pattern is generated procedurally (soft white blobs on a
+    // transparent canvas) and is NOT a Minecraft asset. Scrolling the texture
+    // offset gives the illusion of wind-driven drift without moving meshes.
+    function makeCloudTexture() {
+      const size = 256;
+      const c = document.createElement('canvas');
+      c.width = c.height = size;
+      const ctx = c.getContext('2d');
+      ctx.clearRect(0, 0, size, size);
+      ctx.globalCompositeOperation = 'lighter';
+      for (let i = 0; i < 7; i++) {
+        const cx = Math.random() * size, cy = Math.random() * size;
+        const rx = 30 + Math.random() * 44, ry = 18 + Math.random() * 28;
+        const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, Math.max(rx, ry));
+        g.addColorStop(0, 'rgba(255,255,255,0.85)');
+        g.addColorStop(0.6, 'rgba(255,255,255,0.32)');
+        g.addColorStop(1, 'rgba(255,255,255,0)');
+        ctx.save();
+        ctx.translate(cx, cy);
+        ctx.scale(rx / Math.max(rx, ry), ry / Math.max(rx, ry));
+        ctx.translate(-cx, -cy);
+        ctx.fillStyle = g;
+        ctx.fillRect(0, 0, size, size);
+        ctx.restore();
+      }
+      const tex = new THREE.CanvasTexture(c);
+      tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+      tex.repeat.set(6, 6);
+      return tex;
+    }
+    const cloudTex = makeCloudTexture();
+    const cloudMat = new THREE.MeshBasicMaterial({
+      map: cloudTex, transparent: true, opacity: 0.72,
+      depthWrite: false, fog: false, side: THREE.DoubleSide,
+    });
+    const cloudMesh = new THREE.Mesh(new THREE.PlaneGeometry(900, 900), cloudMat);
+    cloudMesh.rotation.x = -Math.PI / 2;
+    cloudMesh.position.y = 104;
+    cloudMesh.frustumCulled = false;
+    scene.add(cloudMesh);
+    function updateClouds(dt) {
+      cloudTex.offset.x = (cloudTex.offset.x + dt * 0.009) % 1;
+      // Keep the cloud layer centered above the player so clouds always feel overhead.
+      cloudMesh.position.x = player.pos.x;
+      cloudMesh.position.z = player.pos.z;
+    }
+
+    const world = new World();
+    let atlasTexture = null;
+    let opaqueMat = null, transparentMat = null;
+    const chunkMeshes = new Map(); // key -> {opaque, transparent}
+
+    // selection highlight
+    const highlightGeom = new THREE.BoxGeometry(1.002, 1.002, 1.002);
+    const highlightEdges = new THREE.LineSegments(
+      new THREE.EdgesGeometry(highlightGeom),
+      new THREE.LineBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.4 })
+    );
+    highlightEdges.visible = false;
+    scene.add(highlightEdges);
+
+    // Player
+    const player = {
+      pos: new THREE.Vector3(8, WATER_LEVEL + 16, 8),
+      vel: new THREE.Vector3(),
+      yaw: 0, pitch: 0,
+      onGround: false,
+      fly: false,
+      width: 0.6, height: 1.8, eye: 1.62,
+      speed: 4.5, flySpeed: 9,
+      sprinting: false,
+    };
+    // Base FOV follows the menu option; sprinting temporarily widens it. The
+    // initial 72 matches the PerspectiveCamera constructor so the kick lerps cleanly.
+    let baseFov = 72;
+
+    let selectedSlot = 0;
+    const keys = {};
+    let locked = false;
+    let gameStarted = false;
+    let lastSpaceTime = 0;
+    let lastBreak = 0, lastPlace = 0;
+    let worldTime = 0.28;
+
+    // debug exports
+    window.__w = world;
+    window.__p = player;
+    window.__scene = scene;
+
+    // ---- Particles ----
+    const particles = [];
+    const particleGeom = new THREE.BoxGeometry(0.12, 0.12, 0.12);
+    const _avgColorCanvas = document.createElement('canvas');
+    _avgColorCanvas.width = TILE_PX; _avgColorCanvas.height = TILE_PX;
+    const _avgColorCtx = _avgColorCanvas.getContext('2d');
+    _avgColorCtx.imageSmoothingEnabled = false;
+    function tileAverageColor(tile) {
+      if (!atlasTexture || !atlasTexture.image) return 0x888888;
+      const col = tile % ATLAS_COLS, row = Math.floor(tile / ATLAS_COLS);
+      _avgColorCtx.clearRect(0, 0, TILE_PX, TILE_PX);
+      _avgColorCtx.drawImage(atlasTexture.image, col * TILE_PX, row * TILE_PX, TILE_PX, TILE_PX, 0, 0, TILE_PX, TILE_PX);
+      const data = _avgColorCtx.getImageData(0, 0, TILE_PX, TILE_PX).data;
+      let r = 0, g = 0, b = 0, n = 0;
+      for (let i = 0; i < data.length; i += 4) { r += data[i]; g += data[i+1]; b += data[i+2]; n++; }
+      return (Math.floor(r/n) << 16) | (Math.floor(g/n) << 8) | Math.floor(b/n);
+    }
+    function spawnBreakParticles(bx, by, bz, blockId) {
+      const def = BLOCKS[blockId];
+      if (!def) return;
+      const color = tileAverageColor(def.side);
+      const mat = new THREE.MeshLambertMaterial({ color });
+      const count = 10 + Math.floor(Math.random() * 4);
+      for (let i = 0; i < count; i++) {
+        const m = new THREE.Mesh(particleGeom, mat);
+        m.position.set(
+          bx + 0.5 + (Math.random()-0.5)*0.7,
+          by + 0.5 + (Math.random()-0.5)*0.7,
+          bz + 0.5 + (Math.random()-0.5)*0.7
+        );
+        scene.add(m);
+        particles.push({
+          mesh: m, mat,
+          vel: new THREE.Vector3((Math.random()-0.5)*3.5, 2 + Math.random()*2.5, (Math.random()-0.5)*3.5),
+          life: 0.7 + Math.random() * 0.4,
+          maxLife: 1.1,
+        });
+      }
+    }
+    function updateParticles(dt) {
+      for (let i = particles.length - 1; i >= 0; i--) {
+        const p = particles[i];
+        p.life -= dt;
+        if (p.life <= 0) {
+          scene.remove(p.mesh);
+          particles.splice(i, 1);
+          continue;
+        }
+        p.vel.y -= 9 * dt;
+        p.mesh.position.x += p.vel.x * dt;
+        p.mesh.position.y += p.vel.y * dt;
+        p.mesh.position.z += p.vel.z * dt;
+        p.mesh.scale.setScalar(Math.max(0.1, p.life / p.maxLife));
+        p.mesh.rotation.x += dt * 5;
+        p.mesh.rotation.y += dt * 4;
+      }
+    }
+
+    // ---- Sound (WebAudio synthesized) ----
+    let audioCtx = null;
+    function getAudio() {
+      if (!audioCtx) {
+        try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); }
+        catch (e) { return null; }
+      }
+      if (audioCtx.state === 'suspended') audioCtx.resume();
+      return audioCtx;
+    }
+    function playSound(type, blockId) {
+      const ctx = getAudio();
+      if (!ctx) return;
+      const now = ctx.currentTime;
+      if (type === 'break') {
+        const buf = ctx.createBuffer(1, Math.floor(ctx.sampleRate * 0.15), ctx.sampleRate);
+        const data = buf.getChannelData(0);
+        for (let i = 0; i < data.length; i++) data[i] = (Math.random() * 2 - 1) * Math.exp(-i / data.length * 4);
+        const src = ctx.createBufferSource();
+        src.buffer = buf;
+        const filt = ctx.createBiquadFilter();
+        filt.type = 'lowpass';
+        filt.frequency.value = 700 + (blockId || 3) * 35;
+        filt.Q.value = 1;
+        const gain = ctx.createGain();
+        gain.gain.setValueAtTime(0.22, now);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.18);
+        src.connect(filt); filt.connect(gain); gain.connect(ctx.destination);
+        src.start(now); src.stop(now + 0.2);
+      } else if (type === 'place') {
+        const osc = ctx.createOscillator();
+        osc.type = 'square';
+        osc.frequency.setValueAtTime(190, now);
+        osc.frequency.exponentialRampToValueAtTime(80, now + 0.1);
+        const gain = ctx.createGain();
+        gain.gain.setValueAtTime(0.13, now);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.12);
+        osc.connect(gain); gain.connect(ctx.destination);
+        osc.start(now); osc.stop(now + 0.13);
+      } else if (type === 'step') {
+        const osc = ctx.createOscillator();
+        osc.type = 'sine';
+        osc.frequency.value = 55 + Math.random() * 25;
+        const gain = ctx.createGain();
+        gain.gain.setValueAtTime(0.05, now);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.1);
+        osc.connect(gain); gain.connect(ctx.destination);
+        osc.start(now); osc.stop(now + 0.11);
+      }
+    }
+
+    // ---- Mobs (vanilla Bedrock chicken model + texture) ----
+    const mobs = [];
+    const CHICKEN_GEOMETRY_URL = new URL('./VoxelCraft/models/entity/chicken.geo.json', window.location.href).href;
+    const CHICKEN_TEXTURE_URL = new URL('./VoxelCraft/textures/entity/chicken/chicken.png', window.location.href).href;
+    let vanillaChickenGeometry = null;
+    let vanillaChickenTexture = null;
+
+    function setBedrockCubeUV(geometry, uv, size, textureWidth, textureHeight) {
+      if (!Array.isArray(uv)) return;
+      const [u, v] = uv;
+      const [w, h, d] = size;
+      // Bedrock's classic cube atlas layout: east, west, up, down, south, north.
+      const rects = [
+        [u, v + d, d, h],
+        [u + d + w, v + d, d, h],
+        [u + d, v, w, d],
+        [u + d + w, v, w, d],
+        [u + d + w + d, v + d, w, h],
+        [u + d, v + d, w, h],
+      ];
+      const attr = geometry.attributes.uv;
+      for (let face = 0; face < 6; face++) {
+        const [ru, rv, rw, rh] = rects[face];
+        const u0 = ru / textureWidth, u1 = (ru + rw) / textureWidth;
+        const vTop = 1 - rv / textureHeight, vBottom = 1 - (rv + rh) / textureHeight;
+        // Three.js BoxGeometry vertices are ordered left-to-right on each face.
+        // Preserve the Bedrock atlas orientation instead of mirroring every face horizontally.
+        const values = [u0, vTop, u1, vTop, u0, vBottom, u1, vBottom];
+        for (let vertex = 0; vertex < 4; vertex++) {
+          attr.setXY(face * 4 + vertex, values[vertex * 2], values[vertex * 2 + 1]);
+        }
+      }
+      attr.needsUpdate = true;
+    }
+
+    function makeVanillaChickenModel() {
+      if (!vanillaChickenGeometry || !vanillaChickenTexture) return null;
+      const root = new THREE.Group();
+      const bones = new Map();
+      const geometryList = vanillaChickenGeometry['minecraft:geometry'] || [];
+      const model = geometryList.find(g => g.description?.identifier === 'geometry.chicken.v1.12')
+        || geometryList[0];
+      if (!model?.bones) return null;
+      const description = model.description || {};
+      const textureWidth = description.texture_width || 64;
+      const textureHeight = description.texture_height || 32;
+      const sourceBones = new Map(model.bones.map(b => [b.name, b]));
+
+      function buildBone(name) {
+        if (bones.has(name)) return bones.get(name);
+        const source = sourceBones.get(name);
+        if (!source) return root;
+        const bone = new THREE.Group();
+        const pivot = source.pivot || [0, 0, 0];
+        const parent = source.parent ? buildBone(source.parent) : root;
+        const parentPivot = source.parent ? (sourceBones.get(source.parent)?.pivot || [0, 0, 0]) : [0, 0, 0];
+        bone.position.set((pivot[0] - parentPivot[0]) / 16, (pivot[1] - parentPivot[1]) / 16, -(pivot[2] - parentPivot[2]) / 16);
+        bone.name = name;
+        parent.add(bone);
+        bones.set(name, bone);
+
+        for (const cube of (source.cubes || [])) {
+          const origin = cube.origin || [0, 0, 0];
+          const size = cube.size || [1, 1, 1];
+          const center = [
+            origin[0] + size[0] / 2,
+            origin[1] + size[1] / 2,
+            origin[2] + size[2] / 2
+          ];
+          const pivotPoint = cube.pivot || center;
+          const cubeGroup = new THREE.Group();
+          cubeGroup.position.set(
+            (pivotPoint[0] - pivot[0]) / 16,
+            (pivotPoint[1] - pivot[1]) / 16,
+            -(pivotPoint[2] - pivot[2]) / 16
+          );
+          if (cube.rotation) {
+            cubeGroup.rotation.set(
+              THREE.MathUtils.degToRad(cube.rotation[0] || 0),
+              THREE.MathUtils.degToRad(-(cube.rotation[1] || 0)),
+              THREE.MathUtils.degToRad(-(cube.rotation[2] || 0))
+            );
+          }
+          const box = new THREE.BoxGeometry(size[0] / 16, size[1] / 16, size[2] / 16);
+          setBedrockCubeUV(box, cube.uv, size, textureWidth, textureHeight);
+          const mesh = new THREE.Mesh(box, new THREE.MeshLambertMaterial({
+            map: vanillaChickenTexture,
+            transparent: true,
+            alphaTest: 0.05
+          }));
+          mesh.position.set(
+            (center[0] - pivotPoint[0]) / 16,
+            (center[1] - pivotPoint[1]) / 16,
+            -(center[2] - pivotPoint[2]) / 16
+          );
+          mesh.castShadow = true;
+          mesh.receiveShadow = true;
+          cubeGroup.add(mesh);
+          bone.add(cubeGroup);
+        }
+        return bone;
+      }
+
+      for (const bone of model.bones) buildBone(bone.name);
+      // The vanilla model's coordinates are measured from the feet; center it on the mob origin.
+      root.scale.setScalar(1);
+      root.userData.bones = bones;
+      return root;
+    }
+
+    function makeChickenFallback() {
+      const group = new THREE.Group();
+      const white = new THREE.MeshLambertMaterial({ color: 0xfafafa });
+      const orange = new THREE.MeshLambertMaterial({ color: 0xff9900 });
+      const red = new THREE.MeshLambertMaterial({ color: 0xd93636 });
+      const body = new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.42, 0.42), white);
+      body.position.set(0, 0.38, 0); group.add(body);
+      const head = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.28, 0.28), white);
+      head.position.set(0, 0.69, -0.16); group.add(head);
+      const beak = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.08, 0.1), orange);
+      beak.position.set(0, 0.65, -0.34); group.add(beak);
+      const comb = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.09, 0.08), red);
+      comb.position.set(0, 0.86, -0.16); group.add(comb);
+      for (const x of [-0.12, 0.12]) {
+        const leg = new THREE.Mesh(new THREE.BoxGeometry(0.055, 0.2, 0.055), orange);
+        leg.position.set(x, 0.1, 0); group.add(leg);
+      }
+      group.userData.fallbackBody = body;
+      return group;
+    }
+
+    function replaceWithVanillaModel(mob) {
+      const oldMesh = mob.mesh;
+      const replacement = makeVanillaChickenModel();
+      if (!replacement) return false;
+      replacement.position.copy(oldMesh.position);
+      replacement.rotation.copy(oldMesh.rotation);
+      scene.remove(oldMesh);
+      scene.add(replacement);
+      mob.mesh = replacement;
+      mob.bones = replacement.userData.bones;
+      mob.body = mob.bones?.get('body') || replacement;
+      return true;
+    }
+
+    // Assets are copied from the repository's vanilla Bedrock resource pack during setup/build.
+    // Keep a visible fallback if a local preview is opened without running setup first.
+    Promise.all([
+      fetch(CHICKEN_GEOMETRY_URL).then(response => {
+        if (!response.ok) throw new Error('Chicken geometry HTTP ' + response.status);
+        return response.json();
+      }),
+      new Promise((resolve, reject) => {
+        new THREE.TextureLoader().load(CHICKEN_TEXTURE_URL, resolve, undefined, reject);
+      })
+    ]).then(([geometry, texture]) => {
+      vanillaChickenGeometry = geometry;
+      vanillaChickenTexture = texture;
+      vanillaChickenTexture.magFilter = THREE.NearestFilter;
+      vanillaChickenTexture.minFilter = THREE.NearestFilter;
+      if ('colorSpace' in vanillaChickenTexture && THREE.SRGBColorSpace) {
+        vanillaChickenTexture.colorSpace = THREE.SRGBColorSpace;
+      }
+      vanillaChickenTexture.needsUpdate = true;
+      for (const mob of mobs) replaceWithVanillaModel(mob);
+    }).catch(error => {
+      console.warn('[VoxelCraft] Vanilla chicken assets failed to load; using fallback model.', error);
+    });
+
+    function spawnChicken(x, y, z) {
+      const group = makeVanillaChickenModel() || makeChickenFallback();
+      group.position.set(x, y, z);
+      scene.add(group);
+      mobs.push({
+        mesh: group,
+        body: group.userData?.bones?.get('body') || group.userData?.fallbackBody || group,
+        bones: group.userData?.bones || null,
+        vel: new THREE.Vector3(),
+        yaw: Math.random() * Math.PI * 2,
+        nextThink: 1 + Math.random() * 2,
+      });
+    }
+    function updateMobs(dt) {
+      // Spawn near player occasionally, preserving the existing lightweight mob logic.
+      if (mobs.length < 4 && Math.random() < 0.008) {
+        const ang = Math.random() * Math.PI * 2;
+        const dist = 12 + Math.random() * 14;
+        const sx = player.pos.x + Math.cos(ang) * dist;
+        const sz = player.pos.z + Math.sin(ang) * dist;
+        for (let y = CHUNK_Y - 1; y >= 0; y--) {
+          const id = world.getBlock(Math.floor(sx), y, Math.floor(sz));
+          if (id && id !== 19) { spawnChicken(sx + 0.5, y + 1, sz + 0.5); break; }
+        }
+      }
+      for (let i = mobs.length - 1; i >= 0; i--) {
+        const m = mobs[i];
+        m.nextThink -= dt;
+        if (m.nextThink <= 0) {
+          m.yaw = Math.random() * Math.PI * 2;
+          m.nextThink = 1.5 + Math.random() * 2.5;
+          if (Math.random() < 0.45) m.vel.y = 4.5;
+        }
+        const speed = 1.2;
+        m.vel.x = Math.sin(m.yaw) * speed;
+        m.vel.z = Math.cos(m.yaw) * speed;
+        m.vel.y -= 18 * dt;
+        const np = m.mesh.position;
+        const nx = np.x + m.vel.x * dt;
+        if (!isSolid(nx, np.y, np.z)) np.x = nx;
+        const nz = np.z + m.vel.z * dt;
+        if (!isSolid(np.x, np.y, nz)) np.z = nz;
+        const ny = np.y + m.vel.y * dt;
+        if (!isSolid(np.x, ny, np.z)) np.y = ny;
+        else m.vel.y = 0;
+        if (np.distanceTo(player.pos) > 80) {
+          scene.remove(m.mesh);
+          mobs.splice(i, 1);
+          continue;
+        }
+        m.mesh.rotation.y = m.yaw;
+        const gait = Math.sin(performance.now() * 0.018) * 0.55;
+        if (m.bones) {
+          const leftLeg = m.bones.get('leg0');
+          const rightLeg = m.bones.get('leg1');
+          const leftWing = m.bones.get('wing0');
+          const rightWing = m.bones.get('wing1');
+          if (leftLeg) leftLeg.rotation.x = gait;
+          if (rightLeg) rightLeg.rotation.x = -gait;
+          if (leftWing) leftWing.rotation.z = Math.sin(performance.now() * 0.012) * 0.08;
+          if (rightWing) rightWing.rotation.z = -Math.sin(performance.now() * 0.012) * 0.08;
+        } else {
+          m.body.position.y = 0.38 + Math.abs(Math.sin(performance.now() * 0.005)) * 0.025;
+        }
+      }
+    }
+    window.__mobs = mobs;
+    window.__spawnChicken = spawnChicken;
+    window.__setTime = (t) => { worldTime = t % 1; };
+    window.__getTime = () => worldTime;
+    window.__getChickenState = () => ({
+      hasGeometry: !!vanillaChickenGeometry,
+      hasTexture: !!vanillaChickenTexture,
+      geometryKeys: vanillaChickenGeometry ? Object.keys(vanillaChickenGeometry) : null,
+      geometryListLen: vanillaChickenGeometry?.['minecraft:geometry']?.length || 0,
+      geometryIdentifiers: vanillaChickenGeometry?.['minecraft:geometry']?.map(g => g.description?.identifier) || [],
+      textureSize: vanillaChickenTexture ? `${vanillaChickenTexture.image?.width}x${vanillaChickenTexture.image?.height}` : null,
+    });
+
+    // ---- Inventory panel ----
+    const inventoryEl = document.getElementById('inventory');
+    const invGridEl = document.getElementById('invGrid');
+    let inventoryOpen = false;
+    let inventoryReturnToGame = false;
+    const vcGuide = document.getElementById('vcGuide');
+    const vcGuideBody = document.getElementById('vcGuideBody');
+    const vcFlyStatus = document.getElementById('vcFlyStatus');
+    let vcGuideOpen = false;
+    let vcGuideReturnToGame = false;
+    // Mirror the Behavior Pack's persistent player stats in browser storage.
+    const BROWSER_STATS_KEY = 'voxelcraft_browser_stats_v1';
+    function safeBrowserCount(value) {
+      return Number.isSafeInteger(value) && value >= 0 ? value : 0;
+    }
+    function loadBrowserStats() {
+      try {
+        const saved = JSON.parse(localStorage.getItem(BROWSER_STATS_KEY) || 'null');
+        return {
+          joins: safeBrowserCount(saved?.joins),
+          coins: safeBrowserCount(saved?.coins),
+          blocksBroken: safeBrowserCount(saved?.blocksBroken),
+          blocksPlaced: safeBrowserCount(saved?.blocksPlaced),
+          mobsKilled: safeBrowserCount(saved?.mobsKilled),
+        };
+      } catch {
+        return { joins: 0, coins: 0, blocksBroken: 0, blocksPlaced: 0, mobsKilled: 0 };
+      }
+    }
+    const browserStats = loadBrowserStats();
+    browserStats.joins++;
+    function saveBrowserStats() {
+      try { localStorage.setItem(BROWSER_STATS_KEY, JSON.stringify(browserStats)); }
+      catch { /* Stats are a convenience; gameplay must still work if storage is unavailable. */ }
+    }
+    saveBrowserStats();
+    let browserBlocksBroken = browserStats.blocksBroken;
+    let browserBlocksPlaced = browserStats.blocksPlaced;
+    const inventoryFilterSets = {
+      all: null,
+      nature: new Set([1, 2, 3, 4, 5, 7, 8, 9, 19, 34, 36, 37, 39, 40, 42, 43, 45, 46, 48, 49, 50, 51, 52, 53, 55, 56, 57, 58]),
+      building: new Set([6, 10, 11, 12, 17, 18, 25, 27, 29, 32, 33, 35, 38, 41, 44, 47, 54, 59, 60, 61, 62, 63, 64, 65, 66]),
+      minerals: new Set([13, 14, 15, 16, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33]),
+    };
+    let activeInventoryFilter = 'all';
+    const inventoryTabs = [...document.querySelectorAll('#inventory [data-inv-filter]')];
+    function setInventoryFilter(filter, focusSelected = false) {
+      if (!inventoryFilterSets.hasOwnProperty(filter) && filter !== 'all') return;
+      activeInventoryFilter = filter;
+      let selectedTab = null;
+      inventoryTabs.forEach((tab) => {
+        const selected = tab.dataset.invFilter === activeInventoryFilter;
+        tab.classList.toggle('active', selected);
+        tab.setAttribute('aria-selected', String(selected));
+        tab.tabIndex = selected ? 0 : -1;
+        if (selected) selectedTab = tab;
+      });
+      if (selectedTab) {
+        invGridEl.setAttribute('aria-labelledby', selectedTab.id);
+        if (focusSelected) selectedTab.focus();
+      }
+      buildInventory(activeInventoryFilter);
+    }
+    inventoryTabs.forEach((tab, index) => {
+      tab.addEventListener('click', () => setInventoryFilter(tab.dataset.invFilter));
+      tab.addEventListener('keydown', (event) => {
+        let nextIndex = null;
+        if (event.key === 'ArrowRight') nextIndex = (index + 1) % inventoryTabs.length;
+        else if (event.key === 'ArrowLeft') nextIndex = (index - 1 + inventoryTabs.length) % inventoryTabs.length;
+        else if (event.key === 'Home') nextIndex = 0;
+        else if (event.key === 'End') nextIndex = inventoryTabs.length - 1;
+        if (nextIndex === null) return;
+        event.preventDefault();
+        setInventoryFilter(inventoryTabs[nextIndex].dataset.invFilter, true);
+      });
+    });
+
+    function buildInventory(filter = activeInventoryFilter) {
+      activeInventoryFilter = filter;
+      invGridEl.innerHTML = '';
+      const allowedIds = inventoryFilterSets[filter];
+      for (let id = 1; id <= 66; id++) {
+        const def = BLOCKS[id];
+        if (!def || (allowedIds && !allowedIds.has(id))) continue;
+        const slot = document.createElement('div');
+        slot.className = 'inv-slot';
+        const c = document.createElement('canvas');
+        c.width = 40; c.height = 40;
+        const cx = c.getContext('2d');
+        cx.imageSmoothingEnabled = false;
+        drawTilePreview(cx, def.side, 40);
+        slot.appendChild(c);
+        const lbl = document.createElement('div');
+        lbl.className = 'lbl'; lbl.textContent = def.name;
+        slot.appendChild(lbl);
+        slot.title = def.name;
+        slot.addEventListener('click', () => {
+          HOTBAR[selectedSlot] = id;
+          buildHotbar();
+          selectSlot(selectedSlot);
+          toast('Slot ' + (selectedSlot+1) + ' = ' + def.name);
+        });
+        invGridEl.appendChild(slot);
+      }
+    }
+    function toggleInventory() {
+      if (!inventoryOpen && vcGuideOpen) return;
+      const opening = !inventoryOpen;
+      if (opening) inventoryReturnToGame = locked || inventoryReturnToGame;
+      inventoryOpen = opening;
+      // Derive all overlay visibility from one screen state; don't wait for pointerlockchange.
+      syncMenuVisibility();
+
+      if (inventoryOpen) {
+        if (locked) document.exitPointerLock();
+        buildInventory();
+      } else {
+        const shouldResumeGame = inventoryReturnToGame;
+        inventoryReturnToGame = false;
+        if (shouldResumeGame && canvas.requestPointerLock) {
+          const result = canvas.requestPointerLock();
+          if (result && typeof result.catch === 'function') {
+            result.catch((err) => {
+              console.warn('Pointer lock gagal saat menutup inventory:', err);
+              toast('Klik layar game untuk melanjutkan');
+            });
+          }
+        }
+      }
+    }
+    document.getElementById('invClose').addEventListener('click', toggleInventory);
+
+    // ---- Toast ----
+    let toastTimer = null;
+    function toast(msg) {
+      toastEl.textContent = msg;
+      toastEl.classList.add('show');
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => toastEl.classList.remove('show'), 1400);
+    }
+
+    // ---- Atlas ----
+    // Bedrock's grass_top and leaves are grayscale textures meant to be tinted
+    // by biome color. We apply a green multiply tint so they look correct.
+    const TINTS = {
+      'grass_top': [121, 192, 90],          // plains grass green
+      'leaves_oak_opaque': [86, 158, 48],   // oak leaves green
+      'leaves_birch_opaque': [128, 167, 85],
+      'leaves_spruce_opaque': [72, 111, 54],
+      'leaves_jungle_opaque': [65, 145, 52],
+      'leaves_acacia_opaque': [105, 151, 65],
+    };
+    async function buildAtlas() {
+      const canvas2 = document.createElement('canvas');
+      canvas2.width = ATLAS_W; canvas2.height = ATLAS_H;
+      const ctx = canvas2.getContext('2d');
+      ctx.imageSmoothingEnabled = false;
+      // clear to transparent
+      ctx.clearRect(0, 0, ATLAS_W, ATLAS_H);
+      const imgs = new Array(TEXTURE_FILES.length);
+
+      await Promise.all(TEXTURE_FILES.map((name, i) => new Promise((resolve) => {
+        const img = new Image();
+        img.onload = () => {
+          const col = i % ATLAS_COLS, row = Math.floor(i / ATLAS_COLS);
+          ctx.globalCompositeOperation = 'source-over';
+          // Normalize each source texture to one full 16×16 atlas tile.
+          // Using a 16×16 source crop here silently cuts off larger PNGs (for example,
+          // textures supplied at 32×32 or 64×64) and makes their patterns look misaligned.
+          const sourceWidth = img.naturalWidth || img.width;
+          const sourceHeight = img.naturalHeight || img.height;
+          ctx.drawImage(img, 0, 0, sourceWidth, sourceHeight, col * TILE_PX, row * TILE_PX, TILE_PX, TILE_PX);
+          // apply biome tint for grass/leaves (multiply)
+          const tint = TINTS[name];
+          if (tint) {
+            ctx.globalCompositeOperation = 'multiply';
+            ctx.fillStyle = `rgb(${tint[0]},${tint[1]},${tint[2]})`;
+            ctx.fillRect(col * TILE_PX, row * TILE_PX, TILE_PX, TILE_PX);
+            ctx.globalCompositeOperation = 'source-over';
+          }
+          imgs[i] = img;
+          resolve();
+        };
+        img.onerror = () => {
+          const col = i % ATLAS_COLS, row = Math.floor(i / ATLAS_COLS);
+          const x = col * TILE_PX, y = row * TILE_PX;
+          // Procedurally-generated ores (coal/iron/gold/diamond_ore) have no
+          // source file — they're composited from stone + mineral block later.
+          // Don't log a misleading "missing texture" error for those tiles.
+          const isProceduralOre = /^(coal|iron|gold|diamond)_ore$/.test(name);
+          if (!isProceduralOre) {
+            // Never leave a silent transparent hole in the atlas: missing assets
+            // should be obvious during development and reported in the console.
+            ctx.globalCompositeOperation = 'source-over';
+            ctx.fillStyle = '#ff00ff';
+            ctx.fillRect(x, y, TILE_PX, TILE_PX);
+            ctx.fillStyle = '#181018';
+            ctx.fillRect(x, y, TILE_PX / 2, TILE_PX / 2);
+            ctx.fillRect(x + TILE_PX / 2, y + TILE_PX / 2, TILE_PX / 2, TILE_PX / 2);
+            console.error('[VoxelCraft] Missing texture: ' + TEXTURE_DIR + name + '.png');
+          }
+          resolve();
+        };
+        img.src = TEXTURE_DIR + name + '.png';
+      })));
+
+      // Generate ore tiles procedurally (stone base + mineral specks)
+      const ORE_DEFS = [
+        { tile: TILE.COAL_ORE,    speck: TILE.COAL },
+        { tile: TILE.IRON_ORE,    speck: TILE.IRON },
+        { tile: TILE.GOLD_ORE,    speck: TILE.GOLD },
+        { tile: TILE.DIAMOND_ORE, speck: TILE.DIAMOND },
+      ];
+      const stoneImg = imgs[TILE.STONE];
+      for (const { tile, speck } of ORE_DEFS) {
+        const col = tile % ATLAS_COLS, row = Math.floor(tile / ATLAS_COLS);
+        // stone base
+        if (stoneImg) {
+          const sw = stoneImg.naturalWidth || stoneImg.width;
+          const sh = stoneImg.naturalHeight || stoneImg.height;
+          ctx.drawImage(stoneImg, 0, 0, sw, sh, col * TILE_PX, row * TILE_PX, TILE_PX, TILE_PX);
+        }
+        // specks (deterministic pseudo-random positions)
+        const speckImg = imgs[speck];
+        if (speckImg) {
+          for (let i = 0; i < 14; i++) {
+            const sx = 1 + Math.floor((Math.sin(i * 7.3 + tile * 3.1) * 0.5 + 0.5) * (TILE_PX - 4));
+            const sy = 1 + Math.floor((Math.cos(i * 5.7 + tile * 2.1) * 0.5 + 0.5) * (TILE_PX - 4));
+            const sw = 2 + (i % 2);
+            ctx.drawImage(speckImg, sx, sy, sw, sw, col * TILE_PX + sx, row * TILE_PX + sy, sw, sw);
+          }
+        }
+      }
+
+      const tex = new THREE.CanvasTexture(canvas2);
+      tex.magFilter = THREE.NearestFilter;
+      tex.minFilter = THREE.NearestFilter;
+      tex.generateMipmaps = false;
+      tex.colorSpace = THREE.SRGBColorSpace;
+      tex.needsUpdate = true;
+      return tex;
+    }
+
+    // ---- Hotbar UI ----
+    function buildHotbar() {
+      hotbarEl.innerHTML = '';
+      HOTBAR.forEach((id, i) => {
+        const def = BLOCKS[id];
+        const slot = document.createElement('div');
+        slot.className = 'slot' + (i === 0 ? ' active' : '');
+        slot.dataset.index = i;
+        const c = document.createElement('canvas');
+        c.width = 36; c.height = 36;
+        const cx = c.getContext('2d');
+        cx.imageSmoothingEnabled = false;
+        // draw the side texture tile as preview
+        drawTilePreview(cx, def.side, 36);
+        slot.appendChild(c);
+        const num = document.createElement('div');
+        num.className = 'num'; num.textContent = (i + 1);
+        slot.appendChild(num);
+        const nm = document.createElement('div');
+        nm.className = 'name'; nm.textContent = def.name;
+        slot.appendChild(nm);
+        slot.addEventListener('click', () => selectSlot(i));
+        hotbarEl.appendChild(slot);
+      });
+    }
+    function drawTilePreview(ctx, tile, size) {
+      if (!atlasTexture || !atlasTexture.image) return;
+      const col = tile % ATLAS_COLS, row = Math.floor(tile / ATLAS_COLS);
+      ctx.drawImage(atlasTexture.image, col * TILE_PX, row * TILE_PX, TILE_PX, TILE_PX, 0, 0, size, size);
+    }
+    function selectSlot(i) {
+      selectedSlot = i;
+      document.querySelectorAll('#hotbar .slot').forEach((s, idx) => {
+        s.classList.toggle('active', idx === i);
+      });
+    }
+
+    // ---- Chunk meshing management ----
+    function updateChunk(cx, cz) {
+      const chunk = world.getChunk(cx, cz);
+      if (!chunk) return;
+      const key = chunkKey(cx, cz);
+      let meshes = chunkMeshes.get(key);
+      if (!meshes) { meshes = { opaque: null, transparent: null }; chunkMeshes.set(key, meshes); }
+
+      // dispose old
+      if (meshes.opaque) { scene.remove(meshes.opaque); meshes.opaque.geometry.dispose(); meshes.opaque = null; }
+      if (meshes.transparent) { scene.remove(meshes.transparent); meshes.transparent.geometry.dispose(); meshes.transparent = null; }
+
+      const { opaque, transparent } = buildChunkGeometry(world, chunk, atlasTexture);
+      if (opaque) {
+        const m = new THREE.Mesh(opaque, opaqueMat);
+        m.position.set(cx * CHUNK_X, 0, cz * CHUNK_Z);
+        m.frustumCulled = true;
+        scene.add(m);
+        meshes.opaque = m;
+      }
+      if (transparent) {
+        const m = new THREE.Mesh(transparent, transparentMat);
+        m.position.set(cx * CHUNK_X, 0, cz * CHUNK_Z);
+        m.frustumCulled = true;
+        scene.add(m);
+        meshes.transparent = m;
+      }
+      chunk.dirty = false;
+    }
+
+    function ensureChunksAround(px, pz) {
+      const pcx = Math.floor(px / CHUNK_X), pcz = Math.floor(pz / CHUNK_Z);
+      const toGen = [];
+      for (let dz = -RENDER_RADIUS; dz <= RENDER_RADIUS; dz++) {
+        for (let dx = -RENDER_RADIUS; dx <= RENDER_RADIUS; dx++) {
+          const cx = pcx + dx, cz = pcz + dz;
+          const chunk = world.ensureChunk(cx, cz);
+          if (chunk.dirty) toGen.push({ cx, cz });
+        }
+      }
+      // unload far chunks
+      for (const key of chunkMeshes.keys()) {
+        const [kx, kz] = key.split(',').map(Number);
+        if (Math.abs(kx - pcx) > RENDER_RADIUS + 2 || Math.abs(kz - pcz) > RENDER_RADIUS + 2) {
+          const m = chunkMeshes.get(key);
+          if (m.opaque) { scene.remove(m.opaque); m.opaque.geometry.dispose(); }
+          if (m.transparent) { scene.remove(m.transparent); m.transparent.geometry.dispose(); }
+          chunkMeshes.delete(key);
+          world.chunks.delete(key);
+        }
+      }
+      // generate up to a few per frame
+      for (const { cx, cz } of toGen.slice(0, 4)) {
+        updateChunk(cx, cz);
+      }
+      return toGen.length;
+    }
+
+    // ---- Collision ----
+    function isSolid(wx, wy, wz) {
+      const id = world.getBlock(Math.floor(wx), Math.floor(wy), Math.floor(wz));
+      if (!id) return false;
+      const d = BLOCKS[id];
+      return d ? d.solid : false;
+    }
+    function collidesAABB(px, py, pz) {
+      const w = player.width / 2, h = player.height;
+      // Shrink the tested AABB by a tiny epsilon so merely touching a voxel
+      // face does not count as an overlap (notably at integer coordinates).
+      const epsilon = 1e-7;
+      const x0 = px - w + epsilon, x1 = px + w - epsilon;
+      const y0 = py + epsilon, y1 = py + h - epsilon;
+      const z0 = pz - w + epsilon, z1 = pz + w - epsilon;
+      for (let bx = Math.floor(x0); bx <= Math.floor(x1); bx++) {
+        for (let by = Math.floor(y0); by <= Math.floor(y1); by++) {
+          for (let bz = Math.floor(z0); bz <= Math.floor(z1); bz++) {
+            if (isSolid(bx, by, bz)) return true;
+          }
+        }
+      }
+      return false;
+    }
+
+    function movePlayer(dt) {
+      // input -> wishdir
+      const forward = new THREE.Vector3(-Math.sin(player.yaw), 0, -Math.cos(player.yaw));
+      const right = new THREE.Vector3(Math.cos(player.yaw), 0, -Math.sin(player.yaw));
+      const wish = new THREE.Vector3();
+      if (keys['KeyW']) wish.add(forward);
+      if (keys['KeyS']) wish.sub(forward);
+      if (keys['KeyD']) wish.add(right);
+      if (keys['KeyA']) wish.sub(right);
+      if (wish.lengthSq() > 0) wish.normalize();
+      const sprint = keys['ShiftLeft'] && !player.fly;
+      player.sprinting = sprint;
+      const sp = player.fly ? player.flySpeed : player.speed * (sprint ? 1.5 : 1);
+      player.vel.x = wish.x * sp;
+      player.vel.z = wish.z * sp;
+
+      if (player.fly) {
+        let vy = 0;
+        if (keys['Space']) vy += 1;
+        if (keys['ShiftLeft']) vy -= 1;
+        player.vel.y = vy * player.flySpeed;
+      } else {
+        player.vel.y -= 24 * dt; // gravity
+        if (player.vel.y < -40) player.vel.y = -40;
+      }
+
+      // Substep each axis to prevent tunneling through blocks during fast falls
+      // or a delayed frame. Each collision check moves at most 0.25 world units.
+      const maxStep = 0.25;
+      const dx = player.vel.x * dt;
+      const xSteps = Math.max(1, Math.ceil(Math.abs(dx) / maxStep));
+      const stepX = dx / xSteps;
+      for (let i = 0; i < xSteps; i++) {
+        const nx = player.pos.x + stepX;
+        if (collidesAABB(nx, player.pos.y, player.pos.z)) {
+          player.vel.x = 0;
+          break;
+        }
+        player.pos.x = nx;
+      }
+
+      const dy = player.vel.y * dt;
+      const ySteps = Math.max(1, Math.ceil(Math.abs(dy) / maxStep));
+      const stepY = dy / ySteps;
+      for (let i = 0; i < ySteps; i++) {
+        const ny = player.pos.y + stepY;
+        if (collidesAABB(player.pos.x, ny, player.pos.z)) {
+          if (player.vel.y < 0) player.onGround = true;
+          player.vel.y = 0;
+          break;
+        }
+        player.pos.y = ny;
+        player.onGround = false;
+      }
+
+      const dz = player.vel.z * dt;
+      const zSteps = Math.max(1, Math.ceil(Math.abs(dz) / maxStep));
+      const stepZ = dz / zSteps;
+      for (let i = 0; i < zSteps; i++) {
+        const nz = player.pos.z + stepZ;
+        if (collidesAABB(player.pos.x, player.pos.y, nz)) {
+          player.vel.z = 0;
+          break;
+        }
+        player.pos.z = nz;
+      }
+
+      // jump
+      if (keys['Space'] && player.onGround && !player.fly) {
+        player.vel.y = 8.5;
+        player.onGround = false;
+      }
+
+      // prevent falling forever
+      if (player.pos.y < -10) {
+        player.pos.set(8, WATER_LEVEL + 16, 8);
+        player.vel.set(0, 0, 0);
+      }
+    }
+
+    // ---- Raycast (DDA) ----
+    function raycastVoxel(maxDist) {
+      if (!Number.isFinite(maxDist) || maxDist < 0) return null;
+      const origin = new THREE.Vector3(player.pos.x, player.pos.y + player.eye, player.pos.z);
+      const dir = new THREE.Vector3();
+      camera.getWorldDirection(dir);
+      if (![origin.x, origin.y, origin.z, dir.x, dir.y, dir.z].every(Number.isFinite) ||
+          dir.lengthSq() === 0) return null;
+      dir.normalize();
+
+      let x = Math.floor(origin.x), y = Math.floor(origin.y), z = Math.floor(origin.z);
+      const stepX = Math.sign(dir.x), stepY = Math.sign(dir.y), stepZ = Math.sign(dir.z);
+      const tDeltaX = dir.x !== 0 ? Math.abs(1 / dir.x) : Infinity;
+      const tDeltaY = dir.y !== 0 ? Math.abs(1 / dir.y) : Infinity;
+      const tDeltaZ = dir.z !== 0 ? Math.abs(1 / dir.z) : Infinity;
+      let tMaxX = dir.x !== 0 ? ((stepX > 0 ? (x + 1 - origin.x) : (origin.x - x)) * tDeltaX) : Infinity;
+      let tMaxY = dir.y !== 0 ? ((stepY > 0 ? (y + 1 - origin.y) : (origin.y - y)) * tDeltaY) : Infinity;
+      let tMaxZ = dir.z !== 0 ? ((stepZ > 0 ? (z + 1 - origin.z) : (origin.z - z)) * tDeltaZ) : Infinity;
+      let face = null;
+      let dist = 0;
+      while (dist <= maxDist) {
+        const id = world.getBlock(x, y, z);
+        if (id && BLOCKS[id] && !BLOCKS[id].noCollide) {
+          return { x, y, z, face };
+        }
+
+        const nextDist = Math.min(tMaxX, tMaxY, tMaxZ);
+        // Do not inspect a voxel entered beyond the requested reach.
+        if (!Number.isFinite(nextDist) || nextDist > maxDist) return null;
+        if (tMaxX <= tMaxY && tMaxX <= tMaxZ) {
+          x += stepX; dist = tMaxX; tMaxX += tDeltaX; face = [-stepX, 0, 0];
+        } else if (tMaxY <= tMaxZ) {
+          y += stepY; dist = tMaxY; tMaxY += tDeltaY; face = [0, -stepY, 0];
+        } else {
+          z += stepZ; dist = tMaxZ; tMaxZ += tDeltaZ; face = [0, 0, -stepZ];
+        }
+      }
+      return null;
+    }
+
+    function breakBlock() {
+      const hit = raycastVoxel(6);
+      if (!hit) return;
+      const id = world.getBlock(hit.x, hit.y, hit.z);
+      if (id === 11) { toast('Bedrock tidak bisa dihancurkan'); return; }
+      if (!id || !world.setBlock(hit.x, hit.y, hit.z, 0)) return;
+      remeshAround(hit.x, hit.y, hit.z);
+      browserBlocksBroken++;
+      browserStats.blocksBroken = browserBlocksBroken;
+      const coinRewards = { 20: 2, 21: 3, 22: 5, 23: 15, 24: 4, 26: 3, 28: 20, 31: 2 };
+      const coinsEarned = coinRewards[id] || 0;
+      if (coinsEarned > 0) {
+        browserStats.coins += coinsEarned;
+        toast(`+${coinsEarned} koin`);
+      }
+      saveBrowserStats();
+      spawnBreakParticles(hit.x, hit.y, hit.z, id);
+      playSound('break', id);
+    }
+    function placeBlock() {
+      const hit = raycastVoxel(6);
+      if (!hit || !hit.face) return;
+      const px = hit.x + hit.face[0], py = hit.y + hit.face[1], pz = hit.z + hit.face[2];
+      // don't place inside player
+      const w = player.width / 2;
+      const overlap = (player.pos.x + w > px && player.pos.x - w < px + 1) &&
+                      (player.pos.y + player.height > py && player.pos.y < py + 1) &&
+                      (player.pos.z + w > pz && player.pos.z - w < pz + 1);
+      if (overlap) return;
+      const id = HOTBAR[selectedSlot];
+      // Placement may replace air or water, but must never overwrite another
+      // solid block if a ray/face edge resolves to an occupied target voxel.
+      const existing = world.getBlock(px, py, pz);
+      if (existing !== 0 && existing !== 19) return;
+      if (!world.setBlock(px, py, pz, id)) return;
+      remeshAround(px, py, pz);
+      browserBlocksPlaced++;
+      browserStats.blocksPlaced = browserBlocksPlaced;
+      saveBrowserStats();
+      playSound('place', id);
+    }
+    function remeshAround(wx, wy, wz) {
+      const cx = Math.floor(wx / CHUNK_X), cz = Math.floor(wz / CHUNK_Z);
+      updateChunk(cx, cz);
+      const lx = wx - cx * CHUNK_X, lz = wz - cz * CHUNK_Z;
+      if (lx === 0) updateChunk(cx - 1, cz);
+      if (lx === CHUNK_X - 1) updateChunk(cx + 1, cz);
+      if (lz === 0) updateChunk(cx, cz - 1);
+      if (lz === CHUNK_Z - 1) updateChunk(cx, cz + 1);
+    }
+
+    // ---- Input ----
+    // The start overlay covers the canvas, so its click must request pointer lock too.
+    const pauseOverlay = document.getElementById('pauseOverlay');
+    const resumeGameButton = document.getElementById('resumeGameButton');
+    const saveWorldButton = document.getElementById('saveWorldButton');
+    const returnTitleButton = document.getElementById('returnTitleButton');
+
+    // One screen state drives every blocking overlay, following the screen lifecycle
+    // pattern in rujukan/.../client/gui/Screen.cpp. Presentation never owns game state.
+    function getActiveUiScreen() {
+      if (inventoryOpen) return 'inventory';
+      if (vcGuideOpen) return 'guide';
+      if (!gameStarted) return 'title';
+      if (locked) return 'playing';
+      return 'pause';
+    }
+    function syncMenuVisibility() {
+      const activeScreen = getActiveUiScreen();
+      document.body.dataset.uiScreen = activeScreen;
+      overlay.classList.toggle('hidden', activeScreen !== 'title');
+      pauseOverlay.classList.toggle('hidden', activeScreen !== 'pause');
+      inventoryEl.classList.toggle('hidden', activeScreen !== 'inventory');
+      vcGuide.classList.toggle('hidden', activeScreen !== 'guide');
+    }
+    function resumeGame() {
+      if (settingsPanel) settingsPanel.classList.remove('open');
+      gameStarted = true;
+      syncMenuVisibility();
+      if (!locked && canvas.requestPointerLock) {
+        const result = canvas.requestPointerLock();
+        if (result && typeof result.catch === 'function') {
+          result.catch((err) => {
+            console.warn('Pointer lock gagal:', err);
+            toast('Klik layar game untuk mulai bermain');
+          });
+        }
+      }
+    }
+    const startGame = resumeGame;
+    const playButton = document.getElementById('playButton');
+    const mainMenuButtons = document.getElementById('mainMenuButtons');
+    const helpOptionsButton = document.getElementById('helpOptionsButton');
+    const helpOptionsPanel = document.getElementById('helpOptionsPanel');
+    const helpBackButton = document.getElementById('helpBackButton');
+    const optionsButton = document.getElementById('optionsButton');
+    const settingsPanel = document.getElementById('settingsPanel');
+    const saveOptionsButton = document.getElementById('saveOptionsButton');
+    const menuFov = document.getElementById('menuFov');
+    const renderQuality = document.getElementById('renderQuality');
+
+
+    // ---- VoxelCraft ActionForm-inspired menu (adapted from BedrockAddon/scripts/main.js) ----
+    function updateVcGuideBody(showStats = false) {
+      const clock = Math.floor((((worldTime % 1) + 1) % 1) * 24).toString().padStart(2, '0') + ':00';
+      if (showStats) {
+        const pos = player.pos;
+        const selected = BLOCKS[HOTBAR[selectedSlot]];
+        vcGuideBody.textContent = 'Statistik VoxelCraft\n' +
+          'Koin: ' + browserStats.coins + '\n' +
+          'Kunjungan browser: ' + browserStats.joins + '\n' +
+          'Blok dihancurkan: ' + browserBlocksBroken + '\n' +
+          'Blok dipasang: ' + browserBlocksPlaced + '\n' +
+          'Posisi: ' + Math.floor(pos.x) + ', ' + Math.floor(pos.y) + ', ' + Math.floor(pos.z) + '\n' +
+          'Slot aktif: ' + (selectedSlot + 1) + ' — ' + (selected ? selected.name : 'kosong') + '\n' +
+          'Mode terbang: ' + (player.fly ? 'ON' : 'OFF') + ' | Waktu: ' + clock;
+      } else {
+        vcGuideBody.textContent = 'Halo, penjelajah!\nPilih aksi VoxelCraft. Tampilan ini memakai tekstur UI dari resource pack; aksi yang belum didukung browser ditandai jelas.';
+      }
+      vcFlyStatus.textContent = player.fly ? 'Status sekarang: ON' : 'Status sekarang: OFF';
+    }
+    function openVcGuide() {
+      if (vcGuideOpen || inventoryOpen) return;
+      vcGuideReturnToGame = locked;
+      vcGuideOpen = true;
+      syncMenuVisibility();
+      updateVcGuideBody(false);
+      if (locked) document.exitPointerLock();
+    }
+    function closeVcGuide(resume = true) {
+      vcGuideOpen = false;
+      const shouldResume = resume && vcGuideReturnToGame;
+      syncMenuVisibility();
+      vcGuideReturnToGame = false;
+      if (shouldResume && canvas.requestPointerLock) {
+        const result = canvas.requestPointerLock();
+        if (result && typeof result.catch === 'function') result.catch(() => { syncMenuVisibility(); toast('Klik layar game untuk melanjutkan'); });
+      }
+    }
+    vcGuide.querySelectorAll('[data-vc-action]').forEach((button) => {
+      button.addEventListener('click', () => {
+        switch (button.dataset.vcAction) {
+          case 'kit':
+            [1, 3, 5, 6, 12, 14, 33, 62, 19].forEach((id, i) => { if (BLOCKS[id]) HOTBAR[i] = id; });
+            buildHotbar(); selectSlot(selectedSlot);
+            toast('Kit blok starter dipasang ke hotbar');
+            break;
+          case 'fly':
+            player.fly = !player.fly; player.vel.y = 0;
+            updateVcGuideBody(false); toast(player.fly ? 'Mode terbang ON' : 'Mode terbang OFF');
+            break;
+          case 'day': worldTime = 0.5; toast('Waktu diatur ke siang'); updateVcGuideBody(false); break;
+          case 'night': worldTime = 0; toast('Waktu diatur ke malam'); updateVcGuideBody(false); break;
+          case 'stats': updateVcGuideBody(true); break;
+          case 'close': closeVcGuide(true); break;
+        }
+      });
+    });
+    vcGuide.addEventListener('click', (event) => { if (event.target === vcGuide) closeVcGuide(true); });
+
+    document.getElementById('guideButton').addEventListener('click', openVcGuide);
+    playButton.addEventListener('click', startGame);
+    helpOptionsButton.addEventListener('click', () => {
+      mainMenuButtons.classList.add('hidden');
+      helpOptionsPanel.classList.add('open');
+      settingsPanel.classList.remove('open');
+    });
+    helpBackButton.addEventListener('click', () => {
+      helpOptionsPanel.classList.remove('open');
+      settingsPanel.classList.remove('open');
+      mainMenuButtons.classList.remove('hidden');
+    });
+    resumeGameButton.addEventListener('click', resumeGame);
+    saveWorldButton.addEventListener('click', () => {
+      if (world.save()) toast('Dunia disimpan di browser ini');
+    });
+    returnTitleButton.addEventListener('click', () => {
+      if (world.save()) toast('Dunia disimpan sebelum kembali ke menu');
+      gameStarted = false;
+      if (locked && document.exitPointerLock) document.exitPointerLock();
+      helpOptionsPanel.classList.remove('open');
+      settingsPanel.classList.remove('open');
+      mainMenuButtons.classList.remove('hidden');
+      syncMenuVisibility();
+    });
+    optionsButton.addEventListener('click', () => {
+      helpOptionsPanel.classList.remove('open');
+      settingsPanel.classList.add('open');
+    });
+    saveOptionsButton.addEventListener('click', () => {
+      baseFov = Number(menuFov.value);
+      camera.fov = Number(menuFov.value);
+      camera.updateProjectionMatrix();
+      const pixelRatio = renderQuality.value === 'high' ? Math.min(window.devicePixelRatio || 1, 2) : renderQuality.value === 'low' ? 0.75 : Math.min(window.devicePixelRatio || 1, 1.25);
+      renderer.setPixelRatio(pixelRatio);
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      settingsPanel.classList.remove('open');
+      helpOptionsPanel.classList.add('open');
+      toast('Pengaturan diterapkan');
+    });
+    canvas.addEventListener('click', startGame);
+    function clearPressedKeys() {
+      for (const code of Object.keys(keys)) keys[code] = false;
+      // A Space tap before focus loss must not combine with a tap after refocus.
+      lastSpaceTime = 0;
+    }
+    document.addEventListener('pointerlockchange', () => {
+      locked = document.pointerLockElement === canvas;
+      if (!locked) clearPressedKeys();
+      syncMenuVisibility();
+    });
+    window.addEventListener('blur', clearPressedKeys);
+    document.addEventListener('mousemove', (e) => {
+      if (!locked) return;
+      const sens = 0.0024;
+      player.yaw -= e.movementX * sens;
+      player.pitch -= e.movementY * sens;
+      player.pitch = Math.max(-Math.PI / 2 + 0.001, Math.min(Math.PI / 2 - 0.001, player.pitch));
+    });
+    document.addEventListener('keydown', (e) => {
+      // Some browsers/input devices may emit duplicate keydown events without a reliable repeat flag.
+      const wasDown = keys[e.code] === true;
+      keys[e.code] = true;
+      if (e.code === 'Escape' && !e.repeat && !wasDown) {
+        if (inventoryOpen) { e.preventDefault(); toggleInventory(); return; }
+        if (vcGuideOpen) { e.preventDefault(); closeVcGuide(); return; }
+        if (gameStarted && !locked) { e.preventDefault(); resumeGame(); return; }
+        if (!gameStarted && settingsPanel?.classList.contains('open')) {
+          e.preventDefault();
+          settingsPanel.classList.remove('open');
+          helpOptionsPanel.classList.add('open');
+          return;
+        }
+        if (!gameStarted && helpOptionsPanel?.classList.contains('open')) {
+          e.preventDefault();
+          helpOptionsPanel.classList.remove('open');
+          mainMenuButtons.classList.remove('hidden');
+          return;
+        }
+      }
+      if (e.code === 'Space' && !e.repeat && !wasDown) {
+        const now = performance.now();
+        if (now - lastSpaceTime < 280) {
+          player.fly = !player.fly;
+          player.vel.y = 0;
+          toast(player.fly ? '✈ Mode terbang ON' : 'Mode terbang OFF');
+        }
+        lastSpaceTime = now;
+      }
+      if (e.code === 'KeyK' && !e.repeat && !wasDown) {
+        if (world.save()) toast('Dunia disimpan di browser ini');
+      }
+      if (e.code === 'KeyE' && !e.repeat && !wasDown) {
+        e.preventDefault();
+        toggleInventory();
+      }
+      if (e.code === 'KeyG' && !e.repeat && !wasDown && !inventoryOpen) { e.preventDefault(); openVcGuide(); return; }
+      if (e.code === 'KeyT' && !e.repeat && !wasDown) {
+        // advance time of day for quick day/night testing
+        worldTime = (worldTime + 0.15) % 1;
+        toast('Waktu dimajukan');
+      }
+      // number keys
+      if (e.code.startsWith('Digit')) {
+        const n = parseInt(e.code.slice(5));
+        if (n >= 1 && n <= 9 && n <= HOTBAR.length) selectSlot(n - 1);
+      }
+    });
+    document.addEventListener('keyup', (e) => { keys[e.code] = false; });
+    document.addEventListener('mousedown', (e) => {
+      if (!locked || inventoryOpen) return;
+      const now = performance.now();
+      if (e.button === 0) { if (now - lastBreak > 180) { breakBlock(); lastBreak = now; } }
+      if (e.button === 2) { if (now - lastPlace > 180) { placeBlock(); lastPlace = now; } }
+    });
+    document.addEventListener('contextmenu', (e) => e.preventDefault());
+    document.addEventListener('wheel', (e) => {
+      if (!locked) return;
+      const dir = Math.sign(e.deltaY);
+      let i = (selectedSlot + dir + HOTBAR.length) % HOTBAR.length;
+      selectSlot(i);
+    });
+
+    window.addEventListener('resize', () => {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+
+    // ---- Render loop ----
+    let lastT = performance.now();
+    let fps = 0, fpsAccum = 0, fpsFrames = 0, hudTimer = 0;
+    let initialGenerated = false;
+
+    function animate(now) {
+      requestAnimationFrame(animate);
+      const dt = Math.min(0.05, (now - lastT) / 1000);
+      lastT = now;
+
+      const pending = ensureChunksAround(player.pos.x, player.pos.z);
+      if (!initialGenerated && pending === 0) {
+        initialGenerated = true;
+        loadingEl.classList.add('hidden');
+        syncMenuVisibility();
+      }
+
+      const gameplayActive = getActiveUiScreen() === 'playing';
+      if (gameplayActive) movePlayer(dt);
+
+      // Pause gameplay systems while the title, pause, inventory, or guide UI is open.
+      if (gameplayActive) {
+        updateParticles(dt);
+        updateMobs(dt);
+      }
+
+      // camera follow
+      camera.position.set(player.pos.x, player.pos.y + player.eye, player.pos.z);
+      camera.rotation.order = 'YXZ';
+      camera.rotation.y = player.yaw;
+      camera.rotation.x = player.pitch;
+
+      // Smooth sprint FOV kick: widen the view while sprinting on the ground,
+      // ease back to the base FOV from the options menu when not. Clouds drift
+      // every frame so the sky stays alive even while the game is paused.
+      const targetFov = baseFov + (player.sprinting && !player.fly ? 6 : 0);
+      if (Math.abs(camera.fov - targetFov) > 0.05) {
+        camera.fov += (targetFov - camera.fov) * Math.min(1, dt * 8);
+        camera.updateProjectionMatrix();
+      }
+      updateClouds(dt);
+
+      // ---- Day/night cycle with visible sun/moon + stars + sunset tint ----
+      if (gameplayActive) worldTime = (worldTime + dt / 600) % 1;
+      const sunAngle = worldTime * Math.PI * 2 - Math.PI / 2;
+      const daylight = Math.max(0.05, Math.sin(sunAngle) * 0.5 + 0.5);
+      const sunDirX = Math.cos(sunAngle);
+      const sunDirY = Math.sin(sunAngle);
+      const sunDirZ = 0.3;
+      const sunDir = new THREE.Vector3(sunDirX, sunDirY, sunDirZ).normalize();
+      sun.position.copy(sunDir).multiplyScalar(120);
+      sun.intensity = 0.08 + daylight * 0.95;
+      sunMesh.position.copy(sunDir).multiplyScalar(300);
+      moonMesh.position.copy(sunDir).multiplyScalar(-300);
+      // sky color: day (light blue) -> sunset (orange) -> night (dark navy)
+      const dayCol = new THREE.Color(0x88c5ff);
+      const nightCol = new THREE.Color(0x0a0a28);
+      const sunsetCol = new THREE.Color(0xff7a44);
+      const sunsetFactor = Math.max(0, 1 - Math.abs(daylight - 0.25) * 4.2);
+      const skyCol = nightCol.clone().lerp(dayCol, daylight);
+      skyCol.lerp(sunsetCol, sunsetFactor * 0.55);
+      scene.background.copy(skyCol);
+      scene.fog.color.copy(skyCol);
+      // stars fade in at night
+      starMat.opacity = Math.max(0, 1 - daylight * 2.4);
+      // night vignette darkens screen edges after sunset (kept gentle so night
+      // gameplay stays readable; peaks around ~0.4 at deep night)
+      vignetteEl.style.opacity = Math.max(0, 1 - daylight * 2.0) * 0.45;
+      // hemisphere light follows sky brightness
+      const hemi = scene.children.find(c => c.isHemisphereLight);
+      if (hemi) hemi.intensity = 0.25 + daylight * 0.55;
+      // highlight
+      const hit = locked ? raycastVoxel(6) : null;
+      if (hit) {
+        highlightEdges.visible = true;
+        highlightEdges.position.set(hit.x + 0.5, hit.y + 0.5, hit.z + 0.5);
+      } else {
+        highlightEdges.visible = false;
+      }
+
+      renderer.render(scene, camera);
+
+      // fps + hud
+      fpsAccum += dt; fpsFrames++;
+      if (fpsAccum >= 0.5) { fps = Math.round(fpsFrames / fpsAccum); fpsAccum = 0; fpsFrames = 0; }
+      hudTimer += dt;
+      if (hudTimer >= 0.2) {
+        hudTimer = 0;
+        const clockMinutes = Math.floor((((worldTime % 1) + 1) % 1) * 1440);
+        const clock = `${String(Math.floor(clockMinutes / 60) % 24).padStart(2, '0')}:${String(clockMinutes % 60).padStart(2, '0')}`;
+        const clockIcon = (worldTime > 0.22 && worldTime < 0.78) ? '☀' : '🌙';
+        hudEl.innerHTML =
+          `<span class="hud-brand">VoxelCraft</span> <span class="hud-sep">|</span> Overworld <span class="hud-sep">|</span> XYZ <b>${Math.floor(player.pos.x)}, ${Math.floor(player.pos.y)}, ${Math.floor(player.pos.z)}</b> <span class="hud-sep">|</span> ${clockIcon} <b>${clock}</b> <span class="hud-sep">|</span> Koin: <b>${browserStats.coins}</b> <span class="hud-sep">|</span> ${player.fly ? 'Terbang' : (player.sprinting ? 'Lari' : 'Jalan')} <span class="hud-sep">|</span> Blok: <b>${BLOCKS[HOTBAR[selectedSlot]].name}</b> <span class="hud-sep">|</span> Hancur: <b>${browserBlocksBroken}</b> <span class="hud-sep">|</span> FPS: <b>${fps}</b>`;
+      }
+    }
+
+    // ---- Init ----
+    (async function init() {
+      loadingDetail.textContent = 'memuat tekstur minecraft asli...';
+      atlasTexture = await buildAtlas();
+      opaqueMat = new THREE.MeshLambertMaterial({ map: atlasTexture, side: THREE.DoubleSide });
+      transparentMat = new THREE.MeshLambertMaterial({ map: atlasTexture, transparent: true, opacity: 0.82, depthWrite: false, side: THREE.DoubleSide });
+
+      buildHotbar();
+      loadingDetail.textContent = 'membangun dunia...';
+      // pre-generate spawn area synchronously so first frame has ground
+      const pcx = Math.floor(player.pos.x / CHUNK_X), pcz = Math.floor(player.pos.z / CHUNK_Z);
+      for (let dz = -RENDER_RADIUS; dz <= RENDER_RADIUS; dz++) {
+        for (let dx = -RENDER_RADIUS; dx <= RENDER_RADIUS; dx++) {
+          world.ensureChunk(pcx + dx, pcz + dz);
+        }
+      }
+      for (let dz = -RENDER_RADIUS; dz <= RENDER_RADIUS; dz++) {
+        for (let dx = -RENDER_RADIUS; dx <= RENDER_RADIUS; dx++) {
+          updateChunk(pcx + dx, pcz + dz);
+        }
+      }
+      // drop player onto ground
+      const gx = Math.floor(player.pos.x), gz = Math.floor(player.pos.z);
+      for (let y = CHUNK_Y - 1; y >= 0; y--) {
+        const id = world.getBlock(gx, y, gz);
+        if (id && id !== 19) { player.pos.y = y + 1; break; }
+      }
+      // spawn initial chickens near spawn
+      for (let i = 0; i < 3; i++) {
+        const ang = (i / 3) * Math.PI * 2 + 0.4;
+        const sx = player.pos.x + Math.cos(ang) * 6;
+        const sz = player.pos.z + Math.sin(ang) * 6;
+        for (let y = CHUNK_Y - 1; y >= 0; y--) {
+          const id = world.getBlock(Math.floor(sx), y, Math.floor(sz));
+          if (id && id !== 19) { spawnChicken(sx, y + 1, sz); break; }
+        }
+      }
+      requestAnimationFrame(animate);
+    })().catch((err) => {
+      loadingDetail.textContent = 'ERROR: ' + err.message;
+      console.error(err);
+    });
+  </script>
+</body>
+</html>
