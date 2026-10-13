@@ -1,0 +1,811 @@
+     1→#include "Gui.h"
+     2→#include "Font.h"
+     3→#include "screens/IngameBlockSelectionScreen.h"
+     4→#include "../Minecraft.h"
+     5→#include "../player/LocalPlayer.h"
+     6→#include "../renderer/Tesselator.h"
+     7→#include "../renderer/TileRenderer.h"
+     8→#include "../renderer/LevelRenderer.h"
+     9→#include "../renderer/GameRenderer.h"
+    10→#include "../renderer/entity/ItemRenderer.h"
+    11→#include "../player/input/IInputHolder.h"
+    12→#include "../gamemode/GameMode.h"
+    13→#include "../gamemode/CreativeMode.h"
+    14→#include "../renderer/Textures.h"
+    15→#include "../../AppConstants.h"
+    16→#include "../../world/entity/player/Inventory.h"
+    17→#include "../../world/level/material/Material.h"
+    18→#include "../../world/item/Item.h"
+    19→#include "../../world/item/ItemInstance.h"
+    20→#include "../../platform/input/Mouse.h"
+    21→#include "../../world/level/Level.h"
+    22→#include "../../world/PosTranslator.h"
+    23→
+    24→float Gui::InvGuiScale = 1.0f / 3.0f;
+    25→float Gui::GuiScale = 1.0f / Gui::InvGuiScale;
+    26→const float Gui::DropTicks = 40.0f;
+    27→
+    28→//#include <android/log.h>
+    29→
+    30→Gui::Gui(Minecraft* minecraft)
+    31→:       minecraft(minecraft),
+    32→        tickCount(0),
+    33→        progress(0),
+    34→        overlayMessageTime(0),
+    35→        animateOverlayMessageColor(false),
+    36→        tbr(1),
+    37→        _inventoryNeedsUpdate(true),
+    38→        _flashSlotId(-1),
+    39→        _flashSlotStartTime(-1),
+    40→        _slotFont(NULL),
+    41→        _numSlots(4),
+    42→        _currentDropTicks(-1),
+    43→        _currentDropSlot(-1),
+    44→        MAX_MESSAGE_WIDTH(240),
+    45→        itemNameOverlayTime(2)
+    46→{
+    47→        glGenBuffers2(1, &_inventoryRc.vboId);
+    48→        glGenBuffers2(1, &rcFeedbackInner.vboId);
+    49→        glGenBuffers2(1, &rcFeedbackOuter.vboId);
+    50→        //Gui::InvGuiScale = 1.0f / (int) (3 * Minecraft::width / 854);
+    51→}
+    52→
+    53→Gui::~Gui()
+    54→{
+    55→        if (_slotFont)
+    56→                delete _slotFont;
+    57→
+    58→        glDeleteBuffers(1, &_inventoryRc.vboId);
+    59→}
+    60→
+    61→void Gui::render(float a, bool mouseFree, int xMouse, int yMouse) {
+    62→
+    63→        if (!minecraft->level || !minecraft->player)
+    64→                return;
+    65→
+    66→        //minecraft->gameRenderer->setupGuiScreen();
+    67→        Font* font = minecraft->font;
+    68→
+    69→        const bool isTouchInterface = minecraft->useTouchscreen();
+    70→        const int screenWidth = (int)(minecraft->width * InvGuiScale);
+    71→        const int screenHeight = (int)(minecraft->height * InvGuiScale);
+    72→        blitOffset = -90;
+    73→        renderProgressIndicator(isTouchInterface, screenWidth, screenHeight, a);
+    74→
+    75→        glColor4f2(1, 1, 1, 1);
+    76→
+    77→        // H: 4
+    78→    // T: 7
+    79→    // L: 6
+    80→    // F: 3
+    81→        int ySlot = screenHeight - 16 - 3;
+    82→
+    83→        if (minecraft->gameMode->canHurtPlayer()) {
+    84→                minecraft->textures->loadAndBindTexture("gui/icons.png");
+    85→                Tesselator& t = Tesselator::instance;
+    86→                t.beginOverride();
+    87→                t.colorABGR(0xffffffff);
+    88→                renderHearts();
+    89→                renderBubbles();
+    90→                t.endOverrideAndDraw();
+    91→        }
+    92→
+    93→        if(minecraft->player->getSleepTimer() > 0) {
+    94→                glDisable(GL_DEPTH_TEST);
+    95→                glDisable(GL_ALPHA_TEST);
+    96→
+    97→                renderSleepAnimation(screenWidth, screenHeight);
+    98→
+    99→                glEnable(GL_ALPHA_TEST);
+   100→                glEnable(GL_DEPTH_TEST);
+   101→        }
+   102→
+   103→        renderToolBar(a, ySlot, screenWidth);
+   104→
+   105→
+   106→        //font->drawShadow(APP_NAME, 2, 2, 0xffffffff);
+   107→        //font->drawShadow("This is a demo, not the finished product", 2, 10 + 2, 0xffffffff);
+   108→        #ifdef APPLE_DEMO_PROMOTION
+   109→                font->drawShadow("Demo version", 2, 0 + 2, 0xffffffff);
+   110→        #endif /*APPLE_DEMO_PROMOTION*/
+   111→        glEnable(GL_BLEND);
+   112→        unsigned int max = 10;
+   113→    bool isChatting = false;
+   114→        renderChatMessages(screenHeight, max, isChatting, font);
+   115→#if !defined(RPI)
+   116→        renderOnSelectItemNameText(screenWidth, font, ySlot);
+   117→#endif
+   118→#if defined(RPI)
+   119→        renderDebugInfo();
+   120→#endif
+   121→
+   122→//        glPopMatrix2();
+   123→//
+   124→//        glEnable(GL_ALPHA_TEST);
+   125→    glDisable(GL_BLEND);
+   126→        glEnable2(GL_ALPHA_TEST);
+   127→}
+   128→
+   129→int Gui::getSlotIdAt(int x, int y) {
+   130→        int screenWidth = (int)(minecraft->width * InvGuiScale);
+   131→        int screenHeight = (int)(minecraft->height * InvGuiScale);
+   132→        x = (int)(x * InvGuiScale);
+   133→        y = (int)(y * InvGuiScale);
+   134→
+   135→        if (y < (screenHeight - 16 - 3) || y > screenHeight)
+   136→                return -1;
+   137→
+   138→        int xBase = 2 + screenWidth / 2 - getNumSlots() * 10;
+   139→        int xRel  = (x - xBase);
+   140→        if (xRel < 0)
+   141→                return -1;
+   142→
+   143→        int slot = xRel / 20;
+   144→        return (slot >= 0 && slot < getNumSlots())? slot : -1;
+   145→}
+   146→
+   147→bool Gui::isInside(int x, int y) {
+   148→        return getSlotIdAt(x, y) != -1;
+   149→}
+   150→
+   151→int Gui::getNumSlots() {
+   152→        return _numSlots;
+   153→}
+   154→
+   155→void Gui::flashSlot(int slotId) {
+   156→        _flashSlotId = slotId;
+   157→        _flashSlotStartTime = getTimeS();
+   158→}
+   159→
+   160→void Gui::getSlotPos(int slot, int& posX, int& posY) {
+   161→        int screenWidth = (int)(minecraft->width * InvGuiScale);
+   162→        int screenHeight = (int)(minecraft->height * InvGuiScale);
+   163→        posX = screenWidth / 2 - getNumSlots() * 10 + slot * 20, 
+   164→        posY = screenHeight - 22;
+   165→}
+   166→
+   167→RectangleArea Gui::getRectangleArea(int extendSide) {
+   168→        const int Spacing = 3;
+   169→        const float pCenterX   = 2.0f + (float)(minecraft->width / 2);
+   170→        const float pHalfWidth = (1.0f + (getNumSlots() * 10 + Spacing)) * Gui::GuiScale;
+   171→        const float pHeight    = (22 + Spacing) * Gui::GuiScale;
+   172→
+   173→        if (extendSide < 0)
+   174→                return RectangleArea(0, (float)minecraft->height-pHeight, pCenterX+pHalfWidth+2, (float)minecraft->height);
+   175→        if (extendSide > 0)
+   176→                return RectangleArea(pCenterX-pHalfWidth, (float)minecraft->height-pHeight, (float)minecraft->width, (float)minecraft->height);
+   177→        
+   178→        return RectangleArea(pCenterX-pHalfWidth, (float)minecraft->height-pHeight, pCenterX+pHalfWidth+2, (float)minecraft->height);
+   179→}
+   180→
+   181→void Gui::handleClick(int button, int x, int y) {
+   182→        if (button != MouseAction::ACTION_LEFT) return;
+   183→
+   184→        int slot = getSlotIdAt(x, y);
+   185→        if (slot != -1)
+   186→        {
+   187→                if (slot == (getNumSlots()-1))
+   188→                {
+   189→                        minecraft->screenChooser.setScreen(SCREEN_BLOCKSELECTION);
+   190→                }
+   191→                else
+   192→                {
+   193→                        minecraft->player->inventory->selectSlot(slot);
+   194→                        itemNameOverlayTime = 0;
+   195→                }
+   196→        }
+   197→}
+   198→
+   199→void Gui::handleKeyPressed(int key)
+   200→{
+   201→        if (key == 99)
+   202→        {
+   203→                if (minecraft->player->inventory->selected > 0)
+   204→                {
+   205→                        minecraft->player->inventory->selected--;
+   206→                }
+   207→        }
+   208→        else if (key == 4)
+   209→        {
+   210→                if (minecraft->player->inventory->selected < (getNumSlots() - 2))
+   211→                {
+   212→                        minecraft->player->inventory->selected++;
+   213→                }
+   214→        }
+   215→        else if (key == 100)
+   216→        {
+   217→                minecraft->screenChooser.setScreen(SCREEN_BLOCKSELECTION);
+   218→        }
+   219→}
+   220→
+   221→void Gui::tick() {
+   222→        if (overlayMessageTime > 0) overlayMessageTime--;
+   223→        tickCount++;
+   224→        if(itemNameOverlayTime < 2)
+   225→                itemNameOverlayTime += 1.0f / SharedConstants::TicksPerSecond;
+   226→        for (unsigned int i = 0; i < guiMessages.size(); i++) {
+   227→            guiMessages.at(i).ticks++;
+   228→        }
+   229→
+   230→    if (!minecraft->isCreativeMode())
+   231→        tickItemDrop();
+   232→}
+   233→
+   234→void Gui::addMessage(const std::string& _string) {
+   235→        if (!minecraft->font)
+   236→                return;
+   237→
+   238→        std::string string = _string;
+   239→        while (minecraft->font->width(string) > MAX_MESSAGE_WIDTH) {
+   240→                unsigned int i = 1;
+   241→                while (i < string.length() && minecraft->font->width(string.substr(0, i + 1)) <= MAX_MESSAGE_WIDTH) {
+   242→                        i++;
+   243→                }
+   244→                addMessage(string.substr(0, i));
+   245→                string = string.substr(i);
+   246→        }
+   247→        GuiMessage message;
+   248→        message.message = string;
+   249→        message.ticks = 0;
+   250→        guiMessages.insert(guiMessages.begin(), message);
+   251→        while (guiMessages.size() > 30) {
+   252→                guiMessages.pop_back();
+   253→        }
+   254→}
+   255→
+   256→void Gui::setNowPlaying(const std::string& string) {
+   257→        overlayMessageString = "Now playing: " + string;
+   258→        overlayMessageTime = 20 * 3;
+   259→        animateOverlayMessageColor = true;
+   260→}
+   261→
+   262→void Gui::displayClientMessage(const std::string& messageId) {
+   263→        //Language language = Language.getInstance();
+   264→        //std::string languageString = language.getElement(messageId);
+   265→        addMessage(std::string("Client message: ") + messageId);
+   266→}
+   267→
+   268→void Gui::renderVignette(float br, int w, int h) {
+   269→        br = 1 - br;
+   270→        if (br < 0) br = 0;
+   271→        if (br > 1) br = 1;
+   272→        tbr += (br - tbr) * 0.01f;
+   273→
+   274→        glDisable(GL_DEPTH_TEST);
+   275→        glDepthMask(false);
+   276→        glBlendFunc2(GL_ZERO, GL_ONE_MINUS_SRC_COLOR);
+   277→        glColor4f2(tbr, tbr, tbr, 1);
+   278→        minecraft->textures->loadAndBindTexture("misc/vignette.png");
+   279→
+   280→        Tesselator& t = Tesselator::instance;
+   281→        t.begin();
+   282→        t.vertexUV(0, (float)h, -90, 0, 1);
+   283→        t.vertexUV((float)w, (float)h, -90, 1, 1);
+   284→        t.vertexUV((float)w, 0, -90, 1, 0);
+   285→        t.vertexUV(0, 0, -90, 0, 0);
+   286→        t.draw();
+   287→        glDepthMask(true);
+   288→        glEnable(GL_DEPTH_TEST);
+   289→        glColor4f2(1, 1, 1, 1);
+   290→        glBlendFunc2(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+   291→}
+   292→
+   293→void Gui::renderSlot(int slot, int x, int y, float a) {
+   294→        ItemInstance* item = minecraft->player->inventory->getItem(slot);
+   295→        if (!item) {
+   296→                //LOGW("Warning: item @ Gui::renderSlot is NULL\n");
+   297→                return;
+   298→        }
+   299→
+   300→        const bool fancy = true;
+   301→        ItemRenderer::renderGuiItem(minecraft->font, minecraft->textures, item, (float)x, (float)y, fancy);
+   302→}
+   303→
+   304→void Gui::renderSlotText( const ItemInstance* item, float x, float y, bool hasFinite, bool shadow )
+   305→{
+   306→        //if (!item || item->getItem()->getMaxStackSize() <= 1) {
+   307→        if (item->count <= 1) {
+   308→                return;
+   309→        }
+   310→
+   311→        int c = item->count;
+   312→
+   313→        char buffer[4] = {0,0,0,0};
+   314→        if (hasFinite)
+   315→                itemCountItoa(buffer, c);
+   316→        else
+   317→                buffer[0] = (char)157;
+   318→
+   319→        //LOGI("slot: %d - %s\n", slot, buffer);
+   320→        if (shadow)
+   321→                minecraft->font->drawShadow(buffer, x, y, item->count>0?0xffcccccc:0x60cccccc);
+   322→        else
+   323→                minecraft->font->draw(buffer, x, y, item->count>0?0xffcccccc:0x60cccccc);
+   324→}
+   325→
+   326→void Gui::inventoryUpdated() {
+   327→        _inventoryNeedsUpdate = true;
+   328→}
+   329→
+   330→void Gui::onGraphicsReset() {
+   331→    inventoryUpdated();
+   332→}
+   333→
+   334→void Gui::texturesLoaded( Textures* textures ) {
+   335→        //_slotFont = new Font(&minecraft->options, "gui/gui_blocks.png", textures, 0, 504, 10, 1, '0');
+   336→}
+   337→
+   338→void Gui::onConfigChanged( const Config& c ) {
+   339→        Tesselator& t = Tesselator::instance;
+   340→        t.begin();
+   341→
+   342→        //
+   343→        // Create outer feedback circle
+   344→        //
+   345→#ifdef ANDROID
+   346→        const float mm = 12;
+   347→#else
+   348→        const float mm = 12;
+   349→#endif
+   350→        const float maxRadius = minecraft->pixelCalcUi.millimetersToPixels(mm);
+   351→        const float radius = Mth::Min(80.0f/2, maxRadius);
+   352→        //LOGI("radius, maxradius: %f, %f\n", radius, maxRadius);
+   353→        const float radiusInner = radius * 0.95f;
+   354→
+   355→        const int steps = 24;
+   356→        const float fstep = Mth::TWO_PI / steps;
+   357→        for (int i = 0; i < steps; ++i) {
+   358→                float a = i * fstep;;
+   359→                float b = a + fstep;
+   360→
+   361→                float aCos = Mth::cos(a);
+   362→                float bCos = Mth::cos(b);
+   363→                float aSin = Mth::sin(a);
+   364→                float bSin = Mth::sin(b);
+   365→                float x00 = radius * aCos;
+   366→                float x01 = radiusInner * aCos;
+   367→                float x10 = radius * bCos;
+   368→                float x11 = radiusInner * bCos;
+   369→                float y00 = radius * aSin;
+   370→                float y01 = radiusInner * aSin;
+   371→                float y10 = radius * bSin;
+   372→                float y11 = radiusInner * bSin;
+   373→
+   374→                t.vertexUV(x01, y01, 0, 0, 1);
+   375→                t.vertexUV(x11, y11, 0, 1, 1);
+   376→                t.vertexUV(x10, y10, 0, 1, 0);
+   377→                t.vertexUV(x00, y00, 0, 0, 0);
+   378→        }
+   379→        rcFeedbackOuter = t.end(true, rcFeedbackOuter.vboId);
+   380→
+   381→        //
+   382→        // Create the inner feedback ring
+   383→        //
+   384→        t.begin(GL_TRIANGLE_FAN);
+   385→        t.vertex(0, 0, 0);
+   386→        for (int i = 0; i < steps + 1; ++i) {
+   387→                float a = -i * fstep;
+   388→                float xx = radiusInner * Mth::cos(a);
+   389→                float yy = radiusInner * Mth::sin(a);
+   390→                t.vertex(xx, yy, 0);
+   391→                //LOGI("x,y: %f, %f\n", xx, yy);
+   392→        }
+   393→        rcFeedbackInner = t.end(true, rcFeedbackInner.vboId);
+   394→
+   395→        if (c.minecraft->useTouchscreen()) {
+   396→                // I'll bump this up to 6.
+   397→                int num = 6; // without "..." dots
+   398→                if (!c.minecraft->options.isJoyTouchArea && c.width > 480) {
+   399→                        while (num < Inventory::MAX_SELECTION_SIZE - 1) {
+   400→                                int x0, x1, y;
+   401→                                getSlotPos(0, x0, y);
+   402→                                getSlotPos(num, x1, y);
+   403→                                int width = x1 - x0;
+   404→                                float leftoverPixels = c.width - c.guiScale*width;
+   405→                                if (c.pixelCalc.pixelsToMillimeters(leftoverPixels) < 80)
+   406→                                        break;
+   407→                                num++;
+   408→                        }
+   409→                }
+   410→                _numSlots = num;
+   411→#if defined(__APPLE__)
+   412→                _numSlots = Mth::Min(7, _numSlots);
+   413→#endif
+   414→        } else {
+   415→                _numSlots = Inventory::MAX_SELECTION_SIZE; // Xperia Play
+   416→        }
+   417→        MAX_MESSAGE_WIDTH = c.guiWidth;
+   418→}
+   419→
+   420→float Gui::floorAlignToScreenPixel(float v) {
+   421→        return (int)(v * Gui::GuiScale) * Gui::InvGuiScale;
+   422→}
+   423→
+   424→int Gui::itemCountItoa( char* buffer, int count )
+   425→{
+   426→        if (count < 0)
+   427→                return 0;
+   428→
+   429→        if (count < 10) { // 1 digit
+   430→                buffer[0] = '0' + count;
+   431→                buffer[1] = 0;
+   432→                return 1;
+   433→        } else if (count < 100) { // 2 digits
+   434→                int digit = count/10;
+   435→                buffer[0] = '0' + digit;
+   436→                buffer[1] = '0' + count - digit*10;
+   437→                buffer[2] = 0;
+   438→        } else { // 3 digits -> "99+"
+   439→                buffer[0] = buffer[1] = '9';
+   440→                buffer[2] = '+';
+   441→                buffer[3] = 0;
+   442→                return 3;
+   443→        }
+   444→        return 2;
+   445→}
+   446→
+   447→void Gui::tickItemDrop()
+   448→{
+   449→        // Handle item drop
+   450→        static bool isCurrentlyActive = false;
+   451→        isCurrentlyActive = false;
+   452→        if (Mouse::isButtonDown(MouseAction::ACTION_LEFT)) {
+   453→                int slot = getSlotIdAt(Mouse::getX(), Mouse::getY());
+   454→                if (slot >= 0 && slot < getNumSlots()-1) {
+   455→                        if (slot != _currentDropSlot) {
+   456→                                _currentDropTicks = 0;
+   457→                                _currentDropSlot = slot;
+   458→                        }
+   459→                        isCurrentlyActive = true;
+   460→                        if ((_currentDropTicks += 1.0f) >= DropTicks) {
+   461→                                minecraft->player->inventory->dropSlot(slot, false);
+   462→                                minecraft->level->playSound(minecraft->player, "random.pop", 0.3f, 1);
+   463→                                isCurrentlyActive = false;
+   464→                        }
+   465→                }
+   466→        }
+   467→        if (!isCurrentlyActive) {
+   468→                _currentDropSlot = -1;
+   469→                _currentDropTicks = -1;
+   470→        }
+   471→}
+   472→
+   473→void Gui::postError( int errCode )
+   474→{
+   475→        static std::set<int> posted;
+   476→        if (posted.find(errCode) != posted.end())
+   477→                return;
+   478→
+   479→        posted.insert(errCode);
+   480→
+   481→        std::stringstream s;
+   482→        s << "Something went wrong! (errcode " << errCode << ")\n";
+   483→        addMessage(s.str());
+   484→}
+   485→
+   486→void Gui::setScissorRect( const IntRectangle& bbox )
+   487→{
+   488→        GLuint x = (GLuint)(GuiScale * bbox.x);
+   489→        GLuint y = minecraft->height - (GLuint)(GuiScale * (bbox.y + bbox.h));
+   490→        GLuint w = (GLuint)(GuiScale * bbox.w);
+   491→        GLuint h = (GLuint)(GuiScale * bbox.h);
+   492→        glScissor(x, y, w, h);
+   493→}
+   494→
+   495→float Gui::cubeSmoothStep(float percentage, float min, float max) {
+   496→        //percentage = percentage * percentage;
+   497→        //return (min * percentage) + (max * (1 - percentage));
+   498→        return (percentage) * (percentage) * (3 - 2 * (percentage));
+   499→}
+   500→
+   501→void Gui::renderProgressIndicator( const bool isTouchInterface, const int screenWidth, const int screenHeight, float a ) {
+   502→        ItemInstance* currentItem = minecraft->player->inventory->getSelected();
+   503→        bool bowEquipped = currentItem != NULL ? currentItem->getItem() == Item::bow : false;
+   504→        bool itemInUse = currentItem != NULL ? currentItem->getItem() == minecraft->player->getUseItem()->getItem() : false;
+   505→        if (!isTouchInterface || minecraft->options.isJoyTouchArea || (bowEquipped && itemInUse)) {
+   506→                minecraft->textures->loadAndBindTexture("gui/icons.png");
+   507→                glEnable(GL_BLEND);
+   508→                glBlendFunc2(GL_ONE_MINUS_DST_COLOR, GL_ONE_MINUS_SRC_COLOR);
+   509→                blit(screenWidth/2 - 8, screenHeight/2 - 8, 0, 0, 16, 16);
+   510→                glDisable(GL_BLEND);
+   511→        } else if(!bowEquipped) {
+   512→                const float tprogress = minecraft->gameMode->destroyProgress;
+   513→                const float alpha = Mth::clamp(minecraft->inputHolder->alpha, 0.0f, 1.0f);
+   514→                //LOGI("alpha: %f\n", alpha);
+   515→
+   516→                if (tprogress <= 0 && minecraft->inputHolder->alpha >= 0) {
+   517→                        glDisable2(GL_TEXTURE_2D);
+   518→                        glEnable2(GL_BLEND);
+   519→                        glBlendFunc2(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+   520→                        if (minecraft->hitResult.isHit())
+   521→                                glColor4f2(1, 1, 1, 0.8f * alpha);
+   522→                        else
+   523→                                glColor4f2(1, 1, 1, Mth::Min(0.4f, alpha*0.4f));
+   524→
+   525→                        //LOGI("alpha2: %f\n", alpha);
+   526→                        const float x = InvGuiScale * minecraft->inputHolder->mousex;
+   527→                        const float y = InvGuiScale * minecraft->inputHolder->mousey;
+   528→                        glTranslatef2(x, y, 0);
+   529→                        drawArrayVT(rcFeedbackOuter.vboId, rcFeedbackOuter.vertexCount, 24);
+   530→                        glTranslatef2(-x, -y, 0);
+   531→
+   532→                        glEnable2(GL_TEXTURE_2D);
+   533→                        glDisable(GL_BLEND);
+   534→                } else if (tprogress > 0) {
+   535→                        const float oProgress = minecraft->gameMode->oDestroyProgress;
+   536→                        const float progress = 0.5f * (oProgress + (tprogress - oProgress) * a);
+   537→
+   538→                        //static Stopwatch w;
+   539→                        //w.start();
+   540→
+   541→                        glDisable2(GL_TEXTURE_2D);
+   542→                        glColor4f2(1, 1, 1, 0.8f * alpha);
+   543→                        glEnable(GL_BLEND);
+   544→                        glBlendFunc2(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+   545→
+   546→                        const float x = InvGuiScale * minecraft->inputHolder->mousex;
+   547→                        const float y = InvGuiScale * minecraft->inputHolder->mousey;
+   548→                        glPushMatrix2();
+   549→                        glTranslatef2(x, y, 0);
+   550→                        drawArrayVT(rcFeedbackOuter.vboId, rcFeedbackOuter.vertexCount, 24);
+   551→                        glScalef2(0.5f + progress, 0.5f + progress, 1);
+   552→                        //glDisable2(GL_CULL_FACE);
+   553→                        glColor4f2(1, 1, 1, 1);
+   554→                        glBlendFunc2(GL_ONE_MINUS_DST_COLOR, GL_ONE_MINUS_SRC_COLOR);
+   555→                        drawArrayVT(rcFeedbackInner.vboId, rcFeedbackInner.vertexCount, 24, GL_TRIANGLE_FAN);
+   556→                        glPopMatrix2();
+   557→
+   558→                        glDisable(GL_BLEND);
+   559→                        glEnable2(GL_TEXTURE_2D);
+   560→
+   561→                        //w.stop();
+   562→                        //w.printEvery(100, "feedback-r ");
+   563→                }
+   564→        }
+   565→}
+   566→
+   567→void Gui::renderHearts() {
+   568→        bool blink = (minecraft->player->invulnerableTime / 3) % 2 == 1;
+   569→        if (minecraft->player->invulnerableTime < 10) blink = false;
+   570→        int h = minecraft->player->health;
+   571→        int oh = minecraft->player->lastHealth;
+   572→        random.setSeed(tickCount * 312871);
+   573→
+   574→        int xx = 2;//screenWidth / 2 - getNumSlots() * 10;
+   575→
+   576→        int armor = minecraft->player->getArmorValue();
+   577→        for (int i = 0; i < Player::MAX_HEALTH / 2; i++) {
+   578→                int yo = 2;
+   579→                int ip2 = i + i + 1;
+   580→
+   581→                if (armor > 0) {
+   582→                    int xo = xx + 80 + i * 8 + 4;
+   583→                    if (ip2 < armor) blit(xo, yo, 16 + 2 * 9, 9 * 1, 9, 9);
+   584→                    else if (ip2 == armor) blit(xo, yo, 16 + 4 * 9, 9 * 1, 9, 9);
+   585→                    else if (ip2 > armor) blit(xo, yo, 16 + 0 * 9, 9 * 1, 9, 9);
+   586→                }
+   587→
+   588→                int bg = 0;
+   589→                if (blink) bg = 1;
+   590→                int xo = xx + i * 8;
+   591→                if (h <= 4) {
+   592→                        yo = yo + random.nextInt(2) - 1;
+   593→                }
+   594→                blit(xo, yo, 16 + bg * 9, 9 * 0, 9, 9);
+   595→                if (blink) {
+   596→                        if (ip2 < oh) blit(xo, yo, 16 + 6 * 9, 9 * 0, 9, 9);
+   597→                        else if (ip2 == oh) blit(xo, yo, 16 + 7 * 9, 9 * 0, 9, 9);
+   598→                }
+   599→                if (ip2 < h) blit(xo, yo, 16 + 4 * 9, 9 * 0, 9, 9);
+   600→                else if (ip2 == h) blit(xo, yo, 16 + 5 * 9, 9 * 0, 9, 9);
+   601→        }
+   602→}
+   603→
+   604→void Gui::renderBubbles() {
+   605→        if (minecraft->player->isUnderLiquid(Material::water)) {
+   606→                int yo = 12;
+   607→                int count = (int) std::ceil((minecraft->player->airSupply - 2) * 10.0f / Player::TOTAL_AIR_SUPPLY);
+   608→                int extra = (int) std::ceil((minecraft->player->airSupply) * 10.0f / Player::TOTAL_AIR_SUPPLY) - count;
+   609→                for (int i = 0; i < count + extra; i++) {
+   610→                        int xo =  i * 8 + 2;
+   611→                        if (i < count) blit(xo, yo, 16, 9 * 2, 9, 9);
+   612→                        else blit(xo, yo, 16 + 9, 9 * 2, 9, 9);
+   613→                }
+   614→        }
+   615→}
+   616→
+   617→static OffsetPosTranslator posTranslator;
+   618→void Gui::onLevelGenerated() {
+   619→        if (Level* level = minecraft->level) {
+   620→                Pos p = level->getSharedSpawnPos();
+   621→                posTranslator = OffsetPosTranslator((float)-p.x, (float)-p.y, (float)-p.z);
+   622→        }
+   623→}
+   624→
+   625→void Gui::renderDebugInfo() {
+   626→        static char buf[256];
+   627→        float xx = minecraft->player->x;
+   628→        float yy = minecraft->player->y - minecraft->player->heightOffset;
+   629→        float zz = minecraft->player->z;
+   630→        posTranslator.to(xx, yy, zz);
+   631→        sprintf(buf, "pos: %3.1f, %3.1f, %3.1f\n", xx, yy, zz);
+   632→        Tesselator& t = Tesselator::instance;
+   633→        t.beginOverride();
+   634→        t.scale2d(InvGuiScale, InvGuiScale);
+   635→        minecraft->font->draw(buf, 2, 2, 0xffffff);
+   636→        t.resetScale();
+   637→        t.endOverrideAndDraw();
+   638→}
+   639→
+   640→void Gui::renderSleepAnimation( const int screenWidth, const int screenHeight ) {
+   641→        int timer = minecraft->player->getSleepTimer();
+   642→        float amount = (float) timer / (float) Player::SLEEP_DURATION;
+   643→        if (amount > 1) {
+   644→                // waking up
+   645→                amount = 1.0f - ((float) (timer - Player::SLEEP_DURATION) / (float) Player::WAKE_UP_DURATION);
+   646→        }
+   647→
+   648→        int color = (int) (220.0f * amount) << 24 | (0x101020);
+   649→        fill(0, 0, screenWidth, screenHeight, color);
+   650→}
+   651→
+   652→void Gui::renderOnSelectItemNameText( const int screenWidth, Font* font, int ySlot ) {
+   653→        if(itemNameOverlayTime < 1.0f) {
+   654→                ItemInstance* item = minecraft->player->inventory->getSelected();
+   655→                if(item != NULL) {
+   656→                        float x = float(screenWidth / 2 - font->width(item->getName()) / 2);
+   657→                        float y = float(ySlot - 22);
+   658→                        int alpha = 255;
+   659→                        if(itemNameOverlayTime > 0.75) {
+   660→                                float time = 0.25f - (itemNameOverlayTime - 0.75f);
+   661→                                float percentage = cubeSmoothStep(time *  4, 0.0f, 1.0f);
+   662→                                alpha = int(percentage * 255);
+   663→                        }
+   664→                        if(alpha != 0)
+   665→                                font->drawShadow(item->getName(), x, y, 0x00ffffff + (alpha << 24));
+   666→                }
+   667→        }
+   668→}
+   669→
+   670→void Gui::renderChatMessages( const int screenHeight, unsigned int max, bool isChatting, Font* font ) {
+   671→        //        if (minecraft.screen instanceof ChatScreen) {
+   672→        //            max = 20;
+   673→        //            isChatting = true;
+   674→        //        }
+   675→        //
+   676→        //        glEnable(GL_BLEND);
+   677→        //        glBlendFunc2(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+   678→        //        glDisable(GL_ALPHA_TEST);
+   679→        //
+   680→        //        glPushMatrix2();
+   681→        //        glTranslatef2(0, screenHeight - 48, 0);
+   682→        //        // glScalef2(1.0f / ssc.scale, 1.0f / ssc.scale, 1);
+   683→        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+   684→        int baseY = screenHeight - 48;
+   685→        for (unsigned int i = 0; i < guiMessages.size() && i < max; i++) {
+   686→                if (guiMessages.at(i).ticks < 20 * 10 || isChatting) {
+   687→                        float t = guiMessages.at(i).ticks / (20 * 10.0f);
+   688→                        t = 1 - t;
+   689→                        t = t * 10;
+   690→                        if (t < 0) t = 0;
+   691→                        if (t > 1) t = 1;
+   692→                        t = t * t;
+   693→                        int alpha = (int) (255 * t);
+   694→                        if (isChatting) alpha = 255;
+   695→
+   696→                        if (alpha > 0) {
+   697→                                const float x = 2;
+   698→                                const float y = (float)(baseY - i * 9);
+   699→                                std::string msg = guiMessages.at(i).message;
+   700→                                this->fill(x, y - 1, x + MAX_MESSAGE_WIDTH, y + 8, (alpha / 2) << 24);
+   701→                                glEnable(GL_BLEND);
+   702→
+   703→                                font->drawShadow(msg, x, y, 0xffffff + (alpha << 24));
+   704→                        }
+   705→                }
+   706→        }
+   707→}
+   708→
+   709→void Gui::renderToolBar( float a, int ySlot, const int screenWidth ) {
+   710→        glColor4f2(1, 1, 1, .5);
+   711→        minecraft->textures->loadAndBindTexture("gui/gui.png");
+   712→
+   713→        Inventory* inventory = minecraft->player->inventory;
+   714→
+   715→        int xBase, yBase;
+   716→        getSlotPos(0, xBase, yBase);
+   717→        const float baseItemX = (float)xBase + 3;
+   718→        const int slotsWidth = 20 * getNumSlots();
+   719→        // Left + right side of the selection bar
+   720→        blit(xBase, yBase, 0, 0, slotsWidth, 22);
+   721→        blit(xBase + slotsWidth, yBase, 180, 0, 2, 22);
+   722→
+   723→        if (_currentDropSlot >= 0 && inventory->getItem(_currentDropSlot)) {
+   724→                int x = xBase + 3 +  _currentDropSlot * 20;
+   725→                int color = 0x8000ff00;
+   726→                int yy = (int)(17.0f * (_currentDropTicks + a) / DropTicks);
+   727→
+   728→                if (_currentDropTicks >= 3) {
+   729→                        glColor4f2(0, 1, 0, 0.5f);
+   730→                }
+   731→                fill(x, ySlot+16-yy, x+16, ySlot+16, color);
+   732→        }
+   733→        blit(xBase-1 + 20*inventory->selected, yBase - 1, 0, 22, 24, 22);
+   734→        glColor4f2(1, 1, 1, 1);
+   735→
+   736→        // Flash a slot background
+   737→        if (_flashSlotId >= 0) {
+   738→                const float since = getTimeS() - _flashSlotStartTime;
+   739→                if (since > 0.2f) _flashSlotId = -1;
+   740→                else {
+   741→                        int x = screenWidth / 2 - getNumSlots() * 10 + _flashSlotId * 20 + 2;
+   742→                        int color = 0xffffff + (((int)(/*0x80 * since +*/ 0x51 - 0x50 * Mth::cos(10 * 6.28f * since))) << 24);
+   743→                        //LOGI("Color: %.8x\n", color);
+   744→                        fill(x, ySlot, x+16, ySlot+16, color);
+   745→                }
+   746→        }
+   747→        glColor4f2(1, 1, 1, 1);
+   748→
+   749→        //static Stopwatch w;
+   750→        //w.start();
+   751→
+   752→        Tesselator& t = Tesselator::instance;
+   753→        t.beginOverride();
+   754→
+   755→        float x = baseItemX;
+   756→        for (int i = 0; i < getNumSlots()-1; i++) {
+   757→                renderSlot(i, (int)x, ySlot, a);
+   758→                x += 20;
+   759→        }
+   760→        _inventoryNeedsUpdate = false;
+   761→        //_inventoryRc = t.end(_inventoryRc.vboId);
+   762→
+   763→        //drawArrayVTC(_inventoryRc.vboId, _inventoryRc.vertexCount);
+   764→
+   765→        //renderSlotWatch.stop();
+   766→        //renderSlotWatch.printEvery(100, "Render slots:");
+   767→
+   768→        //int x = screenWidth / 2 + getNumSlots() * 10 + (getNumSlots()-1) * 20 + 2;
+   769→        blit(screenWidth / 2 + 10 * getNumSlots() - 20 + 4, ySlot + 6, 242, 252, 14, 4, 14, 4);
+   770→
+   771→        minecraft->textures->loadAndBindTexture("gui/gui_blocks.png");
+   772→        t.endOverrideAndDraw();
+   773→
+   774→        // Render damaged items (@todo: investigate if it's faster by drawing in same batch)
+   775→        glDisable2(GL_DEPTH_TEST);
+   776→        glDisable2(GL_TEXTURE_2D);
+   777→        t.beginOverride();
+   778→        x = baseItemX;
+   779→        for (int i = 0; i < getNumSlots()-1; i++) {
+   780→                ItemRenderer::renderGuiItemDecorations(minecraft->player->inventory->getItem(i), x, (float)ySlot);
+   781→                x += 20;
+   782→        }
+   783→        t.endOverrideAndDraw();
+   784→        glEnable(GL_DEPTH_TEST);
+   785→        glEnable(GL_TEXTURE_2D);
+   786→
+   787→        //w.stop();
+   788→        //w.printEvery(100, "gui-slots");
+   789→
+   790→        // Draw count
+   791→        //Tesselator& t = Tesselator::instance;
+   792→        glPushMatrix2();
+   793→        glScalef2(InvGuiScale + InvGuiScale, InvGuiScale + InvGuiScale, 1);
+   794→        const float k = 0.5f * GuiScale;
+   795→
+   796→        t.beginOverride();
+   797→        if (minecraft->gameMode->isSurvivalType()) {
+   798→                x = baseItemX;
+   799→                for (int i = 0; i < getNumSlots()-1; i++) {
+   800→                        ItemInstance* item = minecraft->player->inventory->getItem(i);
+   801→                        if (item && item->count >= 0)
+   802→                                renderSlotText(item, k*x, k*ySlot + 1, true, true);
+   803→                        x += 20;
+   804→                }
+   805→        }
+   806→        minecraft->textures->loadAndBindTexture("font/default8.png");
+   807→        t.endOverrideAndDraw();
+   808→
+   809→        glPopMatrix2();
+   810→}
+   811→

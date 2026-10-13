@@ -1,0 +1,724 @@
+     1→#include "RandomLevelSource.h"
+     2→
+     3→#include "feature/FeatureInclude.h"
+     4→#include "../Level.h"
+     5→#include "../ChunkPos.h"
+     6→#include "../MobSpawner.h"
+     7→#include "../biome/Biome.h"
+     8→#include "../biome/BiomeSource.h"
+     9→#include "../chunk/LevelChunk.h"
+    10→#include "../material/Material.h"
+    11→#include "../tile/Tile.h"
+    12→#include "../tile/HeavyTile.h"
+    13→#include "../../../util/Random.h"
+    14→
+    15→const float RandomLevelSource::SNOW_CUTOFF = 0.5f;
+    16→const float RandomLevelSource::SNOW_SCALE = 0.3f;
+    17→static const int MAX_BUFFER_SIZE = 1024;
+    18→
+    19→RandomLevelSource::RandomLevelSource(Level* level, long seed, int version, bool spawnMobs)
+    20→:       random(seed),
+    21→        level(level),
+    22→        lperlinNoise1(&random, 16),
+    23→        lperlinNoise2(&random, 16),
+    24→        perlinNoise1(&random, 8),
+    25→        perlinNoise2(&random, 4),
+    26→        perlinNoise3(&random, 4),
+    27→        scaleNoise(&random, 10),
+    28→        depthNoise(&random, 16),
+    29→        forestNoise(&random, 8),
+    30→        spawnMobs(spawnMobs),
+    31→        pnr(NULL), ar(NULL), br(NULL), sr(NULL), dr(NULL), fi(NULL), fis(NULL)
+    32→        //biomes(NULL)
+    33→{
+    34→        for (int i=0; i<32; ++i)
+    35→        for (int j=0; j<32; ++j)
+    36→                waterDepths[i][j] = 0;
+    37→
+    38→        buffer = new float[MAX_BUFFER_SIZE];
+    39→
+    40→        Random randomCopy = random;
+    41→        printf("random.get : %d\n", randomCopy.nextInt());
+    42→}
+    43→
+    44→RandomLevelSource::~RandomLevelSource() {
+    45→
+    46→        // chunks are deleted in the chunk cache instead
+    47→        //ChunkMap::iterator it = chunkMap.begin();
+    48→        //while (it != chunkMap.end()) {
+    49→        //      it->second->deleteBlockData(); //@attn: we delete the block data here, for now
+    50→        //      delete it->second;
+    51→        //      ++it;
+    52→        //}
+    53→
+    54→        delete[] buffer;
+    55→        delete[] pnr;
+    56→        delete[] ar;
+    57→        delete[] br;
+    58→        delete[] sr;
+    59→        delete[] dr;
+    60→        delete[] fi;
+    61→        delete[] fis;
+    62→}
+    63→
+    64→/*public*/
+    65→void RandomLevelSource::prepareHeights(int xOffs, int zOffs, unsigned char* blocks, /*Biome*/void* biomes, float* temperatures) {
+    66→        
+    67→        int xChunks = 16 / CHUNK_WIDTH;
+    68→    int waterHeight = Level::DEPTH - 64;
+    69→
+    70→    int xSize = xChunks + 1;
+    71→    int ySize = 128 / CHUNK_HEIGHT + 1;
+    72→    int zSize = xChunks + 1;
+    73→    buffer = getHeights(buffer, xOffs * xChunks, 0, zOffs * xChunks, xSize, ySize, zSize);
+    74→
+    75→    for (int xc = 0; xc < xChunks; xc++) {
+    76→        for (int zc = 0; zc < xChunks; zc++) {
+    77→            for (int yc = 0; yc < 128 / CHUNK_HEIGHT; yc++) {
+    78→                float yStep = 1 / (float) CHUNK_HEIGHT;
+    79→                float s0 = buffer[((xc + 0) * zSize + (zc + 0)) * ySize + (yc + 0)];
+    80→                float s1 = buffer[((xc + 0) * zSize + (zc + 1)) * ySize + (yc + 0)];
+    81→                float s2 = buffer[((xc + 1) * zSize + (zc + 0)) * ySize + (yc + 0)];
+    82→                float s3 = buffer[((xc + 1) * zSize + (zc + 1)) * ySize + (yc + 0)];
+    83→
+    84→                float s0a = (buffer[((xc + 0) * zSize + (zc + 0)) * ySize + (yc + 1)] - s0) * yStep;
+    85→                float s1a = (buffer[((xc + 0) * zSize + (zc + 1)) * ySize + (yc + 1)] - s1) * yStep;
+    86→                float s2a = (buffer[((xc + 1) * zSize + (zc + 0)) * ySize + (yc + 1)] - s2) * yStep;
+    87→                float s3a = (buffer[((xc + 1) * zSize + (zc + 1)) * ySize + (yc + 1)] - s3) * yStep;
+    88→
+    89→                for (int y = 0; y < CHUNK_HEIGHT; y++) {
+    90→                    float xStep = 1 / (float) CHUNK_WIDTH;
+    91→
+    92→                    float _s0 = s0;
+    93→                    float _s1 = s1;
+    94→                    float _s0a = (s2 - s0) * xStep;
+    95→                    float _s1a = (s3 - s1) * xStep;
+    96→
+    97→                    for (int x = 0; x < CHUNK_WIDTH; x++) {
+    98→                        int offs = (x + xc * CHUNK_WIDTH) << 11 | (0 + zc * CHUNK_WIDTH) << 7 | (yc * CHUNK_HEIGHT + y);
+    99→                        int step = 1 << 7;
+   100→                        float zStep = 1 / (float) CHUNK_WIDTH;
+   101→
+   102→                        float val = _s0;
+   103→                        float vala = (_s1 - _s0) * zStep;
+   104→                        for (int z = 0; z < CHUNK_WIDTH; z++) {
+   105→// + (zc * CHUNK_WIDTH + z)];
+   106→                            float temp = temperatures[(xc * CHUNK_WIDTH + x) * 16 + (zc * CHUNK_WIDTH + z)];
+   107→                            int tileId = 0;
+   108→                            if (yc * CHUNK_HEIGHT + y < waterHeight) {
+   109→                                if (temp < SNOW_CUTOFF && yc * CHUNK_HEIGHT + y >= waterHeight - 1) {
+   110→                                    tileId = Tile::ice->id;
+   111→                                } else {
+   112→                                    tileId = Tile::calmWater->id;
+   113→                                }
+   114→                            }
+   115→                            if (val > 0) {
+   116→                                tileId = Tile::rock->id;
+   117→                            } else {
+   118→                            }
+   119→
+   120→                            blocks[offs] = (unsigned char) tileId;
+   121→                            offs += step;
+   122→                            val += vala;
+   123→                        }
+   124→                        _s0 += _s0a;
+   125→                        _s1 += _s1a;
+   126→                    }
+   127→
+   128→                    s0 += s0a;
+   129→                    s1 += s1a;
+   130→                    s2 += s2a;
+   131→                    s3 += s3a;
+   132→                }
+   133→            }
+   134→        }
+   135→    }
+   136→}
+   137→
+   138→void RandomLevelSource::buildSurfaces(int xOffs, int zOffs, unsigned char* blocks, Biome** biomes) {
+   139→    int waterHeight = Level::DEPTH - 64;
+   140→
+   141→    float s = 1 / 32.0f;
+   142→    perlinNoise2.getRegion(sandBuffer, (float)(xOffs * 16), (float)(zOffs * 16), 0, 16, 16, 1, s, s, 1);
+   143→    perlinNoise2.getRegion(gravelBuffer, (float)(xOffs * 16), 109.01340f, (float)(zOffs * 16), 16, 1, 16, s, 1, s);
+   144→    perlinNoise3.getRegion(depthBuffer, (float)(xOffs * 16), (float)(zOffs * 16), 0, 16, 16, 1, s * 2, s * 2, s * 2);
+   145→
+   146→    for (int x = 0; x < 16; x++) {
+   147→        for (int z = 0; z < 16; z++) {
+   148→                        float temp = 1; // @todo: read temp from BiomeSource
+   149→            Biome* b = biomes[x + z * 16];
+   150→            bool sand = (sandBuffer[x + z * 16] + random.nextFloat() * 0.2f) > 0;
+   151→            bool gravel = (gravelBuffer[x + z * 16] + random.nextFloat() * 0.2f) > 3;
+   152→            int runDepth = (int) (depthBuffer[x + z * 16] / 3 + 3 + random.nextFloat() * 0.25f);
+   153→
+   154→            int run = -1;
+   155→
+   156→                        char top = b->topMaterial;
+   157→            char material = b->material;
+   158→
+   159→            for (int y = 127; y >= 0; y--) {
+   160→                int offs = (z * 16 + x) * 128 + y;
+   161→
+   162→                if (y <= 0 + random.nextInt(5)) {
+   163→                    blocks[offs] = (char) Tile::unbreakable->id;
+   164→                } else {
+   165→                    int old = blocks[offs];
+   166→
+   167→                    if (old == 0) {
+   168→                        run = -1;
+   169→                    } else if (old == Tile::rock->id) {
+   170→                        if (run == -1) {
+   171→                            if (runDepth <= 0) {
+   172→                                top = 0;
+   173→                                material = (char) Tile::rock->id;
+   174→                            } else if (y >= waterHeight - 4 && y <= waterHeight + 1) {
+   175→                                top = b->topMaterial;
+   176→                                                                material = b->material;
+   177→                                                                
+   178→                                                                //@attn: ?
+   179→                                if (gravel) {
+   180→                                                                        top = 0;
+   181→                                                                        material = (char) Tile::gravel->id;
+   182→                                                                }
+   183→                                if (sand) {
+   184→                                                                        top = (char) Tile::sand->id;
+   185→                                                                        material = (char) Tile::sand->id;
+   186→                                                                }
+   187→                            }
+   188→
+   189→                            if (y < waterHeight && top == 0) {
+   190→                                                                if (temp < 0.15f)
+   191→                                                                        top = (char) Tile::ice->id;
+   192→                                                                else
+   193→                                                                        top = (char) Tile::calmWater->id;
+   194→                                                        }
+   195→
+   196→                            run = runDepth;
+   197→                            if (y >= waterHeight - 1) blocks[offs] = top;
+   198→                            else blocks[offs] = material;
+   199→                        } else if (run > 0) {
+   200→                            run--;
+   201→                            blocks[offs] = material;
+   202→
+   203→                            // place a few sandstone blocks beneath sand
+   204→                            // runs
+   205→                            if (run == 0 && material == Tile::sand->id) {
+   206→                                run = random.nextInt(4);
+   207→                                material = (char) Tile::sandStone->id;
+   208→                            }
+   209→                        }
+   210→                    }
+   211→                }
+   212→            }
+   213→        }
+   214→    }
+   215→}
+   216→
+   217→
+   218→/*public*/
+   219→void RandomLevelSource::postProcess(ChunkSource* parent, int xt, int zt) {
+   220→
+   221→        level->isGeneratingTerrain = true;
+   222→
+   223→    HeavyTile::instaFall = true;
+   224→    int xo = xt * 16;
+   225→    int zo = zt * 16;
+   226→
+   227→    Biome* biome = level->getBiomeSource()->getBiome(xo + 16, zo + 16);
+   228→    //    Biome* biome = Biome::forest;
+   229→
+   230→    random.setSeed(level->getSeed());
+   231→    int xScale = random.nextInt() / 2 * 2 + 1;
+   232→    int zScale = random.nextInt() / 2 * 2 + 1;
+   233→    random.setSeed(((xt * xScale) + (zt * zScale)) ^ level->getSeed());
+   234→
+   235→        // //@todo: hide those chunks if they are aren't visible
+   236→//    if (random.nextInt(4) == 0) {
+   237→//        int x = xo + random.nextInt(16) + 8;
+   238→//        int y = random.nextInt(128);
+   239→//        int z = zo + random.nextInt(16) + 8;
+   240→//        LakeFeature feature(Tile::calmWater->id);
+   241→//              feature.place(level, &random, x, y, z);
+   242→//        LOGI("Adding underground lake @ (%d,%d,%d)\n", x, y, z);
+   243→//    }
+   244→
+   245→        ////@todo: hide those chunks if they are aren't visible
+   246→ //   if (random.nextInt(8) == 0) {
+   247→ //       int x = xo + random.nextInt(16) + 8;
+   248→ //       int y = random.nextInt(random.nextInt(120) + 8);
+   249→ //       int z = zo + random.nextInt(16) + 8;
+   250→ //       if (y < 64 || random.nextInt(10) == 0) {
+   251→        //              LakeFeature feature(Tile::calmLava->id);
+   252→        //              feature.place(level, &random, x, y, z);
+   253→        //      }
+   254→ //   }
+   255→
+   256→        static float totalTime = 0;
+   257→        const float st = getTimeS();
+   258→
+   259→    //for (int i = 0; i < 8; i++) {
+   260→    //    int x = xo + random.nextInt(16) + 8;
+   261→    //    int y = random.nextInt(128);
+   262→    //    int z = zo + random.nextInt(16) + 8;
+   263→    //    MonsterRoomFeature().place(level, random, x, y, z);
+   264→    //}
+   265→
+   266→    for (int i = 0; i < 10; i++) {
+   267→        int x = xo + random.nextInt(16);
+   268→        int y = random.nextInt(128);
+   269→        int z = zo + random.nextInt(16);
+   270→        ClayFeature feature(32);
+   271→                feature.place(level, &random, x, y, z);
+   272→    }
+   273→
+   274→    for (int i = 0; i < 20; i++) {
+   275→        int x = xo + random.nextInt(16);
+   276→        int y = random.nextInt(128);
+   277→        int z = zo + random.nextInt(16);
+   278→        OreFeature feature(Tile::dirt->id, 32);
+   279→                feature.place(level, &random, x, y, z);
+   280→    }
+   281→
+   282→    for (int i = 0; i < 10; i++) {
+   283→        int x = xo + random.nextInt(16);
+   284→        int y = random.nextInt(128);
+   285→        int z = zo + random.nextInt(16);
+   286→        OreFeature feature(Tile::gravel->id, 32);
+   287→                feature.place(level, &random, x, y, z);
+   288→    }
+   289→
+   290→    for (int i = 0; i < 20; i++) {
+   291→        int x = xo + random.nextInt(16);
+   292→        int y = random.nextInt(128);
+   293→        int z = zo + random.nextInt(16);
+   294→        OreFeature feature(Tile::coalOre->id, 16);
+   295→                feature.place(level, &random, x, y, z);
+   296→    }
+   297→
+   298→    for (int i = 0; i < 20; i++) {
+   299→        int x = xo + random.nextInt(16);
+   300→        int y = random.nextInt(64);
+   301→        int z = zo + random.nextInt(16);
+   302→        OreFeature feature(Tile::ironOre->id, 8);
+   303→                feature.place(level, &random, x, y, z);
+   304→    }
+   305→
+   306→    for (int i = 0; i < 2; i++) {
+   307→        int x = xo + random.nextInt(16);
+   308→        int y = random.nextInt(32);
+   309→        int z = zo + random.nextInt(16);
+   310→        OreFeature feature(Tile::goldOre->id, 8);
+   311→                feature.place(level, &random, x, y, z);
+   312→    }
+   313→
+   314→    for (int i = 0; i < 8; i++) {
+   315→        int x = xo + random.nextInt(16);
+   316→        int y = random.nextInt(16);
+   317→        int z = zo + random.nextInt(16);
+   318→        OreFeature feature(Tile::redStoneOre->id, 7);
+   319→                feature.place(level, &random, x, y, z);
+   320→    }
+   321→
+   322→    for (int i = 0; i < 1; i++) {
+   323→        int x = xo + random.nextInt(16);
+   324→        int y = random.nextInt(16);
+   325→        int z = zo + random.nextInt(16);
+   326→        OreFeature feature(Tile::emeraldOre->id, 7);
+   327→                feature.place(level, &random, x, y, z);
+   328→    }
+   329→
+   330→    // lapis ore
+   331→    for (int i = 0; i < 1; i++) {
+   332→        int x = xo + random.nextInt(16);
+   333→        int y = random.nextInt(16) + random.nextInt(16);
+   334→        int z = zo + random.nextInt(16);
+   335→        OreFeature feature(Tile::lapisOre->id, 6);
+   336→                feature.place(level, &random, x, y, z);
+   337→    }
+   338→
+   339→    const float ss = 0.5f;
+   340→    int oFor = (int) ((forestNoise.getValue(xo * ss, zo * ss) / 8 + random.nextFloat() * 4 + 4) / 3);
+   341→    int forests = 0;//1; (java: 0)
+   342→    if (random.nextInt(10) == 0) forests += 1;
+   343→
+   344→    if (biome == Biome::forest) forests += oFor + 2; // + 5
+   345→    if (biome == Biome::rainForest) forests += oFor + 2; //+ 5
+   346→    if (biome == Biome::seasonalForest) forests += oFor + 1; // 2
+   347→    if (biome == Biome::taiga) {
+   348→                forests += oFor + 1; // + 5
+   349→                //LOGI("Biome is taiga!\n");
+   350→        }
+   351→
+   352→    if (biome == Biome::desert) forests -= 20;
+   353→    if (biome == Biome::tundra) forests -= 20;
+   354→    if (biome == Biome::plains) forests -= 20;
+   355→
+   356→    for (int i = 0; i < forests; i++) {
+   357→        int x = xo + random.nextInt(16) + 8;
+   358→        int z = zo + random.nextInt(16) + 8;
+   359→                int y = level->getHeightmap(x, z);
+   360→        Feature* tree = biome->getTreeFeature(&random);
+   361→                if (tree) {
+   362→                tree->init(1, 1, 1);
+   363→                    tree->place(level, &random, x, y, z);
+   364→                        delete tree;
+   365→                }
+   366→                //printf("placing tree at %d, %d, %d\n", x, y, z);
+   367→    }
+   368→
+   369→    for (int i = 0; i < 2; i++) {
+   370→        int x = xo + random.nextInt(16) + 8;
+   371→        int y = random.nextInt(128);
+   372→        int z = zo + random.nextInt(16) + 8;
+   373→        FlowerFeature feature(Tile::flower->id);
+   374→                feature.place(level, &random, x, y, z);
+   375→    }
+   376→
+   377→    if (random.nextInt(2) == 0) {
+   378→        int x = xo + random.nextInt(16) + 8;
+   379→        int y = random.nextInt(128);
+   380→        int z = zo + random.nextInt(16) + 8;
+   381→                FlowerFeature feature(Tile::rose->id);
+   382→        feature.place(level, &random, x, y, z);
+   383→    }
+   384→
+   385→    if (random.nextInt(4) == 0) {
+   386→        int x = xo + random.nextInt(16) + 8;
+   387→        int y = random.nextInt(128);
+   388→        int z = zo + random.nextInt(16) + 8;
+   389→        FlowerFeature feature(Tile::mushroom1->id);
+   390→                feature.place(level, &random, x, y, z);
+   391→    }
+   392→
+   393→    if (random.nextInt(8) == 0) {
+   394→        int x = xo + random.nextInt(16) + 8;
+   395→        int y = random.nextInt(128);
+   396→        int z = zo + random.nextInt(16) + 8;
+   397→        FlowerFeature feature(Tile::mushroom2->id);
+   398→                feature.place(level, &random, x, y, z);
+   399→    }
+   400→        /*int grassCount = 1;
+   401→        for (int i = 0; i < grassCount; i++) {
+   402→                int x = xo + random.nextInt(16) + 8;
+   403→                int y = random.nextInt(Level::genDepth);
+   404→                int z = zo + random.nextInt(16) + 8;
+   405→                Feature* grassFeature = biome->getGrassFeature(&random);
+   406→                if (grassFeature) {
+   407→                        grassFeature->place(level, &random, x, y, z);
+   408→                        delete grassFeature;
+   409→                }
+   410→        }*/
+   411→    for (int i = 0; i < 10; i++) {
+   412→        int x = xo + random.nextInt(16) + 8;
+   413→        int y = random.nextInt(128);
+   414→        int z = zo + random.nextInt(16) + 8;
+   415→        ReedsFeature feature;
+   416→                feature.place(level, &random, x, y, z);
+   417→    }
+   418→        
+   419→
+   420→    //if (random.nextInt(32) == 0) {
+   421→    //    int x = xo + random.nextInt(16) + 8;
+   422→    //    int y = random.nextInt(128);
+   423→    //    int z = zo + random.nextInt(16) + 8;
+   424→    //    PumpkinFeature().place(level, random, x, y, z);
+   425→    //}
+   426→
+   427→    int cacti = 0;
+   428→    if (biome == Biome::desert) cacti += 5;
+   429→
+   430→    for (int i = 0; i < cacti; i++) {
+   431→        int x = xo + random.nextInt(16) + 8;
+   432→        int y = random.nextInt(128);
+   433→        int z = zo + random.nextInt(16) + 8;
+   434→        CactusFeature feature;
+   435→        //LOGI("Tried creating a cactus at %d, %d, %d\n", x, y, z);
+   436→        feature.place(level, &random, x, y, z);
+   437→    }
+   438→
+   439→    for (int i = 0; i < 50; i++) {
+   440→        int x = xo + random.nextInt(16) + 8;
+   441→        int y = random.nextInt(random.nextInt(120) + 8);
+   442→        int z = zo + random.nextInt(16) + 8;
+   443→        SpringFeature feature(Tile::water->id);
+   444→                feature.place(level, &random, x, y, z);
+   445→    }
+   446→
+   447→    for (int i = 0; i < 20; i++) {
+   448→        int x = xo + random.nextInt(16) + 8;
+   449→        int y = random.nextInt(random.nextInt(random.nextInt(112) + 8) + 8);
+   450→        int z = zo + random.nextInt(16) + 8;
+   451→        SpringFeature feature(Tile::lava->id);
+   452→                feature.place(level, &random, x, y, z);
+   453→    }
+   454→
+   455→        if (spawnMobs && !level->isClientSide)
+   456→                MobSpawner::postProcessSpawnMobs(level, biome, xo + 8, zo + 8, 16, 16, &random);
+   457→
+   458→        //LOGI("Reading temp: 1\n");
+   459→    float* temperatures = level->getBiomeSource()->getTemperatureBlock(/*NULL,*/ xo + 8, zo + 8, 16, 16);
+   460→    for (int x = xo + 8; x < xo + 8 + 16; x++)
+   461→        for (int z = zo + 8; z < zo + 8 + 16; z++) {
+   462→            int xp = x - (xo + 8);
+   463→            int zp = z - (zo + 8); 
+   464→            int y = level->getTopSolidBlock(x, z);
+   465→            float temp = temperatures[xp * 16 + zp] - (y - 64) / 64.0f * SNOW_SCALE;
+   466→            if (temp < SNOW_CUTOFF) {
+   467→                if (y > 0 && y < 128 && level->isEmptyTile(x, y, z) && level->getMaterial(x, y - 1, z)->blocksMotion()) {
+   468→                    if (level->getMaterial(x, y - 1, z) != Material::ice) level->setTile(x, y, z, Tile::topSnow->id);
+   469→                }
+   470→            }
+   471→        }
+   472→        //LOGI("Reading temp: 0 END\n");
+   473→
+   474→        const float et = getTimeS();
+   475→        totalTime += (et-st);
+   476→
+   477→        //printf("Time to place features: %f. Total %f\n", et - st, totalTime);
+   478→
+   479→    HeavyTile::instaFall = false;
+   480→
+   481→        level->isGeneratingTerrain = false;
+   482→}
+   483→
+   484→LevelChunk* RandomLevelSource::create(int x, int z) {
+   485→    return getChunk(x, z);
+   486→}
+   487→
+   488→LevelChunk* RandomLevelSource::getChunk(int xOffs, int zOffs) {
+   489→        //static int chunkx = 0;
+   490→        int hashedPos = ChunkPos::hashCode(xOffs, zOffs);
+   491→
+   492→        ChunkMap::iterator it = chunkMap.find(hashedPos);
+   493→        if (it != chunkMap.end())
+   494→                return it->second;
+   495→
+   496→    random.setSeed((long)(xOffs * 341872712l + zOffs * 132899541l)); //@fix
+   497→
+   498→    unsigned char* blocks = new unsigned char[LevelChunk::ChunkBlockCount];
+   499→    LevelChunk* levelChunk = new LevelChunk(level, blocks, xOffs, zOffs);
+   500→        chunkMap.insert(std::make_pair(hashedPos, levelChunk));
+   501→
+   502→        Biome** biomes = level->getBiomeSource()->getBiomeBlock(/*biomes, */xOffs * 16, zOffs * 16, 16, 16);
+   503→    float* temperatures = level->getBiomeSource()->temperatures;
+   504→    prepareHeights(xOffs, zOffs, blocks, 0, temperatures);//biomes, temperatures);
+   505→    buildSurfaces(xOffs, zOffs, blocks, biomes);
+   506→
+   507→        //caveFeature.apply(this, level, xOffs, zOffs, blocks, LevelChunk::ChunkBlockCount);
+   508→    levelChunk->recalcHeightmap();
+   509→
+   510→    return levelChunk;
+   511→}
+   512→
+   513→/*private*/
+   514→float* RandomLevelSource::getHeights(float* buffer, int x, int y, int z, int xSize, int ySize, int zSize) {
+   515→        const int size = xSize * ySize * zSize;
+   516→        if (size > MAX_BUFFER_SIZE) {
+   517→                LOGI("RandomLevelSource::getHeights: TOO LARGE BUFFER REQUESTED: %d (max %d)\n", size, MAX_BUFFER_SIZE);
+   518→        }
+   519→
+   520→    float s = 1 * 684.412f;
+   521→    float hs = 1 * 684.412f;
+   522→
+   523→    float* temperatures = level->getBiomeSource()->temperatures;
+   524→    float* downfalls = level->getBiomeSource()->downfalls;
+   525→    sr = scaleNoise.getRegion(sr, x, z, xSize, zSize, 1.121f, 1.121f, 0.5f);
+   526→    dr = depthNoise.getRegion(dr, x, z, xSize, zSize, 200.0f, 200.0f, 0.5f);
+   527→
+   528→    pnr = perlinNoise1.getRegion(pnr, (float)x, (float)y, (float)z, xSize, ySize, zSize, s / 80.0f, hs / 160.0f, s / 80.0f);
+   529→    ar = lperlinNoise1.getRegion(ar, (float)x, (float)y, (float)z, xSize, ySize, zSize, s, hs, s);
+   530→    br = lperlinNoise2.getRegion(br, (float)x, (float)y, (float)z, xSize, ySize, zSize, s, hs, s);
+   531→
+   532→    int p = 0;
+   533→    int pp = 0;
+   534→
+   535→    int wScale = 16 / xSize;
+   536→    for (int xx = 0; xx < xSize; xx++) {
+   537→        int xp = xx * wScale + wScale / 2;
+   538→
+   539→        for (int zz = 0; zz < zSize; zz++) {
+   540→            int zp = zz * wScale + wScale / 2;
+   541→            float temperature = temperatures[xp * 16 + zp];
+   542→            float downfall = downfalls[xp * 16 + zp] * temperature;
+   543→            float dd = 1 - downfall;
+   544→            dd = dd * dd;
+   545→            dd = dd * dd;
+   546→            dd = 1 - dd;
+   547→
+   548→            float scale = ((sr[pp] + 256.0f) / 512);
+   549→            scale *= dd;
+   550→            if (scale > 1) scale = 1;
+   551→
+   552→
+   553→            float depth = (dr[pp] / 8000.0f);
+   554→            if (depth < 0) depth = -depth * 0.3f;
+   555→            depth = depth * 3.0f - 2.0f;
+   556→
+   557→            if (depth < 0) {
+   558→                depth = depth / 2;
+   559→                if (depth < -1) depth = -1;
+   560→                depth = depth / 1.4f;
+   561→                depth /= 2;
+   562→                scale = 0;
+   563→            } else {
+   564→                if (depth > 1) depth = 1;
+   565→                depth = depth / 8;
+   566→            }
+   567→
+   568→            if (scale < 0) scale = 0;
+   569→            scale = (scale) + 0.5f;
+   570→            depth = depth * ySize / 16;
+   571→
+   572→            float yCenter = ySize / 2.0f + depth * 4;
+   573→
+   574→            pp++;
+   575→
+   576→            for (int yy = 0; yy < ySize; yy++) {
+   577→                float val = 0;
+   578→
+   579→                float yOffs = (yy - (yCenter)) * 12 / scale;
+   580→                if (yOffs < 0) yOffs *= 4;
+   581→
+   582→                float bb = ar[p] / 512;
+   583→                float cc = br[p] / 512;
+   584→
+   585→                float v = (pnr[p] / 10 + 1) / 2;
+   586→                if (v < 0) val = bb;
+   587→                else if (v > 1) val = cc;
+   588→                else val = bb + (cc - bb) * v;
+   589→                val -= yOffs;
+   590→
+   591→                if (yy > ySize - 4) {
+   592→                    float slide = (yy - (ySize - 4)) / (4 - 1.0f);
+   593→                    val = val * (1 - slide) + -10 * slide;
+   594→                }
+   595→
+   596→                buffer[p] = val;
+   597→                p++;
+   598→            }
+   599→        }
+   600→    }
+   601→    return buffer;
+   602→}
+   603→
+   604→/*private*/
+   605→void RandomLevelSource::calcWaterDepths(ChunkSource* parent, int xt, int zt) {
+   606→    int xo = xt * 16;
+   607→    int zo = zt * 16;
+   608→    for (int x = 0; x < 16; x++) {
+   609→        int y = level->getSeaLevel();
+   610→        for (int z = 0; z < 16; z++) {
+   611→            int xp = xo + x + 7;
+   612→            int zp = zo + z + 7;
+   613→            int h = level->getHeightmap(xp, zp);
+   614→            if (h <= 0) {
+   615→                if (level->getHeightmap(xp - 1, zp) > 0 || level->getHeightmap(xp + 1, zp) > 0 || level->getHeightmap(xp, zp - 1) > 0 || level->getHeightmap(xp, zp + 1) > 0) {
+   616→                    bool hadWater = false;
+   617→                    if (hadWater || (level->getTile(xp - 1, y, zp) == Tile::calmWater->id && level->getData(xp - 1, y, zp) < 7)) hadWater = true;
+   618→                    if (hadWater || (level->getTile(xp + 1, y, zp) == Tile::calmWater->id && level->getData(xp + 1, y, zp) < 7)) hadWater = true;
+   619→                    if (hadWater || (level->getTile(xp, y, zp - 1) == Tile::calmWater->id && level->getData(xp, y, zp - 1) < 7)) hadWater = true;
+   620→                    if (hadWater || (level->getTile(xp, y, zp + 1) == Tile::calmWater->id && level->getData(xp, y, zp + 1) < 7)) hadWater = true;
+   621→                    if (hadWater) {
+   622→                        for (int x2 = -5; x2 <= 5; x2++) {
+   623→                            for (int z2 = -5; z2 <= 5; z2++) {
+   624→                                int d = (x2 > 0 ? x2 : -x2) + (z2 > 0 ? z2 : -z2);
+   625→
+   626→                                if (d <= 5) {
+   627→                                    d = 6 - d;
+   628→                                    if (level->getTile(xp + x2, y, zp + z2) == Tile::calmWater->id) {
+   629→                                        int od = level->getData(xp + x2, y, zp + z2);
+   630→                                        if (od < 7 && od < d) {
+   631→                                            level->setData(xp + x2, y, zp + z2, d);
+   632→                                        }
+   633→                                    }
+   634→                                }
+   635→                            }
+   636→                        }
+   637→                        if (hadWater) {
+   638→                            level->setTileAndDataNoUpdate(xp, y, zp, Tile::calmWater->id, 7);
+   639→                            for (int y2 = 0; y2 < y; y2++) {
+   640→                                level->setTileAndDataNoUpdate(xp, y2, zp, Tile::calmWater->id, 8);
+   641→                            }
+   642→                        }
+   643→                    }
+   644→                }
+   645→            }
+   646→        }
+   647→    }
+   648→}
+   649→
+   650→bool RandomLevelSource::hasChunk(int x, int y) {
+   651→    //return x >= 0 && x < 16 && y >= 0 && y < 16;
+   652→        return true;
+   653→}
+   654→
+   655→bool RandomLevelSource::tick() {
+   656→        return false;
+   657→}
+   658→
+   659→bool RandomLevelSource::shouldSave() {
+   660→        return true;
+   661→}
+   662→
+   663→std::string RandomLevelSource::gatherStats() {
+   664→        return "RandomLevelSource";
+   665→}
+   666→
+   667→//bool RandomLevelSource::save(bool force, ProgressListener progressListener) {
+   668→//    return true;
+   669→//}
+   670→
+   671→Biome::MobList RandomLevelSource::getMobsAt(const MobCategory& mobCategory, int x, int y, int z) {
+   672→    BiomeSource* biomeSource = level->getBiomeSource();
+   673→    if (biomeSource == NULL) {
+   674→        return Biome::MobList();
+   675→    }
+   676→//    static Stopwatch sw; sw.start();
+   677→    Biome* biome = biomeSource->getBiome(x, z);
+   678→//    sw.stop();
+   679→//    sw.printEvery(10, "getBiome::");
+   680→    if (biome == NULL) {
+   681→        return Biome::MobList();
+   682→    }
+   683→    return biome->getMobs(mobCategory);
+   684→}
+   685→
+   686→
+   687→LevelChunk* PerformanceTestChunkSource::create(int x, int z)
+   688→{
+   689→        unsigned char* blocks = new unsigned char[LevelChunk::ChunkBlockCount];
+   690→        memset(blocks, 0, LevelChunk::ChunkBlockCount);
+   691→
+   692→        for (int y = 0; y < 65; y++)
+   693→        {
+   694→                if (y < 60)
+   695→                {
+   696→                        for (int x = (y + 1) & 1; x < 16; x += 2)
+   697→                        {
+   698→                                for (int z = y & 1; z < 16; z += 2)
+   699→                                {
+   700→                                        blocks[x << 11 | z << 7 | y] = 3;
+   701→                                }
+   702→                        }
+   703→                }
+   704→                else
+   705→                {
+   706→                        for (int x = 0; x < 16; x += 2)
+   707→                        {
+   708→                                for (int z = 0; z < 16; z += 2)
+   709→                                {
+   710→                                        blocks[x << 11 | z << 7 | y] = 3;
+   711→                                }
+   712→                        }
+   713→
+   714→                }
+   715→        }
+   716→
+   717→        LevelChunk* levelChunk = new LevelChunk(level, blocks, x, z);
+   718→
+   719→        //caveFeature.apply(this, level, xOffs, zOffs, blocks, LevelChunk::ChunkBlockCount);
+   720→        levelChunk->recalcHeightmap();
+   721→
+   722→        return levelChunk;
+   723→}
+   724→

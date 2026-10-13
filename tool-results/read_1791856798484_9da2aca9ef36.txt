@@ -1,0 +1,748 @@
+     1→#include "TileInclude.h"
+     2→#include "../Level.h"
+     3→#include "../../entity/player/Player.h"
+     4→#include "../../entity/item/ItemEntity.h"
+     5→#include "../../item/Item.h"
+     6→#include "../../item/TileItem.h"
+     7→
+     8→#include "../../../util/Random.h"
+     9→//#include "locale/Descriptive.h"
+    10→//#include "stats/Stats.h"
+    11→#include "../../entity/Entity.h"
+    12→#include "../LevelSource.h"
+    13→#include "../material/Material.h"
+    14→#include "../../phys/AABB.h"
+    15→#include "../../phys/HitResult.h"
+    16→#include "../../phys/Vec3.h"
+    17→#include "../../../locale/I18n.h"
+    18→#include "../../item/ClothTileItem.h"
+    19→
+    20→#include "../../item/AuxDataTileItem.h"
+    21→#include "../../item/LeafTileItem.h"
+    22→#include "../../item/StoneSlabTileItem.h"
+    23→#include "../../item/SaplingTileItem.h"
+    24→#include "../../item/ItemCategory.h"
+    25→
+    26→const int Tile::RENDERLAYER_OPAQUE          = 0;
+    27→const int Tile::RENDERLAYER_ALPHATEST       = 1;
+    28→const int Tile::RENDERLAYER_BLEND           = 2;
+    29→
+    30→const std::string Tile::TILE_DESCRIPTION_PREFIX("tile.");
+    31→
+    32→const Tile::SoundType Tile::SOUND_NORMAL("stone", 1, 1);
+    33→const Tile::SoundType Tile::SOUND_WOOD("wood", 1, 1);
+    34→const Tile::SoundType Tile::SOUND_GRAVEL("gravel", 1, 1);
+    35→const Tile::SoundType Tile::SOUND_GRASS("grass", 0.5f, 1);
+    36→const Tile::SoundType Tile::SOUND_STONE("stone", 1, 1);
+    37→const Tile::SoundType Tile::SOUND_METAL("stone", 1, 1.5f);
+    38→const Tile::SoundType Tile::SOUND_GLASS("stone", "random.glass", 1, 1);
+    39→const Tile::SoundType Tile::SOUND_CLOTH("cloth", 1, 1);
+    40→
+    41→#ifdef PRE_ANDROID23
+    42→        const Tile::SoundType Tile::SOUND_SAND("sand", 0.45f, 1);
+    43→#else
+    44→        const Tile::SoundType Tile::SOUND_SAND("sand", "step.gravel", 1, 1);
+    45→#endif
+    46→
+    47→const Tile::SoundType Tile::SOUND_SILENT("", 0, 0);
+    48→
+    49→Tile* Tile::tiles[] = {NULL};
+    50→int Tile::lightBlock[] = {0};
+    51→int Tile::lightEmission[] = {0};
+    52→bool Tile::solid[] = {false};
+    53→bool Tile::isEntityTile[] = {false};
+    54→bool Tile::translucent[] = {true, false}; // @trans: translucent, @trans "asbMax", some more like "*conditon"
+    55→bool Tile::shouldTick[] = {false};
+    56→bool Tile::sendTileData[] = {false};
+    57→
+    58→Tile* Tile::sand        = NULL;
+    59→Tile* Tile::sandStone   = NULL;
+    60→const int SANDSTONE_TEXTURES[] = { 0 + 16 * 12, 5 + 16 * 14, 6 + 16 * 14 };
+    61→const int SANDSTONE_TEXTURE_COUNT = 3;
+    62→
+    63→Tile* Tile::stoneBrick  = NULL;
+    64→Tile* Tile::redBrick    = NULL;
+    65→Tile* Tile::wood        = NULL;
+    66→Tile* Tile::sapling     = NULL;
+    67→Tile* Tile::glass       = NULL;
+    68→Tile* Tile::web         = NULL;
+    69→Tile* Tile::thinGlass   = NULL;
+    70→Tile* Tile::calmWater   = NULL;
+    71→Tile* Tile::calmLava    = NULL;
+    72→Tile* Tile::gravel      = NULL;
+    73→Tile* Tile::rock        = NULL;
+    74→Tile* Tile::unbreakable = NULL;
+    75→Tile* Tile::dirt        = NULL;
+    76→Tile* Tile::grass       = NULL;
+    77→Tile* Tile::ice         = NULL;
+    78→Tile* Tile::clay        = NULL;
+    79→Tile* Tile::farmland    = NULL;
+    80→Tile* Tile::stoneSlab   = NULL;
+    81→Tile* Tile::stoneSlabHalf=NULL;
+    82→Tile* Tile::cloth       = NULL;
+    83→Tile* Tile::flower      = NULL;
+    84→Tile* Tile::rose        = NULL;
+    85→Tile* Tile::mushroom1   = NULL;
+    86→Tile* Tile::mushroom2   = NULL;
+    87→Tile* Tile::topSnow     = NULL;
+    88→Tile* Tile::treeTrunk   = NULL;
+    89→Tile* Tile::snow        = NULL;
+    90→LeafTile* Tile::leaves  = NULL;
+    91→Tile* Tile::emeraldOre  = NULL;
+    92→Tile* Tile::redStoneOre = NULL;
+    93→Tile* Tile::redStoneOre_lit = NULL;
+    94→Tile* Tile::goldOre     = NULL;
+    95→Tile* Tile::ironOre     = NULL;
+    96→Tile* Tile::coalOre     = NULL;
+    97→Tile* Tile::lapisOre    = NULL;
+    98→Tile* Tile::lapisBlock  = NULL;
+    99→Tile* Tile::reeds       = NULL;
+   100→Tile* Tile::ladder      = NULL;
+   101→Tile* Tile::obsidian    = NULL;
+   102→Tile* Tile::tnt         = NULL;
+   103→Tile* Tile::bookshelf   = NULL;
+   104→Tile* Tile::sign        = NULL;
+   105→Tile* Tile::wallSign    = NULL;
+   106→Tile* Tile::mossStone   = NULL;
+   107→Tile* Tile::torch       = NULL;
+   108→Tile* Tile::water       = NULL;
+   109→Tile* Tile::lava        = NULL;
+   110→FireTile* Tile::fire    = NULL;
+   111→Tile* Tile::invisible_bedrock = NULL;
+   112→Tile* Tile::goldBlock   = NULL;
+   113→Tile* Tile::ironBlock   = NULL;
+   114→Tile* Tile::emeraldBlock= NULL;
+   115→Tile* Tile::workBench   = NULL;
+   116→Tile* Tile::stonecutterBench = NULL;
+   117→Tile* Tile::crops               = NULL;
+   118→Tile* Tile::furnace     = NULL;
+   119→Tile* Tile::furnace_lit = NULL;
+   120→Tile* Tile::chest               = NULL;
+   121→Tile* Tile::lightGem    = NULL;
+   122→Tile* Tile::stairs_wood = NULL;
+   123→Tile* Tile::stairs_stone= NULL;
+   124→Tile* Tile::stairs_brick= NULL;
+   125→Tile* Tile::door_wood   = NULL;
+   126→Tile* Tile::door_iron   = NULL;
+   127→Tile* Tile::cactus      = NULL;
+   128→
+   129→Tile* Tile::melon       = NULL;
+   130→Tile* Tile::melonStem   = NULL;
+   131→
+   132→Tile* Tile::bed         = NULL;
+   133→Tile* Tile::tallgrass   = NULL;
+   134→Tile* Tile::trapdoor    = NULL;
+   135→Tile* Tile::stoneBrickSmooth = NULL;
+   136→const int STONE_BRICK_TEXTURES[] = { 6 + 16 * 3, 4 + 16 * 6, 5 + 16 * 6 };
+   137→const int STONE_BRICK_TEXTURE_COUNT = 3;
+   138→
+   139→Tile* Tile::fence       = NULL;
+   140→Tile* Tile::fenceGate   = NULL;
+   141→
+   142→Tile* Tile::info_updateGame1 = NULL;
+   143→Tile* Tile::info_updateGame2 = NULL;
+   144→Tile* Tile::info_reserved6   = NULL;
+   145→Tile* Tile::grass_carried    = NULL;
+   146→LeafTile* Tile::leaves_carried   = NULL;
+   147→
+   148→Tile* Tile::netherReactor = NULL;
+   149→Tile* Tile::glowingObsidian = NULL;
+   150→
+   151→Tile* Tile::stairs_stoneBrickSmooth   = NULL;
+   152→Tile* Tile::netherBrick   = NULL;
+   153→Tile* Tile::netherrack   = NULL;
+   154→Tile* Tile::stairs_netherBricks   = NULL;
+   155→Tile* Tile::stairs_sandStone   = NULL;
+   156→Tile* Tile::quartzBlock   = NULL;
+   157→Tile* Tile::stairs_quartz   = NULL;
+   158→
+   159→/*static*/
+   160→void Tile::initTiles() {
+   161→        rock        = (new StoneTile(1, 1))->init()->setDestroyTime(1.5f)->setExplodeable(10)->setSoundType(SOUND_STONE)->setCategory(ItemCategory::Structures)->setDescriptionId("stone");
+   162→        grass       = (GrassTile*) (new GrassTile(2))->init()->setDestroyTime(0.6f)->setSoundType(SOUND_GRASS)->setCategory(ItemCategory::Structures)->setDescriptionId("grass");
+   163→        dirt        = (new DirtTile(3, 2))->init()->setDestroyTime(0.5f)->setSoundType(SOUND_GRAVEL)->setCategory(ItemCategory::Structures)->setDescriptionId("dirt");
+   164→        stoneBrick  = (new Tile(4, 16, Material::stone))->init()->setDestroyTime(2.0f)->setExplodeable(10)->setSoundType(SOUND_STONE)->setCategory(ItemCategory::Structures)->setDescriptionId("stonebrick");
+   165→        wood        = (new Tile(5, 4, Material::wood))->init()->setDestroyTime(2.0f)->setExplodeable(5)->setSoundType(SOUND_WOOD)->setCategory(ItemCategory::Structures)->setDescriptionId("wood");
+   166→        sapling     = (new Sapling(6, 15))->init()->setDestroyTime(0.0f)->setSoundType(SOUND_GRASS)->setCategory(ItemCategory::Structures)->setDescriptionId("sapling");//->sendTileData();
+   167→        unbreakable = (new Tile(7, 17, Material::stone))->init()->setDestroyTime(-1)->setExplodeable(6000000)->setSoundType(SOUND_STONE)->setCategory(ItemCategory::Structures)->setDescriptionId("bedrock");
+   168→        water       = (new LiquidTileDynamic(8, Material::water))->init()->setDestroyTime(100.0f)->setLightBlock(3)->setCategory(ItemCategory::Structures)->setDescriptionId("water");
+   169→        calmWater   = (new LiquidTileStatic(9, Material::water))->init()->setDestroyTime(100.0f)->setLightBlock(3)->setCategory(ItemCategory::Structures)->setDescriptionId("water");
+   170→        lava        = (new LiquidTileDynamic(10, Material::lava))->init()->setDestroyTime(00.0f)->setLightEmission(1.0f)->setLightBlock(255)->setCategory(ItemCategory::Structures)->setDescriptionId("lava"); // 00.0?
+   171→        calmLava    = (new LiquidTileStatic(11, Material::lava))->init()->setDestroyTime(100.0f)->setLightEmission(1.0f)->setLightBlock(255)->setCategory(ItemCategory::Structures)->setDescriptionId("lava");
+   172→        sand        = (new HeavyTile(12, 18))->init()->setDestroyTime(0.5f)->setSoundType(SOUND_SAND)->setCategory(ItemCategory::Structures)->setDescriptionId("sand");
+   173→        gravel      = (new GravelTile(13, 19))->init()->setDestroyTime(0.6f)->setSoundType(SOUND_GRAVEL)->setCategory(ItemCategory::Structures)->setDescriptionId("gravel");
+   174→        goldOre     = (new OreTile(14, 32))->init()->setDestroyTime(3.0f)->setExplodeable(5)->setSoundType(SOUND_STONE)->setCategory(ItemCategory::Decorations)->setDescriptionId("oreGold");
+   175→        ironOre     = (new OreTile(15, 33))->init()->setDestroyTime(3.0f)->setExplodeable(5)->setSoundType(SOUND_STONE)->setCategory(ItemCategory::Decorations)->setDescriptionId("oreIron");
+   176→        coalOre     = (new OreTile(16, 34))->init()->setDestroyTime(3.0f)->setExplodeable(5)->setSoundType(SOUND_STONE)->setCategory(ItemCategory::Structures)->setDescriptionId("oreCoal");
+   177→        treeTrunk   = (new TreeTile(17))->init()->setDestroyTime(2.0f)->setSoundType(SOUND_WOOD)->setCategory(ItemCategory::Structures)->setDescriptionId("log");
+   178→        leaves      = (LeafTile*) (new LeafTile(18, 4 + 3 * 16))->init()->setDestroyTime(0.2f)->setLightBlock(1)->setSoundType(SOUND_GRASS)->setCategory(ItemCategory::Structures)->setDescriptionId("leaves");
+   179→
+   180→        glass       = (new GlassTile(20, 49, Material::glass, false))->init()->setDestroyTime(0.3f)->setSoundType(SOUND_GLASS)->setCategory(ItemCategory::Structures)->setDescriptionId("glass");
+   181→        lapisOre    = (new OreTile(21, 10 * 16))->init()->setDestroyTime(3.0f)->setExplodeable(5)->setSoundType(SOUND_STONE)->setCategory(ItemCategory::Structures)->setDescriptionId("oreLapis");
+   182→        lapisBlock      = (new Tile(22, 9 * 16, Material::stone))->init()->setDestroyTime(3.0f)->setExplodeable(5)->setSoundType(SOUND_STONE)->setCategory(ItemCategory::Decorations)->setDescriptionId("blockLapis");
+   183→        sandStone   = (new SandStoneTile(24, (const int*)&SANDSTONE_TEXTURES, SANDSTONE_TEXTURE_COUNT))->init()->setSoundType(SOUND_STONE)->setDestroyTime(0.8f)->setCategory(ItemCategory::Structures)->setDescriptionId("sandStone");
+   184→        bed         = (new BedTile(26))->init()->setDestroyTime(0.2f)->setCategory(ItemCategory::Structures)->setDescriptionId("bed");
+   185→        web             = (new WebTile(30, 11))->init()->setLightBlock(1)->setDestroyTime(4.0f)->setCategory(ItemCategory::Decorations)->setDescriptionId("web");
+   186→        tallgrass   = (new TallGrass(31, 2 * 16 + 7))->init()->setDestroyTime(0.0f)->setSoundType(SOUND_GRASS)->setCategory(ItemCategory::Decorations)->setDescriptionId("tallgrass");
+   187→        cloth       = (new ClothTile(35))->init()->setDestroyTime(0.8f)->setSoundType(SOUND_CLOTH)->setCategory(ItemCategory::Structures)->setDescriptionId("cloth");
+   188→
+   189→        flower      = (new Bush(37, 13))->init()->setDestroyTime(0.0f)->setSoundType(SOUND_GRASS)->setCategory(ItemCategory::Decorations)->setDescriptionId("flower");
+   190→        rose        = (new Bush(38, 12))->init()->setDestroyTime(0.0f)->setSoundType(SOUND_GRASS)->setCategory(ItemCategory::Decorations)->setDescriptionId("rose");
+   191→        mushroom1   = (new Mushroom(39, 13 + 16))->init()->setDestroyTime(0.0f)->setSoundType(SOUND_GRASS)->setLightEmission(2 / 16.0f)->setCategory(ItemCategory::Decorations)->setDescriptionId("mushroom");
+   192→        mushroom2   = (new Mushroom(40, 12 + 16))->init()->setDestroyTime(0.0f)->setSoundType(SOUND_GRASS)->setCategory(ItemCategory::Decorations)->setDescriptionId("mushroom");
+   193→        goldBlock   = (new MetalTile(41, 39 - 16))->init()->setDestroyTime(3.0f)->setExplodeable(10)->setSoundType(SOUND_METAL)->setCategory(ItemCategory::Decorations)->setDescriptionId("blockGold");
+   194→        ironBlock   = (new MetalTile(42, 38 - 16))->init()->setDestroyTime(5.0f)->setExplodeable(10)->setSoundType(SOUND_METAL)->setCategory(ItemCategory::Decorations)->setDescriptionId("blockIron");
+   195→        stoneSlab   = (new StoneSlabTile(43, true))->init()->setDestroyTime(2.0f)->setExplodeable(10)->setSoundType(SOUND_STONE)->setCategory(ItemCategory::Structures)->setDescriptionId("stoneSlab");
+   196→        stoneSlabHalf=(new StoneSlabTile(44, false))->init()->setDestroyTime(2.0f)->setExplodeable(10)->setSoundType(SOUND_STONE)->setCategory(ItemCategory::Structures)->setDescriptionId("stoneSlab");
+   197→        redBrick    = (new Tile(45, 7, Material::stone))->init()->setDestroyTime(2.0f)->setExplodeable(10)->setSoundType(SOUND_STONE)->setCategory(ItemCategory::Structures)->setDescriptionId("brick");
+   198→        tnt         = (new TntTile(46, 8))->init()->setDestroyTime(0.0f)->setSoundType(SOUND_GRASS)->setCategory(ItemCategory::Tools)->setDescriptionId("tnt");
+   199→        bookshelf       = (new BookshelfTile(47, 35))->init()->setDestroyTime(1.5f)->setSoundType(SOUND_WOOD)->setCategory(ItemCategory::Decorations)->setDescriptionId("bookshelf");
+   200→        mossStone       = (new Tile(48, 36, Material::stone))->init()->setDestroyTime(2.0f)->setExplodeable(10)->setSoundType(SOUND_STONE)->setCategory(ItemCategory::Structures)->setDescriptionId("stoneMoss");
+   201→        obsidian    = (new ObsidianTile(49, 37, false))->init()->setDestroyTime(10.0f)->setExplodeable(2000)->setSoundType(SOUND_STONE)->setCategory(ItemCategory::Structures)->setDescriptionId("obsidian");
+   202→        torch       = (new TorchTile(50, 5 * 16))->init()->setDestroyTime(0.0f)->setLightEmission(15 / 16.0f)->setSoundType(SOUND_WOOD)->setCategory(ItemCategory::Tools)->setDescriptionId("torch");
+   203→
+   204→        stairs_wood = (new StairTile(53, wood))->init()->setCategory(ItemCategory::Structures)->setDescriptionId("stairsWood");
+   205→        chest           = (new ChestTile(54))->init()->setCategory(ItemCategory::Structures)->setDestroyTime(2.5f)->setSoundType(SOUND_WOOD)->setDescriptionId("chest");//->sendTileData();
+   206→
+   207→        emeraldOre  = (new OreTile(56, 16 * 3 + 2))->init()->setDestroyTime(3.0f)->setExplodeable(5)->setSoundType(SOUND_STONE)->setCategory(ItemCategory::Decorations)->setDescriptionId("oreDiamond");
+   208→        emeraldBlock= (new MetalTile(57, 40 - 16))->init()->setDestroyTime(5.0f)->setExplodeable(10)->setSoundType(SOUND_METAL)->setCategory(ItemCategory::Decorations)->setDescriptionId("blockDiamond");
+   209→        workBench   = (new WorkbenchTile(58))->init()->setDestroyTime(2.5f)->setSoundType(SOUND_WOOD)->setCategory(ItemCategory::Structures)->setDescriptionId("workbench");
+   210→        crops           = (new CropTile(59, 8 + 5 * 16))->init()->setDestroyTime(0.0f)->setSoundType(SOUND_GRASS)->setCategory(ItemCategory::Structures)->setDescriptionId("crops");//->sendTileData();
+   211→        farmland    = (new FarmTile(60))->init()->setDestroyTime(0.6f)->setSoundType(SOUND_GRAVEL)->setCategory(ItemCategory::Structures)->setDescriptionId("farmland");
+   212→        furnace         = (new FurnaceTile(61, false))->init()->setDestroyTime(3.5f)->setSoundType(SOUND_STONE)->setCategory(ItemCategory::Structures)->setDescriptionId("furnace");//.sendTileData();
+   213→        furnace_lit = (new FurnaceTile(62, true))->init()->setDestroyTime(3.5f)->setSoundType(SOUND_STONE)->setLightEmission(14 / 16.0f)->setCategory(ItemCategory::Structures)->setDescriptionId("furnace");//.sendTileData();
+   214→    sign        = (new SignTile(63, TileEntityType::Sign, true))->init()->setDestroyTime(1.0f)->setSoundType(SOUND_WOOD)->setCategory(ItemCategory::Decorations)->setDescriptionId("sign");//->sendTileData();
+   215→        door_wood   = (new DoorTile(64, Material::wood))->init()->setDestroyTime(3.0f)->setSoundType(SOUND_WOOD)->setCategory(ItemCategory::Structures)->setDescriptionId("doorWood");
+   216→        ladder      = (new LadderTile(65, 3 + 5 * 16))->init()->setDestroyTime(0.4f)->setSoundType(SOUND_WOOD)->setCategory(ItemCategory::Structures)->setDescriptionId("ladder");
+   217→
+   218→        stairs_stone= (new StairTile(67, stoneBrick))->init()->setCategory(ItemCategory::Structures)->setDescriptionId("stairsStone");
+   219→    wallSign    = (new SignTile(68, TileEntityType::Sign, false))->init()->setDestroyTime(1.0f)->setSoundType(SOUND_WOOD)->setCategory(ItemCategory::Decorations)->setDescriptionId("sign");//->sendTileData();
+   220→
+   221→        door_iron   = (new DoorTile(71, Material::metal))->init()->setDestroyTime(5.0f)->setSoundType(SOUND_METAL)->setCategory(ItemCategory::Structures)->setDescriptionId("doorIron");
+   222→
+   223→        redStoneOre = (new RedStoneOreTile(73, 16 * 3 + 3, false))->init()->setDestroyTime(3.0f)->setExplodeable(5)->setSoundType(SOUND_STONE)->setCategory(ItemCategory::Mechanisms)->setDescriptionId("oreRedstone");
+   224→        redStoneOre_lit = (new RedStoneOreTile(74, 16 * 3 + 3, true))->init()->setDestroyTime(3.0f)->setLightEmission(10 / 16.0f)->setExplodeable(5)->setSoundType(SOUND_STONE)->setCategory(ItemCategory::Mechanisms)->setDescriptionId("oreRedstone");
+   225→
+   226→        topSnow     = (new TopSnowTile(78, 16 * 4 + 2))->init()->setDestroyTime(0.1f)->setSoundType(SOUND_CLOTH)->setCategory(ItemCategory::Structures)->setDescriptionId("snow");
+   227→        ice         = (new IceTile(79, 16 * 4 + 3))->init()->setDestroyTime(0.5f)->setLightBlock(3)->setSoundType(SOUND_GLASS)->setCategory(ItemCategory::Structures)->setDescriptionId("ice");
+   228→        snow            = (new SnowTile(80, 16 * 4 + 2))->init()->setDestroyTime(0.2f)->setSoundType(SOUND_CLOTH)->setCategory(ItemCategory::Structures)->setDescriptionId("snow");
+   229→    cactus      = (new CactusTile(81, 16 * 4 + 6))->init()->setDestroyTime(0.4f)->setSoundType(SOUND_CLOTH)->setCategory(ItemCategory::Structures)->setDescriptionId("cactus");
+   230→        clay        = (new ClayTile(82, 16 * 4 + 8))->init()->setDestroyTime(0.6f)->setSoundType(SOUND_GRAVEL)->setCategory(ItemCategory::Structures)->setDescriptionId("clay");
+   231→        reeds       = (new ReedTile(83, 16 * 4 + 9))->init()->setDestroyTime(0.0f)->setSoundType(SOUND_GRASS)->setCategory(ItemCategory::Structures)->setDescriptionId("reeds");
+   232→
+   233→        fence           = (new FenceTile(85, 4))->init()->setDestroyTime(2.0f)->setExplodeable(5)->setSoundType(SOUND_WOOD)->setCategory(ItemCategory::Structures)->setDescriptionId("fence");
+   234→
+   235→        netherrack = (new Tile(87, 7 + 6 * 16, Material::stone))->init()->setDestroyTime(0.4f)->setSoundType(SOUND_STONE)->setDescriptionId("hellrock");
+   236→        //hellSand = (new HellSandTile(88, 8 + 6 * 16, Material::sand))->init()->setDestroyTime(0.5f)->setSoundType(SOUND_SAND)->setDescriptionId("hellsand");
+   237→
+   238→        lightGem        = (new LightGemTile(89, 9 + 16 * 6, Material::glass))->init()->setDestroyTime(0.3f)->setCategory(ItemCategory::Structures)->setSoundType(SOUND_GLASS)->setLightEmission(1.0f)->setDescriptionId("lightgem");
+   239→        invisible_bedrock = (new InvisibleTile(95, 0, Material::stone))->init()->setDestroyTime(-1)->setExplodeable(6000000);//->setSoundType(SOUND_SILENT);
+   240→        trapdoor = (new TrapDoorTile(96, Material::wood))->init()->setDestroyTime(3.0f)->setSoundType(SOUND_WOOD)->setCategory(ItemCategory::Structures)->setDescriptionId("trapdoor");//->sendTileData();
+   241→
+   242→        stoneBrickSmooth = (new MultiTextureTile(98, (const int*)&STONE_BRICK_TEXTURES, STONE_BRICK_TEXTURE_COUNT, Material::stone))->init()->setDestroyTime(1.5f)->setExplodeable(10)->setSoundType(SOUND_STONE)->setCategory(ItemCategory::Structures)->setDescriptionId("stonebricksmooth");
+   243→
+   244→        thinGlass = (new ThinFenceTile(102, 1 + 3 * 16, 4 + 9 * 16, Material::glass, false))->init()->setDestroyTime(0.3f)->setSoundType(SOUND_GLASS)->setCategory(ItemCategory::Structures)->setDescriptionId("thinGlass");
+   245→        melon = (new MelonTile(103))->init()->setDestroyTime(1.0f)->setSoundType(SOUND_WOOD)->setCategory(ItemCategory::FoodArmor)->setDescriptionId("melon");
+   246→        melonStem = (new StemTile(105, Tile::melon))->init()->setDestroyTime(0.0f)->setSoundType(SOUND_WOOD)->setCategory(ItemCategory::FoodArmor)->setDescriptionId("pumpkinStem");//->sendTileData();
+   247→        fenceGate = (new FenceGateTile(107, 4))->init()->setDestroyTime(2.0f)->setExplodeable(5)->setSoundType(SOUND_WOOD)->setCategory(ItemCategory::Structures)->setDescriptionId("fenceGate");//->sendTileData();
+   248→        stairs_brick = (new StairTile(108, Tile::redBrick))->init()->setCategory(ItemCategory::Structures)->setDescriptionId("stairsBrick");//->sendTileData();
+   249→
+   250→        stairs_stoneBrickSmooth = (new StairTile(109, Tile::stoneBrickSmooth))->init()->setCategory(ItemCategory::Structures)->setDescriptionId("stairsStoneBrickSmooth");//->sendTileData();
+   251→        netherBrick    = (new Tile(112, 0 + 14 * 16, Material::stone))->init()->setDestroyTime(2.0f)->setExplodeable(10)->setSoundType(SOUND_STONE)->setCategory(ItemCategory::Structures)->setDescriptionId("netherBrick");
+   252→        stairs_netherBricks = (new StairTile(114, Tile::netherBrick))->init()->setCategory(ItemCategory::Structures)->setDescriptionId("stairsNetherBrick");//->sendTileData();
+   253→        stairs_sandStone = (new StairTile(128, Tile::sandStone))->init()->setCategory(ItemCategory::Structures)->setDescriptionId("stairsSandStone");//->sendTileData();
+   254→
+   255→        quartzBlock   = (new QuartzBlockTile(155))->init()->setSoundType(SOUND_STONE)->setDestroyTime(0.8f)->setCategory(ItemCategory::Structures)->setDescriptionId("quartzBlock");
+   256→        stairs_quartz = (new StairTile(156, Tile::quartzBlock))->init()->setCategory(ItemCategory::Structures)->setDescriptionId("stairsQuartz");//->sendTileData();
+   257→
+   258→        //
+   259→        // Special tiles for Pocket Edition is placed at high IDs
+   260→        //
+   261→        stonecutterBench= (new StonecutterTile(245))->init()->setDestroyTime(2.5f)->setSoundType(SOUND_STONE)->setCategory(ItemCategory::Structures)->setDescriptionId("stonecutter");
+   262→        glowingObsidian = (new ObsidianTile(246, 10 + 16 * 13, true))->init()->setDestroyTime(10.0f)->setLightEmission(14 / 16.0f)->setExplodeable(2000)->setSoundType(SOUND_STONE)->setCategory(ItemCategory::Structures)->setDescriptionId("glowingobsidian");
+   263→        netherReactor   = (new NetherReactor(247, 10  + 14 * 16, Material::metal))->init()->setDestroyTime(3.0f)->setSoundType(SOUND_METAL)->setCategory(ItemCategory::Structures)->setDescriptionId("netherreactor");
+   264→        info_updateGame1= (new Tile(248, 252, Material::dirt))->init()->setDestroyTime(1.0f)->setSoundType(SOUND_GRAVEL)->setCategory(ItemCategory::Structures)->setDescriptionId("info_update");
+   265→        info_updateGame2= (new Tile(249, 253, Material::dirt))->init()->setDestroyTime(1.0f)->setSoundType(SOUND_GRAVEL)->setCategory(ItemCategory::Structures)->setDescriptionId("info_update");
+   266→        grass_carried   = (new CarriedTile(253, 3, 12*16 + 12))->init()->setDescriptionId("grass");
+   267→        leaves_carried  = (LeafTile*) (new LeafTile(254, 11 + 14 * 16))->init()->setDestroyTime(0.2f)->setLightBlock(1)->setSoundType(SOUND_GRASS)->setCategory(ItemCategory::Structures)->setDescriptionId("leaves");
+   268→        info_reserved6  = (new Tile(255, Material::dirt))->init();
+   269→
+   270→    //
+   271→    // Stuff that need to be inited in a specific order (i.e. after the other tiles have been created)
+   272→    //
+   273→    fire     = (FireTile*) (new FireTile(51, 1 * 16 + 15))->init()->setDestroyTime(0.0f)->setLightEmission(1.0f)->setSoundType(SOUND_WOOD)->setCategory(ItemCategory::Structures)->setDescriptionId("fire");
+   274→
+   275→        //
+   276→    // Special case for certain items since they can have different icons
+   277→        // @note: Make sure those different items are handled in ItemInHandRenderer::renderItem
+   278→        //
+   279→        Item::items[cloth->id] = (new ClothTileItem(cloth->id - 256))->setCategory(ItemCategory::Structures)->setDescriptionId("cloth");
+   280→        Item::items[treeTrunk->id] = (new AuxDataTileItem(treeTrunk->id - 256, treeTrunk))->setCategory(ItemCategory::Structures)->setDescriptionId("log");
+   281→        Item::items[stoneBrickSmooth->id] = (new AuxDataTileItem(stoneBrickSmooth->id - 256, stoneBrickSmooth))->setCategory(ItemCategory::Structures)->setDescriptionId("stonebricksmooth");
+   282→        Item::items[stoneSlabHalf->id] = (new StoneSlabTileItem(stoneSlabHalf->id - 256))->setCategory(ItemCategory::Structures)->setDescriptionId("stoneSlab");
+   283→        Item::items[sapling->id] = (new SaplingTileItem(sapling->id - 256))->setCategory(ItemCategory::Structures)->setDescriptionId("sapling");
+   284→        Item::items[leaves->id] = (new LeafTileItem(leaves->id - 256))->setCategory(ItemCategory::Decorations)->setDescriptionId("leaves");
+   285→        Item::items[sandStone->id] = (new AuxDataTileItem(sandStone->id - 256, sandStone))->setCategory(ItemCategory::Structures)->setDescriptionId("sandStone");
+   286→
+   287→        Item::items[quartzBlock->id] = (new AuxDataTileItem(quartzBlock->id - 256, quartzBlock))->setCategory(ItemCategory::Structures)->setDescriptionId("quartzBlock");
+   288→
+   289→    for (int i = 0; i < 256; i++) {
+   290→        if (Tile::tiles[i] != NULL) {
+   291→                        if (Item::items[i] == NULL) {
+   292→                                Item::items[i] = new TileItem(i - 256);
+   293→                                Item::items[i]->category = Tile::tiles[i]->category;
+   294→                        }
+   295→                        // Check for missing category
+   296→                        if (Item::items[i]->category == -1)
+   297→                                LOGE("Error: Missing category for tile %d: %s\n", tiles[i]->id, tiles[i]->getDescriptionId().c_str());
+   298→        }
+   299→    }
+   300→}
+   301→
+   302→/*static*/
+   303→void Tile::teardownTiles() {
+   304→        for (int i = 0; i < 256; ++i)
+   305→                if (Tile::tiles[i]) {
+   306→                        delete Tile::tiles[i];
+   307→                        Tile::tiles[i] = NULL;
+   308→                }
+   309→}
+   310→
+   311→int Tile::transformToValidBlockId( int blockId ) {
+   312→        return transformToValidBlockId(blockId, 0, 0, 0);
+   313→}
+   314→
+   315→int Tile::transformToValidBlockId( int blockId, int x, int y, int z ) {
+   316→        if (blockId != 0 && Tile::tiles[blockId] == NULL)
+   317→                return (((x + y + z)&1) == 1)? Tile::info_updateGame1->id : Tile::info_updateGame2->id;
+   318→        return blockId;
+   319→}
+   320→
+   321→
+   322→Tile::Tile(int id, const Material* material)
+   323→:       id(id),
+   324→        material(material),
+   325→        tex(1),
+   326→        category(-1),
+   327→        gravity(1.0f),
+   328→        friction(0.6f),
+   329→        soundType(&Tile::SOUND_NORMAL),
+   330→        tmpBB(0,0,0,1,1,1),
+   331→        xx0(0),yy0(0),zz0(0),
+   332→        xx1(1),yy1(1),zz1(1)
+   333→{
+   334→        if (Tile::tiles[id]) {
+   335→                printf("Slot %d is already occupied by %p when adding %p\n", id, &Tile::tiles[id], this);
+   336→        }
+   337→}
+   338→
+   339→Tile::Tile( int id, int tex, const Material* material )
+   340→:       id(id),
+   341→        tex(tex),
+   342→        material(material),
+   343→        category(-1),
+   344→        gravity(1.0f),
+   345→        friction(0.6f),
+   346→        soundType(&Tile::SOUND_NORMAL),
+   347→        tmpBB(0,0,0,1,1,1),
+   348→        xx0(0),yy0(0),zz0(0),
+   349→        xx1(1),yy1(1),zz1(1)
+   350→{
+   351→        if (Tile::tiles[id]) {
+   352→                printf("Slot %d is already occupied by %p when adding %p\n", id, &Tile::tiles[id], this);
+   353→        }
+   354→}
+   355→
+   356→//Tile* sendTileData() {
+   357→//    Tile::sendTileData[id] = true;
+   358→//    return this;
+   359→//}
+   360→
+   361→/*protected*/
+   362→Tile* Tile::setLightEmission(float f) {
+   363→    Tile::lightEmission[id] = (int) (Level::MAX_BRIGHTNESS * f);
+   364→    return this;
+   365→}
+   366→
+   367→/*public static*/
+   368→bool Tile::isFaceVisible(Level* level, int x, int y, int z, int f) {
+   369→        switch (f) {
+   370→                case Facing::DOWN : y--; break;
+   371→                case Facing::UP   : y++; break;
+   372→                case Facing::NORTH: z--; break;
+   373→                case Facing::SOUTH: z++; break;
+   374→                case Facing::WEST : x--; break;
+   375→                case Facing::EAST : x++; break;
+   376→        }
+   377→        return !level->isSolidRenderTile(x, y, z);
+   378→}
+   379→
+   380→/* private */
+   381→Tile* Tile::init() {
+   382→    Tile::tiles[id] = this;
+   383→        setShape(xx0, yy0, zz0, xx1, yy1, zz1); // @attn
+   384→        solid[id] = isSolidRender();
+   385→        lightBlock[id] = isSolidRender() ? 255 : 0;
+   386→        translucent[id] = !material->blocksLight();
+   387→        return this;
+   388→}
+   389→
+   390→/*public virtual*/
+   391→float Tile::getDestroyProgress(Player* player) {
+   392→    if (destroySpeed < 0) return 0;
+   393→    if (!player->canDestroy(this)) return 1 / destroySpeed / 100.0f;
+   394→    return (player->getDestroySpeed(this) / destroySpeed) / 30.0f;
+   395→}
+   396→
+   397→/*public virtual*/
+   398→HitResult Tile::clip(Level* level, int xt, int yt, int zt, const Vec3& A, const Vec3& B) {
+   399→    updateShape(level, xt, yt, zt);
+   400→
+   401→        //Stopwatch sw;
+   402→        //sw.start();
+   403→
+   404→        Vec3 sub((float)xt, (float)yt, (float)zt);
+   405→        Vec3 a = A - sub;//a.add((float)-xt, (float)-yt, (float)-zt);
+   406→    Vec3 b = B - sub;//b.add((float)-xt, (float)-yt, (float)-zt);
+   407→
+   408→    Vec3 xh0, xh1, yh0, yh1, zh0, zh1;
+   409→
+   410→        bool bxh0 = a.clipX(b, xx0, xh0);
+   411→    bool bxh1 = a.clipX(b, xx1, xh1);
+   412→
+   413→    bool byh0 = a.clipY(b, yy0, yh0);
+   414→    bool byh1 = a.clipY(b, yy1, yh1);
+   415→
+   416→    bool bzh0 = a.clipZ(b, zz0, zh0);
+   417→    bool bzh1 = a.clipZ(b, zz1, zh1);
+   418→
+   419→    //if (!containsX(xh0)) xh0 = NULL;
+   420→    if (!bxh0 || !containsX(xh0)) bxh0 = false;
+   421→    if (!bxh1 || !containsX(xh1)) bxh1 = false;
+   422→    if (!byh0 || !containsY(yh0)) byh0 = false;
+   423→    if (!byh1 || !containsY(yh1)) byh1 = false;
+   424→    if (!bzh0 || !containsZ(zh0)) bzh0 = false;
+   425→    if (!bzh1 || !containsZ(zh1)) bzh1 = false;
+   426→    Vec3* closest = NULL;
+   427→
+   428→    //if (xh0 != NULL && (closest == NULL || a.distanceToSqr(xh0) < a.distanceToSqr(closest))) closest = xh0;
+   429→    if (bxh0 && (closest == NULL || a.distanceToSqr(xh0) < a.distanceToSqr(*closest))) closest = &xh0;
+   430→    if (bxh1 && (closest == NULL || a.distanceToSqr(xh1) < a.distanceToSqr(*closest))) closest = &xh1;
+   431→    if (byh0 && (closest == NULL || a.distanceToSqr(yh0) < a.distanceToSqr(*closest))) closest = &yh0;
+   432→    if (byh1 && (closest == NULL || a.distanceToSqr(yh1) < a.distanceToSqr(*closest))) closest = &yh1;
+   433→    if (bzh0 && (closest == NULL || a.distanceToSqr(zh0) < a.distanceToSqr(*closest))) closest = &zh0;
+   434→    if (bzh1 && (closest == NULL || a.distanceToSqr(zh1) < a.distanceToSqr(*closest))) closest = &zh1;
+   435→
+   436→    if (closest == NULL)
+   437→                return HitResult();
+   438→
+   439→    int face = -1;
+   440→
+   441→    if (closest == &xh0) face = 4;
+   442→    if (closest == &xh1) face = 5;
+   443→    if (closest == &yh0) face = 0;
+   444→    if (closest == &yh1) face = 1;
+   445→    if (closest == &zh0) face = 2;
+   446→    if (closest == &zh1) face = 3;
+   447→
+   448→        //sw.stop();
+   449→        //sw.printEvery(5, ">>> ");
+   450→
+   451→    return HitResult(xt, yt, zt, face, closest->add((float)xt, (float)yt, (float)zt));
+   452→}
+   453→
+   454→/*virtual*/
+   455→void Tile::spawnResources(Level* level, int x, int y, int z, int data, float odds) {
+   456→    if (level->isClientSide) return;
+   457→
+   458→    int count = getResourceCount(&level->random);
+   459→    for (int i = 0; i < count; i++) {
+   460→        if (level->random.nextFloat() > odds) continue;
+   461→        int type = getResource(data, &level->random);
+   462→        if (type <= 0) continue;
+   463→        const float s = 0.7f;
+   464→        float xo = level->random.nextFloat() * s + (1 - s) * 0.5f;
+   465→        float yo = level->random.nextFloat() * s + (1 - s) * 0.5f;
+   466→        float zo = level->random.nextFloat() * s + (1 - s) * 0.5f;
+   467→                ItemEntity* item = new ItemEntity(level, x + xo, y + yo, z + zo, ItemInstance(type, 1, getSpawnResourcesAuxValue(data)));
+   468→        item->throwTime = 10;
+   469→        level->addEntity(item);
+   470→    }
+   471→}
+   472→
+   473→void Tile::spawnResources( Level* level, int x, int y, int z, int data )
+   474→{
+   475→        spawnResources(level, x, y, z, data, 1);
+   476→}
+   477→
+   478→void Tile::popResource(Level* level, int x, int y, int z, const ItemInstance& itemInstance) {
+   479→        if (level->isClientSide || level->getLevelData()->getGameType() == GameType::Creative) return;
+   480→
+   481→        float s = 0.7f;
+   482→        float xo = level->random.nextFloat() * s + (1 - s) * 0.5f;
+   483→        float yo = level->random.nextFloat() * s + (1 - s) * 0.5f;
+   484→        float zo = level->random.nextFloat() * s + (1 - s) * 0.5f;
+   485→
+   486→        ItemEntity* item = new ItemEntity(level, x + xo, y + yo, z + zo, itemInstance);
+   487→        item->throwTime = 10;
+   488→        level->addEntity(item);
+   489→}
+   490→
+   491→
+   492→void Tile::destroy( Level* level, int x, int y, int z, int data )
+   493→{
+   494→}
+   495→
+   496→bool Tile::isCubeShaped()
+   497→{
+   498→        return true;
+   499→}
+   500→
+   501→int Tile::getRenderShape()
+   502→{
+   503→        return SHAPE_BLOCK;
+   504→}
+   505→
+   506→float Tile::getBrightness( LevelSource* level, int x, int y, int z )
+   507→{
+   508→        return level->getBrightness(x, y, z);
+   509→}
+   510→
+   511→bool Tile::shouldRenderFace( LevelSource* level, int x, int y, int z, int face )
+   512→{
+   513→        if (face == 0 && y == -1) return false;
+   514→        // For fixed size worlds //@todo: external constants rather than magic numbers
+   515→        if (face == 2 && z == -1)  return false;
+   516→        if (face == 3 && z == 256) return false;
+   517→        if (face == 4 && x == -1)  return false;
+   518→        if (face == 5 && x == 256) return false;
+   519→        // Common
+   520→        if (face == 0 && yy0 > 0) return true;
+   521→        if (face == 1 && yy1 < 1) return true;
+   522→        if (face == 2 && zz0 > 0) return true;
+   523→        if (face == 3 && zz1 < 1) return true;
+   524→        if (face == 4 && xx0 > 0) return true;
+   525→        if (face == 5 && xx1 < 1) return true;
+   526→        Tile* t = Tile::tiles[level->getTile(x, y, z)];
+   527→        if (!t) return true;
+   528→        if (face == 1 && t->id == topSnow->id) return false;
+   529→        return !t->isSolidRender();
+   530→        //return (!level->isSolidRenderTile(x, y, z));
+   531→}
+   532→
+   533→int Tile::getTexture( LevelSource* level, int x, int y, int z, int face )
+   534→{
+   535→        return getTexture(face, level->getData(x, y, z));
+   536→}
+   537→
+   538→int Tile::getTexture( int face, int data )
+   539→{
+   540→        return getTexture(face);
+   541→}
+   542→
+   543→int Tile::getTexture( int face )
+   544→{
+   545→        return tex;
+   546→}
+   547→
+   548→void Tile::addAABBs( Level* level, int x, int y, int z, const AABB* box, std::vector<AABB>& boxes )
+   549→{
+   550→        AABB* aabb = getAABB(level, x, y, z);
+   551→        if (aabb != NULL && box->intersects(*aabb)) {
+   552→                boxes.push_back(*aabb);
+   553→        }
+   554→}
+   555→
+   556→AABB* Tile::getAABB( Level* level, int x, int y, int z )
+   557→{
+   558→        tmpBB.x0 = x + xx0;
+   559→        tmpBB.y0 = y + yy0;
+   560→        tmpBB.z0 = z + zz0;
+   561→        tmpBB.x1 = x + xx1;
+   562→        tmpBB.y1 = y + yy1;
+   563→        tmpBB.z1 = z + zz1;
+   564→        return &tmpBB;
+   565→}
+   566→
+   567→bool Tile::isSolidRender()
+   568→{
+   569→        return true;
+   570→}
+   571→
+   572→bool Tile::mayPick( int data, bool liquid )
+   573→{
+   574→        return mayPick();
+   575→}
+   576→
+   577→bool Tile::mayPick()
+   578→{
+   579→        return true;
+   580→}
+   581→
+   582→int Tile::getTickDelay()
+   583→{
+   584→        return 10;
+   585→}
+   586→
+   587→int Tile::getResourceCount( Random* random )
+   588→{
+   589→        return 1;
+   590→}
+   591→
+   592→int Tile::getResource( int data, Random* random )
+   593→{
+   594→        return id;
+   595→}
+   596→
+   597→float Tile::getExplosionResistance( Entity* source )
+   598→{
+   599→        return explosionResistance / 5.0f;
+   600→}
+   601→
+   602→int Tile::getRenderLayer()
+   603→{
+   604→        return Tile::RENDERLAYER_OPAQUE;
+   605→}
+   606→
+   607→bool Tile::use( Level* level, int x, int y, int z, Player* player )
+   608→{
+   609→        return false;
+   610→}
+   611→
+   612→bool Tile::spawnBurnResources( Level* level, float x, float y, float z )
+   613→{
+   614→        return false;
+   615→}
+   616→
+   617→int Tile::getColor( LevelSource* level, int x, int y, int z )
+   618→{
+   619→        return 0xffffff;
+   620→}
+   621→
+   622→bool Tile::getSignal( LevelSource* level, int x, int y, int z )
+   623→{
+   624→        return false;
+   625→}
+   626→
+   627→bool Tile::getSignal( LevelSource* level, int x, int y, int z, int dir )
+   628→{
+   629→        return false;
+   630→}
+   631→
+   632→bool Tile::isSignalSource()
+   633→{
+   634→        return false;
+   635→}
+   636→
+   637→bool Tile::getDirectSignal( Level* level, int x, int y, int z, int dir )
+   638→{
+   639→        return false;
+   640→}
+   641→
+   642→void Tile::playerDestroy( Level* level, Player* player, int x, int y, int z, int data )
+   643→{
+   644→        //player.awardStat(Stats.blockMined[id], 1);
+   645→        spawnResources(level, x, y, z, data);
+   646→}
+   647→
+   648→bool Tile::canSurvive( Level* level, int x, int y, int z )
+   649→{
+   650→        return true;
+   651→}
+   652→
+   653→Tile* Tile::setDescriptionId( const std::string& id )
+   654→{
+   655→        descriptionId = TILE_DESCRIPTION_PREFIX + id;
+   656→        return this;
+   657→}
+   658→
+   659→std::string Tile::getName() const
+   660→{
+   661→        return I18n::get(getDescriptionId() + ".name");
+   662→}
+   663→
+   664→std::string Tile::getDescriptionId() const
+   665→{
+   666→        return descriptionId;
+   667→}
+   668→
+   669→Tile* Tile::setSoundType( const SoundType& soundType )
+   670→{
+   671→        this->soundType = &soundType;
+   672→        return this;
+   673→}
+   674→
+   675→Tile* Tile::setLightBlock( int i )
+   676→{
+   677→        lightBlock[id] = i;
+   678→        return this;
+   679→}
+   680→
+   681→Tile* Tile::setExplodeable( float explosionResistance )
+   682→{
+   683→        this->explosionResistance = explosionResistance * 3;
+   684→        return this;
+   685→}
+   686→
+   687→Tile* Tile::setDestroyTime( float destroySpeed )
+   688→{
+   689→        this->destroySpeed = destroySpeed;
+   690→        if (explosionResistance < destroySpeed * 5) explosionResistance = destroySpeed * 5;
+   691→        return this;
+   692→}
+   693→
+   694→void Tile::setTicking( bool tick )
+   695→{
+   696→        shouldTick[id] = tick;
+   697→}
+   698→
+   699→int Tile::getSpawnResourcesAuxValue( int data )
+   700→{
+   701→        return 0;
+   702→}
+   703→
+   704→bool Tile::containsX( const Vec3& v )
+   705→{
+   706→        return v.y >= yy0 && v.y <= yy1 && v.z >= zz0 && v.z <= zz1;
+   707→}
+   708→
+   709→bool Tile::containsY( const Vec3& v )
+   710→{
+   711→        return v.x >= xx0 && v.x <= xx1 && v.z >= zz0 && v.z <= zz1;
+   712→}
+   713→
+   714→bool Tile::containsZ( const Vec3& v )
+   715→{
+   716→        return v.x >= xx0 && v.x <= xx1 && v.y >= yy0 && v.y <= yy1;
+   717→}
+   718→
+   719→/*public*/
+   720→AABB Tile::getTileAABB(Level* level, int x, int y, int z) {
+   721→        return AABB(x + xx0, y + yy0, z + zz0, x + xx1, y + yy1, z + zz1);
+   722→}
+   723→
+   724→/*public*/
+   725→void Tile::setShape(float x0, float y0, float z0, float x1, float y1, float z1) {
+   726→        this->xx0 = x0;
+   727→        this->yy0 = y0;
+   728→        this->zz0 = z0;
+   729→        this->xx1 = x1;
+   730→        this->yy1 = y1;
+   731→        this->zz1 = z1;
+   732→}
+   733→
+   734→/*public*/
+   735→bool Tile::mayPlace(Level* level, int x, int y, int z, unsigned char face) {
+   736→        return mayPlace(level, x, y, z);
+   737→}
+   738→
+   739→bool Tile::mayPlace( Level* level, int x, int y, int z ) {
+   740→        int t = level->getTile(x, y, z);
+   741→        return t == 0 || Tile::tiles[t]->material->isReplaceable();
+   742→}
+   743→
+   744→Tile* Tile::setCategory(int category) {
+   745→        this->category = category;
+   746→        return this;
+   747→}
+   748→

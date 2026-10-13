@@ -1,0 +1,1296 @@
+     1→     1→#include "LevelRenderer.h"
+     2→     2→
+     3→     3→#include "DirtyChunkSorter.h"
+     4→     4→#include "DistanceChunkSorter.h"
+     5→     5→#include "Chunk.h"
+     6→     6→#include "TileRenderer.h"
+     7→     7→#include "../Minecraft.h"
+     8→     8→#include "../../util/Mth.h"
+     9→     9→#include "../../world/entity/player/Player.h"
+    10→    10→#include "../../world/level/tile/LevelEvent.h"
+    11→    11→#include "../../world/level/tile/LeafTile.h"
+    12→    12→#include "../../client/particle/ParticleEngine.h"
+    13→    13→#include "../../client/particle/ParticleInclude.h"
+    14→    14→#include "../sound/SoundEngine.h"
+    15→    15→#include "culling/Culler.h"
+    16→    16→#include "entity/EntityRenderDispatcher.h"
+    17→    17→#include "../model/HumanoidModel.h"
+    18→    18→
+    19→    19→#include "GameRenderer.h"
+    20→    20→#include "../../AppPlatform.h"
+    21→    21→#include "../../util/PerfTimer.h"
+    22→    22→#include "Textures.h"
+    23→    23→#include "tileentity/TileEntityRenderDispatcher.h"
+    24→    24→#include "../particle/BreakingItemParticle.h"
+    25→    25→
+    26→    26→#include "../../client/player/LocalPlayer.h"
+    27→    27→
+    28→    28→#ifdef GFX_SMALLER_CHUNKS
+    29→    29→/* static */ const int LevelRenderer::CHUNK_SIZE = 8;
+    30→    30→#else
+    31→    31→/* static */ const int LevelRenderer::CHUNK_SIZE = 16;
+    32→    32→#endif
+    33→    33→
+    34→    34→LevelRenderer::LevelRenderer( Minecraft* mc)
+    35→    35→:       mc(mc),
+    36→    36→        textures(mc->textures),
+    37→    37→        level(NULL),
+    38→    38→        cullStep(0),
+    39→    39→
+    40→    40→        chunkLists(0),
+    41→    41→        xChunks(0), yChunks(0), zChunks(0),
+    42→    42→
+    43→    43→        chunks(NULL),
+    44→    44→        sortedChunks(NULL),
+    45→    45→
+    46→    46→        xMinChunk(0), yMinChunk(0), zMinChunk(0),
+    47→    47→        xMaxChunk(0), yMaxChunk(0), zMaxChunk(0),
+    48→    48→
+    49→    49→        lastViewDistance(-1),
+    50→    50→
+    51→    51→        noEntityRenderFrames(2),
+    52→    52→        totalEntities(0),
+    53→    53→        renderedEntities(0),
+    54→    54→        culledEntities(0),
+    55→    55→
+    56→    56→        occlusionCheck(false),
+    57→    57→        totalChunks(0), offscreenChunks(0), renderedChunks(0), occludedChunks(0), emptyChunks(0),
+    58→    58→
+    59→    59→        chunkFixOffs(0),
+    60→    60→        xOld(-9999), yOld(-9999), zOld(-9999),
+    61→    61→
+    62→    62→        ticks(0),
+    63→    63→        skyList(0), starList(0), darkList(0),
+    64→    64→        tileRenderer(NULL),
+    65→    65→        destroyProgress(0)
+    66→    66→{
+    67→    67→#ifdef OPENGL_ES
+    68→    68→        int maxChunksWidth = 2 * LEVEL_WIDTH / CHUNK_SIZE + 1;
+    69→    69→        numListsOrBuffers = maxChunksWidth * maxChunksWidth * (128/CHUNK_SIZE) * 3;
+    70→    70→        chunkBuffers = new GLuint[numListsOrBuffers];
+    71→    71→        glGenBuffers2(numListsOrBuffers, chunkBuffers);
+    72→    72→        LOGI("numBuffers: %d\n", numListsOrBuffers);
+    73→    73→        //for (int i = 0; i < numListsOrBuffers; ++i) printf("bufId %d: %d\t", i, chunkBuffers[i]);
+    74→    74→
+    75→    75→        glGenBuffers2(1, &skyBuffer);
+    76→    76→        generateSky();
+    77→    77→#else
+    78→    78→        int maxChunksWidth = 1024 / CHUNK_SIZE;
+    79→    79→        numListsOrBuffers = maxChunksWidth * maxChunksWidth * maxChunksWidth * 3;
+    80→    80→        chunkLists = glGenLists(numListsOrBuffers);
+    81→    81→#endif
+    82→    82→}
+    83→    83→
+    84→    84→LevelRenderer::~LevelRenderer()
+    85→    85→{
+    86→    86→        delete tileRenderer;
+    87→    87→        tileRenderer = NULL;
+    88→    88→
+    89→    89→        deleteChunks();
+    90→    90→
+    91→    91→#ifdef OPENGL_ES
+    92→    92→        glDeleteBuffers(numListsOrBuffers, chunkBuffers);
+    93→    93→        glDeleteBuffers(1, &skyBuffer);
+    94→    94→        delete[] chunkBuffers;
+    95→    95→#else
+    96→    96→        glDeleteLists(numListsOrBuffers, chunkLists);
+    97→    97→#endif
+    98→    98→}
+    99→    99→
+   100→   100→void LevelRenderer::generateSky() {
+   101→   101→        Tesselator& t = Tesselator::instance;
+   102→   102→        float yy;
+   103→   103→        int s = 128;
+   104→   104→        int d = (256 / s) + 2;
+   105→   105→        yy = (float) (16);
+   106→   106→        t.begin();
+   107→   107→
+   108→   108→        skyVertexCount = 0;
+   109→   109→        for (int xx = -s * d; xx <= s * d; xx += s) {
+   110→   110→                for (int zz = -s * d; zz <= s * d; zz += s) {
+   111→   111→                        t.vertex((float) xx + 0,  yy, (float) zz + 0);
+   112→   112→                        t.vertex((float)(xx + s), yy, (float) zz + 0);
+   113→   113→                        t.vertex((float)(xx + s), yy, (float)(zz + s));
+   114→   114→                        t.vertex((float) xx + 0,  yy, (float)(zz + s));
+   115→   115→                        //LOGI("x, z: %d, %d\n", xx, zz);
+   116→   116→                        skyVertexCount += 4;
+   117→   117→                }
+   118→   118→        }
+   119→   119→
+   120→   120→        t.end(true, skyBuffer);
+   121→   121→        //LOGI("skyvertexcount: %d\n", skyVertexCount);
+   122→   122→        //glEndList();
+   123→   123→}
+   124→   124→
+   125→   125→void LevelRenderer::setLevel( Level* level )
+   126→   126→{
+   127→   127→        if (this->level != NULL) {
+   128→   128→                this->level->removeListener(this);
+   129→   129→        }
+   130→   130→
+   131→   131→        xOld = -9999;
+   132→   132→        yOld = -9999;
+   133→   133→        zOld = -9999;
+   134→   134→
+   135→   135→        EntityRenderDispatcher::getInstance()->setLevel(level);
+   136→   136→        EntityRenderDispatcher::getInstance()->setMinecraft(mc);
+   137→   137→        this->level = level;
+   138→   138→
+   139→   139→        delete tileRenderer;
+   140→   140→        tileRenderer = new TileRenderer(level);
+   141→   141→
+   142→   142→        if (level != NULL) {
+   143→   143→                level->addListener(this);
+   144→   144→                allChanged();
+   145→   145→        }
+   146→   146→}
+   147→   147→
+   148→   148→void LevelRenderer::allChanged()
+   149→   149→{
+   150→   150→        deleteChunks();
+   151→   151→
+   152→   152→        Tile::leaves->setFancy(mc->options.fancyGraphics);
+   153→   153→        Tile::leaves_carried->setFancy(mc->options.fancyGraphics);
+   154→   154→        lastViewDistance = mc->options.viewDistance;
+   155→   155→
+   156→   156→        int dist = (512 >> 3) << (3 - lastViewDistance);
+   157→   157→        if (lastViewDistance <= 2 && mc->isPowerVR())
+   158→   158→                dist = (int)((float)dist * 0.8f);
+   159→   159→        LOGI("last: %d, power: %d\n", lastViewDistance, mc->isPowerVR());
+   160→   160→
+   161→   161→        #if defined(RPI)
+   162→   162→                dist *= 0.6f;
+   163→   163→        #endif
+   164→   164→
+   165→   165→        if (dist > 400) dist = 400;
+   166→   166→        /*
+   167→   167→        * if (Minecraft.FLYBY_MODE) { dist = 512 - CHUNK_SIZE * 2; }
+   168→   168→        */
+   169→   169→        xChunks = (dist / LevelRenderer::CHUNK_SIZE) + 1;
+   170→   170→        yChunks = (128 /  LevelRenderer::CHUNK_SIZE);
+   171→   171→        zChunks = (dist / LevelRenderer::CHUNK_SIZE) + 1;
+   172→   172→        chunksLength = xChunks * yChunks * zChunks;
+   173→   173→        LOGI("chunksLength: %d. Distance: %d\n", chunksLength, dist);
+   174→   174→
+   175→   175→        chunks = new Chunk*[chunksLength];
+   176→   176→        sortedChunks = new Chunk*[chunksLength];
+   177→   177→
+   178→   178→        int id = 0;
+   179→   179→        int count = 0;
+   180→   180→
+   181→   181→        xMinChunk = 0;
+   182→   182→        yMinChunk = 0;
+   183→   183→        zMinChunk = 0;
+   184→   184→        xMaxChunk = xChunks;
+   185→   185→        yMaxChunk = yChunks;
+   186→   186→        zMaxChunk = zChunks;
+   187→   187→        dirtyChunks.clear();
+   188→   188→        //renderableTileEntities.clear();
+   189→   189→
+   190→   190→        for (int x = 0; x < xChunks; x++) {
+   191→   191→                for (int y = 0; y < yChunks; y++) {
+   192→   192→                        for (int z = 0; z < zChunks; z++) {
+   193→   193→                                const int c = getLinearCoord(x, y, z);
+   194→   194→                                Chunk* chunk = new Chunk(level, x * CHUNK_SIZE, y * CHUNK_SIZE, z * CHUNK_SIZE, CHUNK_SIZE, chunkLists + id, &chunkBuffers[id]);
+   195→   195→
+   196→   196→                                if (occlusionCheck) {
+   197→   197→                                        chunk->occlusion_id = 0;//occlusionCheckIds.get(count);
+   198→   198→                                }
+   199→   199→                                chunk->occlusion_querying = false;
+   200→   200→                                chunk->occlusion_visible = true;
+   201→   201→                                chunk->visible = true;
+   202→   202→                                chunk->id = count++;
+   203→   203→                                chunk->setDirty();
+   204→   204→
+   205→   205→                                chunks[c] = chunk;
+   206→   206→                                sortedChunks[c] = chunk;
+   207→   207→                                dirtyChunks.push_back(chunk);
+   208→   208→
+   209→   209→                                id += 3;
+   210→   210→                        }
+   211→   211→                }
+   212→   212→        }
+   213→   213→
+   214→   214→        if (level != NULL) {
+   215→   215→                Entity* player = mc->cameraTargetPlayer;
+   216→   216→                if (player != NULL) {
+   217→   217→                        this->resortChunks(Mth::floor(player->x), Mth::floor(player->y), Mth::floor(player->z));
+   218→   218→                        DistanceChunkSorter distanceSorter(player);
+   219→   219→                        std::sort(sortedChunks, sortedChunks + chunksLength, distanceSorter);
+   220→   220→                }
+   221→   221→        }
+   222→   222→        noEntityRenderFrames = 2;
+   223→   223→}
+   224→   224→
+   225→   225→void LevelRenderer::deleteChunks()
+   226→   226→{
+   227→   227→        for (int z = 0; z < zChunks; ++z)
+   228→   228→        for (int y = 0; y < yChunks; ++y)
+   229→   229→        for (int x = 0; x < xChunks; ++x) {
+   230→   230→                int c = getLinearCoord(x, y, z);
+   231→   231→                delete chunks[c];
+   232→   232→        }
+   233→   233→
+   234→   234→        delete[] chunks;
+   235→   235→        chunks = NULL;
+   236→   236→
+   237→   237→        delete[] sortedChunks;
+   238→   238→        sortedChunks = NULL;
+   239→   239→}
+   240→   240→
+   241→   241→void LevelRenderer::resortChunks( int xc, int yc, int zc )
+   242→   242→{
+   243→   243→        xc -= CHUNK_SIZE / 2;
+   244→   244→        //yc -= CHUNK_SIZE / 2;
+   245→   245→        zc -= CHUNK_SIZE / 2;
+   246→   246→        xMinChunk = INT_MAX;
+   247→   247→        yMinChunk = INT_MAX;
+   248→   248→        zMinChunk = INT_MAX;
+   249→   249→        xMaxChunk = INT_MIN;
+   250→   250→        yMaxChunk = INT_MIN;
+   251→   251→        zMaxChunk = INT_MIN;
+   252→   252→
+   253→   253→        int dirty = 0;
+   254→   254→
+   255→   255→        int s2 = xChunks * CHUNK_SIZE;
+   256→   256→        int s1 = s2 / 2;
+   257→   257→
+   258→   258→        for (int x = 0; x < xChunks; x++) {
+   259→   259→                int xx = x * CHUNK_SIZE;
+   260→   260→
+   261→   261→                int xOff = (xx + s1 - xc);
+   262→   262→                if (xOff < 0) xOff -= (s2 - 1);
+   263→   263→                xOff /= s2;
+   264→   264→                xx -= xOff * s2;
+   265→   265→
+   266→   266→                if (xx < xMinChunk) xMinChunk = xx;
+   267→   267→                if (xx > xMaxChunk) xMaxChunk = xx;
+   268→   268→
+   269→   269→                for (int z = 0; z < zChunks; z++) {
+   270→   270→                        int zz = z * CHUNK_SIZE;
+   271→   271→                        int zOff = (zz + s1 - zc);
+   272→   272→                        if (zOff < 0) zOff -= (s2 - 1);
+   273→   273→                        zOff /= s2;
+   274→   274→                        zz -= zOff * s2;
+   275→   275→
+   276→   276→                        if (zz < zMinChunk) zMinChunk = zz;
+   277→   277→                        if (zz > zMaxChunk) zMaxChunk = zz;
+   278→   278→
+   279→   279→                        for (int y = 0; y < yChunks; y++) {
+   280→   280→                                int yy = y * CHUNK_SIZE;
+   281→   281→                                if (yy < yMinChunk) yMinChunk = yy;
+   282→   282→                                if (yy > yMaxChunk) yMaxChunk = yy;
+   283→   283→
+   284→   284→                                Chunk* chunk = chunks[(z * yChunks + y) * xChunks + x];
+   285→   285→                                bool wasDirty = chunk->isDirty();
+   286→   286→                                chunk->setPos(xx, yy, zz);
+   287→   287→                                if (!wasDirty && chunk->isDirty()) {
+   288→   288→                                        dirtyChunks.push_back(chunk);
+   289→   289→                                        ++dirty;
+   290→   290→                                }
+   291→   291→                        }
+   292→   292→                }
+   293→   293→        }
+   294→   294→}
+   295→   295→
+   296→   296→int LevelRenderer::render( Mob* player, int layer, float alpha )
+   297→   297→{
+   298→   298→        if (mc->options.viewDistance != lastViewDistance) {
+   299→   299→                allChanged();
+   300→   300→        }
+   301→   301→
+   302→   302→        TIMER_PUSH("sortchunks");
+   303→   303→        for (int i = 0; i < 10; i++) {
+   304→   304→                chunkFixOffs = (chunkFixOffs + 1) % chunksLength;
+   305→   305→                Chunk* c = chunks[chunkFixOffs];
+   306→   306→                if (c->isDirty() && std::find(dirtyChunks.begin(), dirtyChunks.end(), c) == dirtyChunks.end()) {
+   307→   307→                        dirtyChunks.push_back(c);
+   308→   308→                }
+   309→   309→        }
+   310→   310→
+   311→   311→        if (layer == 0) {
+   312→   312→                totalChunks = 0;
+   313→   313→                offscreenChunks = 0;
+   314→   314→                occludedChunks = 0;
+   315→   315→                renderedChunks = 0;
+   316→   316→                emptyChunks = 0;
+   317→   317→        }
+   318→   318→
+   319→   319→        float xOff = player->xOld + (player->x - player->xOld) * alpha;
+   320→   320→        float yOff = player->yOld + (player->y - player->yOld) * alpha;
+   321→   321→        float zOff = player->zOld + (player->z - player->zOld) * alpha;
+   322→   322→
+   323→   323→        float xd = player->x - xOld;
+   324→   324→        float yd = player->y - yOld;
+   325→   325→        float zd = player->z - zOld;
+   326→   326→        if (xd * xd + yd * yd + zd * zd > 4 * 4) {
+   327→   327→                xOld = player->x;
+   328→   328→                yOld = player->y;
+   329→   329→                zOld = player->z;
+   330→   330→
+   331→   331→                resortChunks(Mth::floor(player->x), Mth::floor(player->y), Mth::floor(player->z));
+   332→   332→                DistanceChunkSorter distanceSorter(player);
+   333→   333→                std::sort(sortedChunks, sortedChunks + chunksLength, distanceSorter);
+   334→   334→        }
+   335→   335→
+   336→   336→        int count = 0;
+   337→   337→        if (occlusionCheck && !mc->options.anaglyph3d && layer == 0) {
+   338→   338→                int from = 0;
+   339→   339→                int to = 16;
+   340→   340→                //checkQueryResults(from, to);
+   341→   341→                for (int i = from; i < to; i++) {
+   342→   342→                        sortedChunks[i]->occlusion_visible = true;
+   343→   343→                }
+   344→   344→
+   345→   345→                count += renderChunks(from, to, layer, alpha);
+   346→   346→
+   347→   347→                do {
+   348→   348→                        from = to;
+   349→   349→                        to = to * 2;
+   350→   350→                        if (to > chunksLength) to = chunksLength;
+   351→   351→
+   352→   352→                        glDisable2(GL_TEXTURE_2D);
+   353→   353→                        glDisable2(GL_LIGHTING);
+   354→   354→                        glDisable2(GL_ALPHA_TEST);
+   355→   355→                        glDisable2(GL_FOG);
+   356→   356→
+   357→   357→                        glColorMask(false, false, false, false);
+   358→   358→                        glDepthMask(false);
+   359→   359→                        //checkQueryResults(from, to);
+   360→   360→                        glPushMatrix2();
+   361→   361→                        float xo = 0;
+   362→   362→                        float yo = 0;
+   363→   363→                        float zo = 0;
+   364→   364→                        for (int i = from; i < to; i++) {
+   365→   365→                                if (sortedChunks[i]->isEmpty()) {
+   366→   366→                                        sortedChunks[i]->visible = false;
+   367→   367→                                        continue;
+   368→   368→                                }
+   369→   369→                                if (!sortedChunks[i]->visible) {
+   370→   370→                                        sortedChunks[i]->occlusion_visible = true;
+   371→   371→                                }
+   372→   372→
+   373→   373→                                if (sortedChunks[i]->visible && !sortedChunks[i]->occlusion_querying) {
+   374→   374→                                        float dist = Mth::sqrt(sortedChunks[i]->distanceToSqr(player));
+   375→   375→
+   376→   376→                                        int frequency = (int) (1 + dist / 128);
+   377→   377→
+   378→   378→                                        if (ticks % frequency == i % frequency) {
+   379→   379→                                                Chunk* chunk = sortedChunks[i];
+   380→   380→                                                float xt = (float) (chunk->x - xOff);
+   381→   381→                                                float yt = (float) (chunk->y - yOff);
+   382→   382→                                                float zt = (float) (chunk->z - zOff);
+   383→   383→                                                float xdd = xt - xo;
+   384→   384→                                                float ydd = yt - yo;
+   385→   385→                                                float zdd = zt - zo;
+   386→   386→
+   387→   387→                                                if (xdd != 0 || ydd != 0 || zdd != 0) {
+   388→   388→                                                        glTranslatef2(xdd, ydd, zdd);
+   389→   389→                                                        xo += xdd;
+   390→   390→                                                        yo += ydd;
+   391→   391→                                                        zo += zdd;
+   392→   392→                                                }
+   393→   393→
+   394→   394→                                                sortedChunks[i]->renderBB();
+   395→   395→                                                sortedChunks[i]->occlusion_querying = true;
+   396→   396→                                        }
+   397→   397→                                }
+   398→   398→                        }
+   399→   399→                        glPopMatrix2();
+   400→   400→                        glColorMask(true, true, true, true);
+   401→   401→                        glDepthMask(true);
+   402→   402→                        glEnable2(GL_TEXTURE_2D);
+   403→   403→                        glEnable2(GL_ALPHA_TEST);
+   404→   404→                        glEnable2(GL_FOG);
+   405→   405→
+   406→   406→                        count += renderChunks(from, to, layer, alpha);
+   407→   407→
+   408→   408→                } while (to < chunksLength);
+   409→   409→
+   410→   410→        } else {
+   411→   411→                TIMER_POP_PUSH("render");
+   412→   412→                count += renderChunks(0, chunksLength, layer, alpha);
+   413→   413→        }
+   414→   414→
+   415→   415→        TIMER_POP();
+   416→   416→        return count;
+   417→   417→}
+   418→   418→
+   419→   419→void LevelRenderer::renderDebug(const AABB& b, float a) const {
+   420→   420→        float x0 = b.x0;
+   421→   421→        float x1 = b.x1;
+   422→   422→        float y0 = b.y0;
+   423→   423→        float y1 = b.y1;
+   424→   424→        float z0 = b.z0;
+   425→   425→        float z1 = b.z1;
+   426→   426→        float u0 = 0, v0 = 0;
+   427→   427→        float u1 = 1, v1 = 1;
+   428→   428→
+   429→   429→        glEnable2(GL_BLEND);
+   430→   430→        glBlendFunc2(GL_DST_COLOR, GL_SRC_COLOR);
+   431→   431→        glDisable2(GL_TEXTURE_2D);
+   432→   432→        glColor4f2(1, 1, 1, 1);
+   433→   433→
+   434→   434→        textures->loadAndBindTexture("terrain.png");
+   435→   435→
+   436→   436→        Tesselator& t = Tesselator::instance;
+   437→   437→        t.begin();
+   438→   438→        t.color(255, 255, 255, 255);
+   439→   439→
+   440→   440→        t.offset(((Mob*)mc->player)->getPos(a).negated());
+   441→   441→
+   442→   442→        // up
+   443→   443→        t.vertexUV(x0, y0, z1, u0, v1);
+   444→   444→        t.vertexUV(x0, y0, z0, u0, v0);
+   445→   445→        t.vertexUV(x1, y0, z0, u1, v0);
+   446→   446→        t.vertexUV(x1, y0, z1, u1, v1);
+   447→   447→
+   448→   448→        // down
+   449→   449→        t.vertexUV(x1, y1, z1, u1, v1);
+   450→   450→        t.vertexUV(x1, y1, z0, u1, v0);
+   451→   451→        t.vertexUV(x0, y1, z0, u0, v0);
+   452→   452→        t.vertexUV(x0, y1, z1, u0, v1);
+   453→   453→
+   454→   454→        // north
+   455→   455→        t.vertexUV(x0, y1, z0, u1, v0);
+   456→   456→        t.vertexUV(x1, y1, z0, u0, v0);
+   457→   457→        t.vertexUV(x1, y0, z0, u0, v1);
+   458→   458→        t.vertexUV(x0, y0, z0, u1, v1);
+   459→   459→
+   460→   460→        // south
+   461→   461→        t.vertexUV(x0, y1, z1, u0, v0);
+   462→   462→        t.vertexUV(x0, y0, z1, u0, v1);
+   463→   463→        t.vertexUV(x1, y0, z1, u1, v1);
+   464→   464→        t.vertexUV(x1, y1, z1, u1, v0);
+   465→   465→
+   466→   466→        // west
+   467→   467→        t.vertexUV(x0, y1, z1, u1, v0);
+   468→   468→        t.vertexUV(x0, y1, z0, u0, v0);
+   469→   469→        t.vertexUV(x0, y0, z0, u0, v1);
+   470→   470→        t.vertexUV(x0, y0, z1, u1, v1);
+   471→   471→
+   472→   472→        // east
+   473→   473→        t.vertexUV(x1, y0, z1, u0, v1);
+   474→   474→        t.vertexUV(x1, y0, z0, u1, v1);
+   475→   475→        t.vertexUV(x1, y1, z0, u1, v0);
+   476→   476→        t.vertexUV(x1, y1, z1, u0, v0);
+   477→   477→
+   478→   478→        t.offset(0, 0, 0);
+   479→   479→        t.draw();
+   480→   480→
+   481→   481→        glEnable2(GL_TEXTURE_2D);
+   482→   482→        glDisable2(GL_BLEND);
+   483→   483→}
+   484→   484→
+   485→   485→void LevelRenderer::render(const AABB& b) const
+   486→   486→{
+   487→   487→        Tesselator& t = Tesselator::instance;
+   488→   488→
+   489→   489→        glColor4f2(1, 1, 1, 1);
+   490→   490→
+   491→   491→        textures->loadAndBindTexture("terrain.png");
+   492→   492→
+   493→   493→        //t.begin();
+   494→   494→        t.color(255, 255, 255, 255);
+   495→   495→
+   496→   496→        t.offset(((Mob*)mc->player)->getPos(0).negated());
+   497→   497→
+   498→   498→        t.begin(GL_LINE_STRIP);
+   499→   499→        t.vertex(b.x0, b.y0, b.z0);
+   500→   500→        t.vertex(b.x1, b.y0, b.z0);
+   501→   501→        t.vertex(b.x1, b.y0, b.z1);
+   502→   502→        t.vertex(b.x0, b.y0, b.z1);
+   503→   503→        t.vertex(b.x0, b.y0, b.z0);
+   504→   504→        t.draw();
+   505→   505→
+   506→   506→        t.begin(GL_LINE_STRIP);
+   507→   507→        t.vertex(b.x0, b.y1, b.z0);
+   508→   508→        t.vertex(b.x1, b.y1, b.z0);
+   509→   509→        t.vertex(b.x1, b.y1, b.z1);
+   510→   510→        t.vertex(b.x0, b.y1, b.z1);
+   511→   511→        t.vertex(b.x0, b.y1, b.z0);
+   512→   512→        t.draw();
+   513→   513→
+   514→   514→        t.begin(GL_LINES);
+   515→   515→        t.vertex(b.x0, b.y0, b.z0);
+   516→   516→        t.vertex(b.x0, b.y1, b.z0);
+   517→   517→        t.vertex(b.x1, b.y0, b.z0);
+   518→   518→        t.vertex(b.x1, b.y1, b.z0);
+   519→   519→        t.vertex(b.x1, b.y0, b.z1);
+   520→   520→        t.vertex(b.x1, b.y1, b.z1);
+   521→   521→        t.vertex(b.x0, b.y0, b.z1);
+   522→   522→        t.vertex(b.x0, b.y1, b.z1);
+   523→   523→
+   524→   524→        t.offset(0, 0, 0);
+   525→   525→        t.draw();
+   526→   526→}
+   527→   527→
+   528→   528→//void LevelRenderer::checkQueryResults( int from, int to )
+   529→   529→//{
+   530→   530→//      for (int i = from; i < to; i++) {
+   531→   531→//              if (sortedChunks[i]->occlusion_querying) {
+   532→   532→//                      // I wanna do a fast occusion culler here.
+   533→   533→//              }
+   534→   534→//      }
+   535→   535→//}
+   536→   536→
+   537→   537→int LevelRenderer::renderChunks( int from, int to, int layer, float alpha )
+   538→   538→{
+   539→   539→        _renderChunks.clear();
+   540→   540→        int count = 0;
+   541→   541→        for (int i = from; i < to; i++) {
+   542→   542→                if (layer == 0) {
+   543→   543→                        totalChunks++;
+   544→   544→                        if (sortedChunks[i]->empty[layer]) emptyChunks++;
+   545→   545→                        else if (!sortedChunks[i]->visible) offscreenChunks++;
+   546→   546→                        else if (occlusionCheck && !sortedChunks[i]->occlusion_visible) occludedChunks++;
+   547→   547→                        else renderedChunks++;
+   548→   548→                }
+   549→   549→
+   550→   550→                if (!sortedChunks[i]->empty[layer] && sortedChunks[i]->visible && sortedChunks[i]->occlusion_visible) {
+   551→   551→                        int list = sortedChunks[i]->getList(layer);
+   552→   552→                        if (list >= 0) {
+   553→   553→                                _renderChunks.push_back(sortedChunks[i]);
+   554→   554→                                count++;
+   555→   555→                        }
+   556→   556→                }
+   557→   557→        }
+   558→   558→
+   559→   559→        Mob* player = mc->cameraTargetPlayer;
+   560→   560→        float xOff = player->xOld + (player->x - player->xOld) * alpha;
+   561→   561→        float yOff = player->yOld + (player->y - player->yOld) * alpha;
+   562→   562→        float zOff = player->zOld + (player->z - player->zOld) * alpha;
+   563→   563→
+   564→   564→        //int lists = 0;
+   565→   565→        renderList.clear();
+   566→   566→        renderList.init(xOff, yOff, zOff);
+   567→   567→
+   568→   568→        for (unsigned int i = 0; i < _renderChunks.size(); ++i) {
+   569→   569→                Chunk* chunk = _renderChunks[i];
+   570→   570→                #ifdef USE_VBO
+   571→   571→                        renderList.addR(chunk->getRenderChunk(layer));
+   572→   572→                #else
+   573→   573→                        renderList.add(chunk->getList(layer));
+   574→   574→                #endif
+   575→   575→                renderList.next();
+   576→   576→        }
+   577→   577→
+   578→   578→        renderSameAsLast(layer, alpha);
+   579→   579→
+   580→   580→        return count;
+   581→   581→}
+   582→   582→
+   583→   583→void LevelRenderer::renderSameAsLast( int layer, float alpha )
+   584→   584→{
+   585→   585→        renderList.render();
+   586→   586→}
+   587→   587→
+   588→   588→void LevelRenderer::tick()
+   589→   589→{
+   590→   590→        ticks++;
+   591→   591→}
+   592→   592→
+   593→   593→bool LevelRenderer::updateDirtyChunks( Mob* player, bool force )
+   594→   594→{
+   595→   595→        bool slow = false;
+   596→   596→
+   597→   597→        if (slow) {
+   598→   598→                DirtyChunkSorter dirtySorter(player);
+   599→   599→                std::sort(dirtyChunks.begin(), dirtyChunks.end(), dirtySorter);
+   600→   600→                int s = dirtyChunks.size() - 1;
+   601→   601→                int amount = dirtyChunks.size();
+   602→   602→                for (int i = 0; i < amount; i++) {
+   603→   603→                        Chunk* chunk = dirtyChunks[s-i];
+   604→   604→                        if (!force) {
+   605→   605→                                if (chunk->distanceToSqr(player) > 16 * 16) {
+   606→   606→                                        if (chunk->visible) {
+   607→   607→                                                if (i >= MAX_VISIBLE_REBUILDS_PER_FRAME) return false;
+   608→   608→                                        } else {
+   609→   609→                                                if (i >= MAX_INVISIBLE_REBUILDS_PER_FRAME) return false;
+   610→   610→                                        }
+   611→   611→                                }
+   612→   612→                        } else {
+   613→   613→                                if (!chunk->visible) continue;
+   614→   614→                        }
+   615→   615→                        chunk->rebuild();
+   616→   616→
+   617→   617→                        dirtyChunks.erase( std::find(dirtyChunks.begin(), dirtyChunks.end(), chunk) ); // @q: s-i?
+   618→   618→                        chunk->setClean();
+   619→   619→                }
+   620→   620→
+   621→   621→                return dirtyChunks.size() == 0;
+   622→   622→        } else {
+   623→   623→                const int count = 3;
+   624→   624→
+   625→   625→                DirtyChunkSorter dirtyChunkSorter(player);
+   626→   626→                Chunk* toAdd[count] = {NULL};
+   627→   627→                std::vector<Chunk*>* nearChunks = NULL;
+   628→   628→
+   629→   629→                int pendingChunkSize = dirtyChunks.size();
+   630→   630→                int pendingChunkRemoved = 0;
+   631→   631→
+   632→   632→                for (int i = 0; i < pendingChunkSize; i++) {
+   633→   633→                        Chunk* chunk = dirtyChunks[i];
+   634→   634→
+   635→   635→                        if (!force) {
+   636→   636→                                if (chunk->distanceToSqr(player) > 1024.0f) {
+   637→   637→                                        int index;
+   638→   638→
+   639→   639→                                        // is this chunk in the closest <count>?
+   640→   640→                                        for (index = 0; index < count; index++) {
+   641→   641→                                                if (toAdd[index] != NULL && dirtyChunkSorter(toAdd[index], chunk) == false) {
+   642→   642→                                                        break;
+   643→   643→                                                }
+   644→   644→                                        }
+   645→   645→
+   646→   646→                                        index--;
+   647→   647→
+   648→   648→                                        if (index > 0) {
+   649→   649→                                                int x = index;
+   650→   650→                                                while (--x != 0) {
+   651→   651→                                                        toAdd[x - 1] = toAdd[x];
+   652→   652→                                                }
+   653→   653→                                                toAdd[index] = chunk;
+   654→   654→                                        }
+   655→   655→
+   656→   656→                                        continue;
+   657→   657→                                }
+   658→   658→                        } else if (!chunk->visible) {
+   659→   659→                                continue;
+   660→   660→                        }
+   661→   661→
+   662→   662→                        // chunk is very close -- always render
+   663→   663→
+   664→   664→                        if (nearChunks == NULL) {
+   665→   665→                                nearChunks = new std::vector<Chunk*>();
+   666→   666→                        }
+   667→   667→
+   668→   668→                        pendingChunkRemoved++;
+   669→   669→                        nearChunks->push_back(chunk);
+   670→   670→                        dirtyChunks[i] = NULL;
+   671→   671→                }
+   672→   672→
+   673→   673→                // if there are nearby chunks that need to be prepared for
+   674→   674→                // rendering, sort them and then process them
+   675→   675→                static const float MaxFrameTime = 1.0f / 100.0f;
+   676→   676→                Stopwatch chunkWatch;
+   677→   677→                chunkWatch.start();
+   678→   678→
+   679→   679→                if (nearChunks != NULL) {
+   680→   680→                        if (nearChunks->size() > 1) {
+   681→   681→                                std::sort(nearChunks->begin(), nearChunks->end(), dirtyChunkSorter);
+   682→   682→                        }
+   683→   683→
+   684→   684→                        for (int i = nearChunks->size() - 1; i >= 0; i--) {
+   685→   685→                                Chunk* chunk = (*nearChunks)[i];
+   686→   686→                                chunk->rebuild();
+   687→   687→                                chunk->setClean();
+   688→   688→                        }
+   689→   689→                        delete nearChunks;
+   690→   690→                }
+   691→   691→
+   692→   692→                // render the nearest <count> chunks (farther than 1024 units away)
+   693→   693→                int secondaryRemoved = 0;
+   694→   694→
+   695→   695→                for (int i = count - 1; i >= 0; i--) {
+   696→   696→                        Chunk* chunk = toAdd[i];
+   697→   697→                        if (chunk != NULL) {
+   698→   698→
+   699→   699→                                float ttt = chunkWatch.stopContinue();
+   700→   700→                                if (ttt >= MaxFrameTime) {
+   701→   701→                                        //LOGI("Too much work, I quit2!\n");
+   702→   702→                                        break;
+   703→   703→                                }
+   704→   704→
+   705→   705→                                if (!chunk->visible && i != count - 1) {
+   706→   706→                                        // escape early if chunks aren't ready
+   707→   707→                                        toAdd[i] = NULL;
+   708→   708→                                        toAdd[0] = NULL;
+   709→   709→                                        break;
+   710→   710→                                }
+   711→   711→                                toAdd[i]->rebuild();
+   712→   712→                                toAdd[i]->setClean();
+   713→   713→                                secondaryRemoved++;
+   714→   714→                        }
+   715→   715→                }
+   716→   716→
+   717→   717→                // compact by removing nulls
+   718→   718→                int cursor = 0;
+   719→   719→                int target = 0;
+   720→   720→                int arraySize = dirtyChunks.size();
+   721→   721→                while (cursor != arraySize) {
+   722→   722→                        Chunk* chunk = dirtyChunks[cursor];
+   723→   723→                        if (chunk != NULL) {
+   724→   724→                                bool remove = false;
+   725→   725→                for (int i = 0; i < count && !remove; i++)
+   726→   726→                    if (chunk == toAdd[i]) {
+   727→   727→                        remove = true;
+   728→   728→                    }
+   729→   729→
+   730→   730→                if (!remove) {
+   731→   731→                                //if (chunk == toAdd[0] || chunk == toAdd[1] || chunk == toAdd[2]) {
+   732→   732→                                //      ; // this chunk was rendered and should be removed
+   733→   733→                                //} else {
+   734→   734→                                        if (target != cursor) {
+   735→   735→                                                dirtyChunks[target] = chunk;
+   736→   736→                                        }
+   737→   737→                                        target++;
+   738→   738→                                }
+   739→   739→                        }
+   740→   740→                        cursor++;
+   741→   741→                }
+   742→   742→
+   743→   743→                // trim
+   744→   744→                if (cursor > target)
+   745→   745→                        dirtyChunks.erase(dirtyChunks.begin() + target, dirtyChunks.end());
+   746→   746→
+   747→   747→                return pendingChunkSize == (pendingChunkRemoved + secondaryRemoved);
+   748→   748→        }
+   749→   749→}
+   750→   750→
+   751→   751→void LevelRenderer::renderHit( Player* player, const HitResult& h, int mode, /*ItemInstance*/void* inventoryItem, float a )
+   752→   752→{
+   753→   753→        if (mode == 0) {
+   754→   754→                if (destroyProgress > 0) {
+   755→   755→                        Tesselator& t = Tesselator::instance;
+   756→   756→                        glEnable2(GL_BLEND);
+   757→   757→                        glBlendFunc2(GL_DST_COLOR, GL_SRC_COLOR);
+   758→   758→
+   759→   759→                        textures->loadAndBindTexture("terrain.png");
+   760→   760→                        glPushMatrix2();
+   761→   761→
+   762→   762→                        int tileId = level->getTile(h.x, h.y, h.z);
+   763→   763→                        Tile* tile = tileId > 0 ? Tile::tiles[tileId] : NULL;
+   764→   764→                        //glDisable2(GL_ALPHA_TEST);
+   765→   765→
+   766→   766→                        glPolygonOffset(-3.0f, -3.0f);
+   767→   767→                        glEnable2(GL_POLYGON_OFFSET_FILL);
+   768→   768→                        t.begin();
+   769→   769→                        t.color(1.0f, 1.0f, 1.0f, 0.5f);
+   770→   770→                        t.noColor();
+   771→   771→                        float xo = player->xOld + (player->x - player->xOld) * a;
+   772→   772→                        float yo = player->yOld + (player->y - player->yOld) * a;
+   773→   773→                        float zo = player->zOld + (player->z - player->zOld) * a;
+   774→   774→
+   775→   775→                        t.offset(-xo, -yo, -zo);
+   776→   776→                        //t.noColor();
+   777→   777→
+   778→   778→                        if (tile == NULL) tile = Tile::rock;
+   779→   779→                        const int progress = (int) (destroyProgress * 10);
+   780→   780→                        tileRenderer->tesselateInWorld(tile, h.x, h.y, h.z, 15 * 16 + progress);
+   781→   781→
+   782→   782→                        t.draw();
+   783→   783→                        t.offset(0, 0, 0);
+   784→   784→                        glPolygonOffset(0.0f, 0.0f);
+   785→   785→                        glDisable2(GL_POLYGON_OFFSET_FILL);
+   786→   786→                        //glDisable2(GL_ALPHA_TEST);
+   787→   787→                        glDisable2(GL_BLEND);
+   788→   788→
+   789→   789→                        glDepthMask(true);
+   790→   790→                        glPopMatrix2();
+   791→   791→                }
+   792→   792→        }
+   793→   793→        //else if (inventoryItem != NULL) {
+   794→   794→        //          glBlendFunc2(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+   795→   795→        //          float br = ((float) (util.Mth::sin(System.currentTimeMillis() / 100.0f)) * 0.2f + 0.8f);
+   796→   796→        //          glColor4f2(br, br, br, ((float) (util.Mth::sin(System.currentTimeMillis() / 200.0f)) * 0.2f + 0.5f));
+   797→   797→
+   798→   798→        //          int id = textures.loadTexture("terrain.png");
+   799→   799→        //          glBindTexture2(GL_TEXTURE_2D, id);
+   800→   800→        //          int x = h.x;
+   801→   801→        //          int y = h.y;
+   802→   802→        //          int z = h.z;
+   803→   803→        //          if (h.f == 0) y--;
+   804→   804→        //          if (h.f == 1) y++;
+   805→   805→        //          if (h.f == 2) z--;
+   806→   806→        //          if (h.f == 3) z++;
+   807→   807→        //          if (h.f == 4) x--;
+   808→   808→        //          if (h.f == 5) x++;
+   809→   809→        //          /*
+   810→   810→        //           * t.begin(); t.noColor(); Tile.tiles[tileType].tesselate(level, x,
+   811→   811→        //           * y, z, t); t.end();
+   812→   812→        //           */
+   813→   813→        //      }
+   814→   814→}
+   815→   815→
+   816→   816→void LevelRenderer::renderHitOutline( Player* player, const HitResult& h, int mode, /*ItemInstance*/void* inventoryItem, float a )
+   817→   817→{
+   818→   818→        if (mode == 0 && h.type == TILE) {
+   819→   819→                glEnable2(GL_BLEND);
+   820→   820→                glBlendFunc2(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+   821→   821→                glColor4f2(0, 0, 0, 0.4f);
+   822→   822→                glLineWidth(1.0f);
+   823→   823→                glDisable2(GL_TEXTURE_2D);
+   824→   824→                glDepthMask(false);
+   825→   825→                float ss = 0.002f;
+   826→   826→                int tileId = level->getTile(h.x, h.y, h.z);
+   827→   827→
+   828→   828→                if (tileId > 0) {
+   829→   829→                        Tile::tiles[tileId]->updateShape(level, h.x, h.y, h.z);
+   830→   830→                        float xo = player->xOld + (player->x - player->xOld) * a;
+   831→   831→                        float yo = player->yOld + (player->y - player->yOld) * a;
+   832→   832→                        float zo = player->zOld + (player->z - player->zOld) * a;
+   833→   833→                        render(Tile::tiles[tileId]->getTileAABB(level, h.x, h.y, h.z).grow(ss, ss, ss).cloneMove(-xo, -yo, -zo));
+   834→   834→                }
+   835→   835→                glDepthMask(true);
+   836→   836→                glEnable2(GL_TEXTURE_2D);
+   837→   837→                glDisable2(GL_BLEND);
+   838→   838→        }
+   839→   839→}
+   840→   840→
+   841→   841→void LevelRenderer::setDirty( int x0, int y0, int z0, int x1, int y1, int z1 )
+   842→   842→{
+   843→   843→        int _x0 = Mth::intFloorDiv(x0, CHUNK_SIZE);
+   844→   844→        int _y0 = Mth::intFloorDiv(y0, CHUNK_SIZE);
+   845→   845→        int _z0 = Mth::intFloorDiv(z0, CHUNK_SIZE);
+   846→   846→        int _x1 = Mth::intFloorDiv(x1, CHUNK_SIZE);
+   847→   847→        int _y1 = Mth::intFloorDiv(y1, CHUNK_SIZE);
+   848→   848→        int _z1 = Mth::intFloorDiv(z1, CHUNK_SIZE);
+   849→   849→
+   850→   850→        for (int x = _x0; x <= _x1; x++) {
+   851→   851→                int xx = x % xChunks;
+   852→   852→                if (xx < 0) xx += xChunks;
+   853→   853→                for (int y = _y0; y <= _y1; y++) {
+   854→   854→                        int yy = y % yChunks;
+   855→   855→                        if (yy < 0) yy += yChunks;
+   856→   856→                        for (int z = _z0; z <= _z1; z++) {
+   857→   857→                                int zz = z % zChunks;
+   858→   858→                                if (zz < 0) zz += zChunks;
+   859→   859→
+   860→   860→                                int p = ((zz) * yChunks + (yy)) * xChunks + (xx);
+   861→   861→                                Chunk* chunk = chunks[p];
+   862→   862→                                if (!chunk->isDirty()) {
+   863→   863→                                        dirtyChunks.push_back(chunk);
+   864→   864→                                        chunk->setDirty();
+   865→   865→                                }
+   866→   866→                        }
+   867→   867→                }
+   868→   868→        }
+   869→   869→}
+   870→   870→
+   871→   871→void LevelRenderer::tileChanged( int x, int y, int z)
+   872→   872→{
+   873→   873→        setDirty(x - 1, y - 1, z - 1, x + 1, y + 1, z + 1);
+   874→   874→}
+   875→   875→
+   876→   876→
+   877→   877→void LevelRenderer::setTilesDirty( int x0, int y0, int z0, int x1, int y1, int z1 )
+   878→   878→{
+   879→   879→        setDirty(x0 - 1, y0 - 1, z0 - 1, x1 + 1, y1 + 1, z1 + 1);
+   880→   880→}
+   881→   881→
+   882→   882→
+   883→   883→void LevelRenderer::cull( Culler* culler, float a )
+   884→   884→{
+   885→   885→        for (int i = 0; i < chunksLength; i++) {
+   886→   886→                if (!chunks[i]->isEmpty()) {
+   887→   887→                        if (!chunks[i]->visible || ((i + cullStep) & 15) == 0) {
+   888→   888→                                chunks[i]->cull(culler);
+   889→   889→                        }
+   890→   890→                }
+   891→   891→        }
+   892→   892→        cullStep++;
+   893→   893→}
+   894→   894→
+   895→   895→void LevelRenderer::skyColorChanged()
+   896→   896→{
+   897→   897→        for (int i = 0; i < chunksLength; i++) {
+   898→   898→                if (chunks[i]->skyLit) {
+   899→   899→                        if (!chunks[i]->isDirty()) {
+   900→   900→                                dirtyChunks.push_back(chunks[i]);
+   901→   901→                                chunks[i]->setDirty();
+   902→   902→                        }
+   903→   903→                }
+   904→   904→        }
+   905→   905→}
+   906→   906→
+   907→   907→bool entityRenderPredicate(const Entity* a, const Entity* b) {
+   908→   908→        return a->entityRendererId < b->entityRendererId;
+   909→   909→}
+   910→   910→
+   911→   911→void LevelRenderer::renderEntities(Vec3 cam, Culler* culler, float a) {
+   912→   912→    if (noEntityRenderFrames > 0) {
+   913→   913→        noEntityRenderFrames--;
+   914→   914→        return;
+   915→   915→    }
+   916→   916→
+   917→   917→        TIMER_PUSH("prepare");
+   918→   918→    TileEntityRenderDispatcher::getInstance()->prepare(level, textures, mc->font, mc->cameraTargetPlayer, a);
+   919→   919→    EntityRenderDispatcher::getInstance()->prepare(level, mc->font, mc->cameraTargetPlayer, &mc->options, a);
+   920→   920→
+   921→   921→    totalEntities = 0;
+   922→   922→    renderedEntities = 0;
+   923→   923→    culledEntities = 0;
+   924→   924→
+   925→   925→        Entity* player = mc->cameraTargetPlayer;
+   926→   926→    EntityRenderDispatcher::xOff = TileEntityRenderDispatcher::xOff = (player->xOld + (player->x - player->xOld) * a);
+   927→   927→    EntityRenderDispatcher::yOff = TileEntityRenderDispatcher::yOff = (player->yOld + (player->y - player->yOld) * a);
+   928→   928→    EntityRenderDispatcher::zOff = TileEntityRenderDispatcher::zOff = (player->zOld + (player->z - player->zOld) * a);
+   929→   929→
+   930→   930→        glEnableClientState2(GL_VERTEX_ARRAY);
+   931→   931→        glEnableClientState2(GL_TEXTURE_COORD_ARRAY);
+   932→   932→
+   933→   933→        TIMER_POP_PUSH("entities");
+   934→   934→        const EntityList& entities = level->getAllEntities();
+   935→   935→        totalEntities = entities.size();
+   936→   936→        if (totalEntities > 0) {
+   937→   937→                Entity** toRender = new Entity*[totalEntities];
+   938→   938→                for (int i = 0; i < totalEntities; i++) {
+   939→   939→                        Entity* entity = entities[i];
+   940→   940→
+   941→   941→                        if (entity->shouldRender(cam) && culler->isVisible(entity->bb))
+   942→   942→                        {
+   943→   943→                                if (entity == mc->cameraTargetPlayer && mc->options.thirdPersonView == 0 && mc->cameraTargetPlayer->isPlayer() && !((Player*)mc->cameraTargetPlayer)->isSleeping()) continue;
+   944→   944→                                if (entity == mc->cameraTargetPlayer && !mc->options.thirdPersonView)
+   945→   945→                                        continue;
+   946→   946→                                if (!level->hasChunkAt(Mth::floor(entity->x), Mth::floor(entity->y), Mth::floor(entity->z)))
+   947→   947→                                        continue;
+   948→   948→
+   949→   949→                                toRender[renderedEntities++] = entity;
+   950→   950→                                //EntityRenderDispatcher::getInstance()->render(entity, a);
+   951→   951→                        }
+   952→   952→                }
+   953→   953→
+   954→   954→                if (renderedEntities > 0) {
+   955→   955→                        std::sort(&toRender[0], &toRender[renderedEntities], entityRenderPredicate);
+   956→   956→                        for (int i = 0; i < renderedEntities; ++i) {
+   957→   957→                                EntityRenderDispatcher* disp = EntityRenderDispatcher::getInstance();
+   958→   958→                                disp->render(toRender[i], a);
+   959→   959→                        }
+   960→   960→                }
+   961→   961→
+   962→   962→                delete[] toRender;
+   963→   963→        }
+   964→   964→
+   965→   965→    TIMER_POP_PUSH("tileentities");
+   966→   966→    for (unsigned int i = 0; i < level->tileEntities.size(); i++) {
+   967→   967→        TileEntityRenderDispatcher::getInstance()->render(level->tileEntities[i], a);
+   968→   968→    }
+   969→   969→
+   970→   970→        glDisableClientState2(GL_VERTEX_ARRAY);
+   971→   971→        glDisableClientState2(GL_TEXTURE_COORD_ARRAY);
+   972→   972→
+   973→   973→        TIMER_POP();
+   974→   974→}
+   975→   975→
+   976→   976→std::string LevelRenderer::gatherStats1() {
+   977→   977→        std::stringstream ss;
+   978→   978→        ss << "C: " << renderedChunks << "/" << totalChunks << ". F: " << offscreenChunks << ", O: " << occludedChunks << ", E: " << emptyChunks << "\n";
+   979→   979→    return ss.str();
+   980→   980→}
+   981→   981→
+   982→   982→//
+   983→   983→//    /*public*/ std::string gatherStats2() {
+   984→   984→//        return "E: " + renderedEntities + "/" + totalEntities + ". B: " + culledEntities + ", I: " + ((totalEntities - culledEntities) - renderedEntities);
+   985→   985→//    }
+   986→   986→//
+   987→   987→//    int[] toRender = new int[50000];
+   988→   988→//    IntBuffer resultBuffer = MemoryTracker.createIntBuffer(64);
+   989→   989→
+   990→   990→void LevelRenderer::renderSky(float alpha) {
+   991→   991→    if (mc->level->dimension->foggy) return;
+   992→   992→
+   993→   993→    glDisable2(GL_TEXTURE_2D);
+   994→   994→    Vec3 sc = level->getSkyColor(mc->cameraTargetPlayer, alpha);
+   995→   995→    float sr = (float) sc.x;
+   996→   996→    float sg = (float) sc.y;
+   997→   997→    float sb = (float) sc.z;// + 0.5f;
+   998→   998→
+   999→   999→    if (mc->options.anaglyph3d) {
+  1000→  1000→        float srr = (sr * 30.0f + sg * 59.0f + sb * 11.0f) / 100.0f;
+  1001→  1001→        float sgg = (sr * 30.0f + sg * 70.0f) / (100.0f);
+  1002→  1002→        float sbb = (sr * 30.0f + sb * 70.0f) / (100.0f);
+  1003→  1003→
+  1004→  1004→        sr = srr;
+  1005→  1005→        sg = sgg;
+  1006→  1006→        sb = sbb;
+  1007→  1007→    }
+  1008→  1008→    glColor4f2(sr, sg, Mth::Min(1.0f, sb), 1);
+  1009→  1009→
+  1010→  1010→    //Tesselator& t = Tesselator::instance;
+  1011→  1011→
+  1012→  1012→    glEnable2(GL_FOG);
+  1013→  1013→    glColor4f2(sr, sg, sb, 1.0f);
+  1014→  1014→
+  1015→  1015→#ifdef OPENGL_ES
+  1016→  1016→        drawArrayVT(skyBuffer, skyVertexCount);
+  1017→  1017→#endif
+  1018→  1018→    glEnable2(GL_TEXTURE_2D);
+  1019→  1019→}
+  1020→  1020→
+  1021→  1021→void LevelRenderer::renderClouds( float alpha ) {
+  1022→  1022→        //if (!mc->level->dimension->isNaturalDimension()) return;
+  1023→  1023→        glEnable2(GL_TEXTURE_2D);
+  1024→  1024→        glDisable(GL_CULL_FACE);
+  1025→  1025→        float yOffs = (float) (mc->player->yOld + (mc->player->y - mc->player->yOld) * alpha);
+  1026→  1026→        int s = 32;
+  1027→  1027→        int d = 256 / s;
+  1028→  1028→        Tesselator& t = Tesselator::instance;
+  1029→  1029→
+  1030→  1030→        //glBindTexture(GL_TEXTURE_2D, texturesloadTexture("/environment/clouds.png"));
+  1031→  1031→        textures->loadAndBindTexture("environment/clouds.png");
+  1032→  1032→        
+  1033→  1033→        glEnable(GL_BLEND);
+  1034→  1034→        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+  1035→  1035→
+  1036→  1036→        Vec3 cc = level->getCloudColor(alpha);
+  1037→  1037→        float cr = (float) cc.x;
+  1038→  1038→        float cg = (float) cc.y;
+  1039→  1039→        float cb = (float) cc.z;
+  1040→  1040→
+  1041→  1041→        float scale = 1 / 2048.0f;
+  1042→  1042→
+  1043→  1043→        float time = (ticks + alpha);
+  1044→  1044→        float xo = mc->player->xo + (mc->player->x - mc->player->xo) * alpha + time * 0.03f;
+  1045→  1045→        float zo = mc->player->zo + (mc->player->z - mc->player->zo) * alpha;
+  1046→  1046→        int xOffs = Mth::floor(xo / 2048);
+  1047→  1047→        int zOffs = Mth::floor(zo / 2048);
+  1048→  1048→        xo -= xOffs * 2048;
+  1049→  1049→        zo -= zOffs * 2048;
+  1050→  1050→
+  1051→  1051→        float yy = /*level.dimension.getCloudHeight()*/ 128 - yOffs + 0.33f;//mc->player->y + 1;
+  1052→  1052→        float uo = (float) (xo * scale);
+  1053→  1053→        float vo = (float) (zo * scale);
+  1054→  1054→        t.begin();
+  1055→  1055→
+  1056→  1056→        t.color(cr, cg, cb, 0.8f);
+  1057→  1057→        for (int xx = -s * d; xx < +s * d; xx += s) {
+  1058→  1058→                for (int zz = -s * d; zz < +s * d; zz += s) {
+  1059→  1059→                        t.vertexUV((float)xx, yy, (float)zz + s, xx * scale + uo, (zz + s) * scale + vo);
+  1060→  1060→                        t.vertexUV((float)xx + s, yy, (float)zz + s, (xx + s) * scale + uo, (zz + s) * scale + vo);
+  1061→  1061→                        t.vertexUV((float)xx + s, yy, (float)zz, (xx + s) * scale + uo, zz * scale + vo);
+  1062→  1062→                        t.vertexUV((float)xx, yy, (float)zz, xx * scale + uo, zz * scale + vo);
+  1063→  1063→                }
+  1064→  1064→        }
+  1065→  1065→        t.endOverrideAndDraw();
+  1066→  1066→        glColor4f(1, 1, 1, 1.0f);
+  1067→  1067→        glDisable(GL_BLEND);
+  1068→  1068→        glEnable(GL_CULL_FACE);
+  1069→  1069→}
+  1070→  1070→
+  1071→  1071→void LevelRenderer::playSound(const std::string& name, float x, float y, float z, float volume, float pitch) {
+  1072→  1072→        // @todo: deny sounds here if sound is off (rather than waiting 'til SoundEngine)
+  1073→  1073→        float dd = 16;
+  1074→  1074→
+  1075→  1075→    if (volume > 1) dd *= volume;
+  1076→  1076→    if (mc->cameraTargetPlayer->distanceToSqr(x, y, z) < dd * dd) {
+  1077→  1077→        mc->soundEngine->play(name, x, y, z, volume, pitch);
+  1078→  1078→    }
+  1079→  1079→}
+  1080→  1080→
+  1081→  1081→void LevelRenderer::addParticle(const std::string& name, float x, float y, float z, float xa, float ya, float za, int data) {
+  1082→  1082→
+  1083→  1083→        float xd = mc->cameraTargetPlayer->x - x;
+  1084→  1084→    float yd = mc->cameraTargetPlayer->y - y;
+  1085→  1085→    float zd = mc->cameraTargetPlayer->z - z;
+  1086→  1086→        float distanceSquared = xd * xd + yd * yd + zd * zd;
+  1087→  1087→
+  1088→  1088→        //Particle* p = NULL;
+  1089→  1089→        //if (name == "hugeexplosion") p = new HugeExplosionSeedParticle(level, x, y, z, xa, ya, za);
+  1090→  1090→        //else if (name == "largeexplode") p = new HugeExplosionParticle(textures, level, x, y, z, xa, ya, za);
+  1091→  1091→
+  1092→  1092→        //if (p) {
+  1093→  1093→        //      if (distanceSquared < 32 * 32) {
+  1094→  1094→        //              mc->particleEngine->add(p);
+  1095→  1095→        //      } else { delete p; }
+  1096→  1096→        //      return;
+  1097→  1097→        //}
+  1098→  1098→
+  1099→  1099→    const float particleDistance = 16;
+  1100→  1100→    if (distanceSquared > particleDistance * particleDistance) return;
+  1101→  1101→
+  1102→  1102→        //static Stopwatch sw;
+  1103→  1103→        //sw.start();
+  1104→  1104→
+  1105→  1105→    if (name == "bubble") mc->particleEngine->add(new BubbleParticle(level, x, y, z, xa, ya, za));
+  1106→  1106→        else if (name == "crit") mc->particleEngine->add(new CritParticle2(level, x, y, z, xa, ya, za));
+  1107→  1107→        else if (name == "smoke") mc->particleEngine->add(new SmokeParticle(level, x, y, z, xa, ya, za));
+  1108→  1108→    //else if (name == "note") mc->particleEngine->add(new NoteParticle(level, x, y, z, xa, ya, za));
+  1109→  1109→    else if (name == "explode") mc->particleEngine->add(new ExplodeParticle(level, x, y, z, xa, ya, za));
+  1110→  1110→    else if (name == "flame") mc->particleEngine->add(new FlameParticle(level, x, y, z, xa, ya, za));
+  1111→  1111→    else if (name == "lava") mc->particleEngine->add(new LavaParticle(level, x, y, z));
+  1112→  1112→    //else if (name == "splash") mc->particleEngine->add(new SplashParticle(level, x, y, z, xa, ya, za));
+  1113→  1113→        else if (name == "largesmoke") mc->particleEngine->add(new SmokeParticle(level, x, y, z, xa, ya, za, 2.5f));
+  1114→  1114→    else if (name == "reddust") mc->particleEngine->add(new RedDustParticle(level, x, y, z, xa, ya, za));
+  1115→  1115→        else if (name == "iconcrack") mc->particleEngine->add(new BreakingItemParticle(level, x, y, z, xa, ya, za, Item::items[data]));
+  1116→  1116→        else if (name == "snowballpoof") mc->particleEngine->add(new BreakingItemParticle(level, x, y, z, Item::snowBall));
+  1117→  1117→    //else if (name == "snowballpoof") mc->particleEngine->add(new BreakingItemParticle(level, x, y, z, Item::snowBall));
+  1118→  1118→    //else if (name == "slime") mc->particleEngine->add(new BreakingItemParticle(level, x, y, z, Item::slimeBall));
+  1119→  1119→    //else if (name == "heart") mc->particleEngine->add(new HeartParticle(level, x, y, z, xa, ya, za));
+  1120→  1120→
+  1121→  1121→        //sw.stop();
+  1122→  1122→        //sw.printEvery(50, "add-particle-string");
+  1123→  1123→}
+  1124→  1124→
+  1125→  1125→/*
+  1126→  1126→void LevelRenderer::addParticle(ParticleType::Id name, float x, float y, float z, float xa, float ya, float za, int data) {
+  1127→  1127→        float xd = mc->cameraTargetPlayer->x - x;
+  1128→  1128→        float yd = mc->cameraTargetPlayer->y - y;
+  1129→  1129→        float zd = mc->cameraTargetPlayer->z - z;
+  1130→  1130→
+  1131→  1131→        const float particleDistance = 16;
+  1132→  1132→        if (xd * xd + yd * yd + zd * zd > particleDistance * particleDistance) return;
+  1133→  1133→
+  1134→  1134→        //static Stopwatch sw;
+  1135→  1135→        //sw.start();
+  1136→  1136→
+  1137→  1137→        //Particle* p = NULL;
+  1138→  1138→
+  1139→  1139→        if (name == ParticleType::bubble)               mc->particleEngine->add( new BubbleParticle(level, x, y, z, xa, ya, za) );
+  1140→  1140→        else if (name == ParticleType::crit)            mc->particleEngine->add(new CritParticle2(level, x, y, z, xa, ya, za) );
+  1141→  1141→        else if (name == ParticleType::smoke)           mc->particleEngine->add(new SmokeParticle(level, x, y, z, xa, ya, za) );
+  1142→  1142→        else if (name == ParticleType::explode)         mc->particleEngine->add( new ExplodeParticle(level, x, y, z, xa, ya, za) );
+  1143→  1143→        else if (name == ParticleType::flame)           mc->particleEngine->add( new FlameParticle(level, x, y, z, xa, ya, za) );
+  1144→  1144→        else if (name == ParticleType::lava)            mc->particleEngine->add( new LavaParticle(level, x, y, z) );
+  1145→  1145→        else if (name == ParticleType::largesmoke)      mc->particleEngine->add( new SmokeParticle(level, x, y, z, xa, ya, za, 2.5f) );
+  1146→  1146→        else if (name == ParticleType::reddust)         mc->particleEngine->add( new RedDustParticle(level, x, y, z, xa, ya, za) );
+  1147→  1147→        else if (name == ParticleType::iconcrack)       mc->particleEngine->add( new BreakingItemParticle(level, x, y, z, xa, ya, za, Item::items[data]) );
+  1148→  1148→
+  1149→  1149→        //switch (name) {
+  1150→  1150→        //      case ParticleType::bubble:              p = new BubbleParticle(level, x, y, z, xa, ya, za); break;
+  1151→  1151→        //      case ParticleType::crit:                p = new CritParticle2(level, x, y, z, xa, ya, za); break;
+  1152→  1152→        //      case ParticleType::smoke:               p = new SmokeParticle(level, x, y, z, xa, ya, za); break;
+  1153→  1153→        //      //case ParticleType::note: p = new NoteParticle(level, x, y, z, xa, ya, za); break;
+  1154→  1154→        //      case ParticleType::explode:             p = new ExplodeParticle(level, x, y, z, xa, ya, za); break;
+  1155→  1155→        //      case ParticleType::flame:               p = new FlameParticle(level, x, y, z, xa, ya, za); break;
+  1156→  1156→        //      case ParticleType::lava:                p = new LavaParticle(level, x, y, z); break;
+  1157→  1157→        //      //case ParticleType::splash: p = new SplashParticle(level, x, y, z, xa, ya, za); break;
+  1158→  1158→        //      case ParticleType::largesmoke:  p = new SmokeParticle(level, x, y, z, xa, ya, za, 2.5f); break;
+  1159→  1159→        //      case ParticleType::reddust:             p = new RedDustParticle(level, x, y, z, xa, ya, za); break;
+  1160→  1160→        //      case ParticleType::iconcrack:   p = new BreakingItemParticle(level, x, y, z, xa, ya, za, Item::items[data]); break;
+  1161→  1161→        //      //case ParticleType::snowballpoof: p = new BreakingItemParticle(level, x, y, z, Item::snowBall); break;
+  1162→  1162→        //      //case ParticleType::slime: p = new BreakingItemParticle(level, x, y, z, Item::slimeBall); break;
+  1163→  1163→        //      //case ParticleType::heart: p = new HeartParticle(level, x, y, z, xa, ya, za); break;
+  1164→  1164→        //      default:
+  1165→  1165→        //              LOGW("Couldn't find particle of type: %d\n", name);
+  1166→  1166→        //              break;
+  1167→  1167→        //}
+  1168→  1168→        //if (p) {
+  1169→  1169→        //      mc->particleEngine->add(p);
+  1170→  1170→        //}
+  1171→  1171→
+  1172→  1172→        //sw.stop();
+  1173→  1173→        //sw.printEvery(50, "add-particle-enum");
+  1174→  1174→}
+  1175→  1175→*/
+  1176→  1176→
+  1177→  1177→void LevelRenderer::renderHitSelect( Player* player, const HitResult& h, int mode, /*ItemInstance*/void* inventoryItem, float a )
+  1178→  1178→{
+  1179→  1179→        //if (h.type == TILE) LOGI("type: %s @ (%d, %d, %d)\n", Tile::tiles[level->getTile(h.x, h.y, h.z)]->getDescriptionId().c_str(), h.x, h.y, h.z);
+  1180→  1180→
+  1181→  1181→        if (mode == 0) {
+  1182→  1182→
+  1183→  1183→                Tesselator& t = Tesselator::instance;
+  1184→  1184→                glEnable2(GL_BLEND);
+  1185→  1185→                glDisable2(GL_TEXTURE_2D);
+  1186→  1186→                glBlendFunc2(GL_SRC_ALPHA, GL_ONE);
+  1187→  1187→                glBlendFunc2(GL_DST_COLOR, GL_SRC_COLOR);
+  1188→  1188→                glEnable2(GL_DEPTH_TEST);
+  1189→  1189→
+  1190→  1190→                textures->loadAndBindTexture("terrain.png");
+  1191→  1191→                
+  1192→  1192→                int tileId = level->getTile(h.x, h.y, h.z);
+  1193→  1193→                Tile* tile = tileId > 0 ? Tile::tiles[tileId] : NULL;
+  1194→  1194→                glDisable2(GL_ALPHA_TEST);
+  1195→  1195→
+  1196→  1196→                //LOGI("block: %d - %d (%s)\n", tileId, level->getData(h.x, h.y, h.z), tile==NULL?"null" : tile->getDescriptionId().c_str() );
+  1197→  1197→
+  1198→  1198→                const float br = 0.65f;
+  1199→  1199→                glColor4f2(br * 1.0f, br * 1.0f, br * 1.0f, br * 1.0f);
+  1200→  1200→                glPushMatrix2();
+  1201→  1201→
+  1202→  1202→                //glPolygonOffset(-.3f, -.3f);
+  1203→  1203→                glPolygonOffset(-1.f, -1.f); //Implementation dependent units
+  1204→  1204→                glEnable2(GL_POLYGON_OFFSET_FILL);
+  1205→  1205→                float xo = player->xOld + (player->x - player->xOld) * a;
+  1206→  1206→                float yo = player->yOld + (player->y - player->yOld) * a;
+  1207→  1207→                float zo = player->zOld + (player->z - player->zOld) * a;
+  1208→  1208→
+  1209→  1209→                t.begin();
+  1210→  1210→                t.offset(-xo, -yo, -zo);
+  1211→  1211→                t.noColor();
+  1212→  1212→
+  1213→  1213→                if (tile == NULL) tile = Tile::rock;
+  1214→  1214→                tileRenderer->tesselateInWorld(tile, h.x, h.y, h.z);
+  1215→  1215→
+  1216→  1216→                t.draw();
+  1217→  1217→                t.offset(0, 0, 0);
+  1218→  1218→                glPolygonOffset(0.0f, 0.0f);
+  1219→  1219→
+  1220→  1220→                glDisable2(GL_POLYGON_OFFSET_FILL);
+  1221→  1221→                glEnable2(GL_TEXTURE_2D);
+  1222→  1222→
+  1223→  1223→                glDepthMask(true);
+  1224→  1224→                glPopMatrix2();
+  1225→  1225→
+  1226→  1226→                glEnable2(GL_ALPHA_TEST);
+  1227→  1227→                glDisable2(GL_BLEND);
+  1228→  1228→        }
+  1229→  1229→}
+  1230→  1230→
+  1231→  1231→void LevelRenderer::onGraphicsReset()
+  1232→  1232→{
+  1233→  1233→        generateSky();
+  1234→  1234→
+  1235→  1235→        // Get new buffers
+  1236→  1236→#ifdef OPENGL_ES
+  1237→  1237→        glGenBuffers2(numListsOrBuffers, chunkBuffers);
+  1238→  1238→#else
+  1239→  1239→        chunkLists = glGenLists(numListsOrBuffers);
+  1240→  1240→#endif
+  1241→  1241→
+  1242→  1242→        // Rebuild
+  1243→  1243→        allChanged();
+  1244→  1244→}
+  1245→  1245→
+  1246→  1246→void LevelRenderer::entityAdded( Entity* entity )
+  1247→  1247→{
+  1248→  1248→        if (!entity->isPlayer())
+  1249→  1249→                return;
+  1250→  1250→
+  1251→  1251→        // Hack to (hopefully) get the players to show
+  1252→  1252→        EntityRenderDispatcher::getInstance()->onGraphicsReset();
+  1253→  1253→}
+  1254→  1254→
+  1255→  1255→int _t_keepPic = -1;
+  1256→  1256→
+  1257→  1257→void LevelRenderer::takePicture( TripodCamera* cam, Entity* entity )
+  1258→  1258→{
+  1259→  1259→        // Push old values
+  1260→  1260→        Mob* oldCameraEntity = mc->cameraTargetPlayer;
+  1261→  1261→        bool hideGui = mc->options.hideGui;
+  1262→  1262→        bool thirdPerson = mc->options.thirdPersonView;
+  1263→  1263→
+  1264→  1264→        // @huge @attn: This is highly illegal, super temp!
+  1265→  1265→        mc->cameraTargetPlayer = (Mob*)cam;
+  1266→  1266→        mc->options.hideGui = true;
+  1267→  1267→        mc->options.thirdPersonView = false;
+  1268→  1268→
+  1269→  1269→        mc->gameRenderer->renderLevel(0);
+  1270→  1270→
+  1271→  1271→        // Pop values back
+  1272→  1272→        mc->cameraTargetPlayer = oldCameraEntity;
+  1273→  1273→        mc->options.hideGui = hideGui;
+  1274→  1274→        mc->options.thirdPersonView = thirdPerson;
+  1275→  1275→
+  1276→  1276→        _t_keepPic = -1;
+  1277→  1277→
+  1278→  1278→        // Save image
+  1279→  1279→        static char filename[256];
+  1280→  1280→        sprintf(filename, "%s/games/com.mojang/img_%.4d.jpg", mc->externalStoragePath.c_str(), getTimeMs());
+  1281→  1281→
+  1282→  1282→        mc->platform()->saveScreenshot(filename, mc->width, mc->height);
+  1283→  1283→}
+  1284→  1284→
+  1285→  1285→void LevelRenderer::levelEvent(Player* player, int type, int x, int y, int z, int data) {
+  1286→  1286→        switch (type) {    
+  1287→  1287→        case LevelEvent::SOUND_OPEN_DOOR:
+  1288→  1288→        if (Mth::random() < 0.5f) {
+  1289→  1289→            level->playSound(x + 0.5f, y + 0.5f, z + 0.5f, "random.door_open", 1, level->random.nextFloat() * 0.1f + 0.9f);
+  1290→  1290→        } else {
+  1291→  1291→            level->playSound(x + 0.5f, y + 0.5f, z + 0.5f, "random.door_close", 1, level->random.nextFloat() * 0.1f + 0.9f);
+  1292→  1292→        }
+  1293→  1293→        break;
+  1294→  1294→        }
+  1295→  1295→}
+  1296→  1296→

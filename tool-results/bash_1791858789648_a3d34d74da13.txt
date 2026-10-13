@@ -1,0 +1,208 @@
+### Tile::initTiles() — VERIFIED (Tile.cpp:160–300), FULL REGISTRY
+
+```cpp
+/*static*/
+void Tile::initTiles() {
+    rock           = (new StoneTile(1, 1))->init()->setDestroyTime(1.5f)->setExplodeable(10)->setSoundType(SOUND_STONE)->setCategory(ItemCategory::Structures)->setDescriptionId("stone");
+    grass          = (GrassTile*) (new GrassTile(2))->init()->setDestroyTime(0.6f)->setSoundType(SOUND_GRASS)->setCategory(ItemCategory::Structures)->setDescriptionId("grass");
+    dirt           = (new DirtTile(3, 2))->init()->setDestroyTime(0.5f)->setSoundType(SOUND_GRAVEL)->setCategory(ItemCategory::Structures)->setDescriptionId("dirt");
+    stoneBrick     = (new Tile(4, 16, Material::stone))->init()->setDestroyTime(2.0f)->setExplodeable(10)->setSoundType(SOUND_STONE)->setCategory(ItemCategory::Structures)->setDescriptionId("stonebrick");
+    wood           = (new Tile(5, 4, Material::wood))->init()->setDestroyTime(2.0f)->setExplodeable(5)->setSoundType(SOUND_WOOD)->setCategory(ItemCategory::Structures)->setDescriptionId("wood");
+    sapling        = (new Sapling(6, 15))->init()->setDestroyTime(0.0f)->setSoundType(SOUND_GRASS)->setCategory(ItemCategory::Structures)->setDescriptionId("sapling");
+    unbreakable    = (new Tile(7, 17, Material::stone))->init()->setDestroyTime(-1)->setExplodeable(6000000)->setSoundType(SOUND_STONE)->setCategory(ItemCategory::Structures)->setDescriptionId("bedrock");
+    water          = (new LiquidTileDynamic(8, Material::water))->init()->setDestroyTime(100.0f)->setLightBlock(3)->setCategory(ItemCategory::Structures)->setDescriptionId("water");
+    calmWater      = (new LiquidTileStatic(9, Material::water))->init()->setDestroyTime(100.0f)->setLightBlock(3)->setCategory(ItemCategory::Structures)->setDescriptionId("water");
+    lava           = (new LiquidTileDynamic(10, Material::lava))->init()->setDestroyTime(00.0f)->setLightEmission(1.0f)->setLightBlock(255)->setCategory(ItemCategory::Structures)->setDescriptionId("lava");
+    calmLava       = (new LiquidTileStatic(11, Material::lava))->init()->setDestroyTime(100.0f)->setLightEmission(1.0f)->setLightBlock(255)->setCategory(ItemCategory::Structures)->setDescriptionId("lava");
+    sand           = (new HeavyTile(12, 18))->init()->setDestroyTime(0.5f)->setSoundType(SOUND_SAND)->setCategory(ItemCategory::Structures)->setDescriptionId("sand");
+    gravel         = (new GravelTile(13, 19))->init()->setDestroyTime(0.6f)->setSoundType(SOUND_GRAVEL)->setCategory(ItemCategory::Structures)->setDescriptionId("gravel");
+    goldOre        = (new OreTile(14, 32))->init()->setDestroyTime(3.0f)->setExplodeable(5)->setSoundType(SOUND_STONE)->setCategory(ItemCategory::Decorations)->setDescriptionId("oreGold");
+    ironOre        = (new OreTile(15, 33))->init()->setDestroyTime(3.0f)->setExplodeable(5)->setSoundType(SOUND_STONE)->setCategory(ItemCategory::Decorations)->setDescriptionId("oreIron");
+    coalOre        = (new OreTile(16, 34))->init()->setDestroyTime(3.0f)->setExplodeable(5)->setSoundType(SOUND_STONE)->setCategory(ItemCategory::Structures)->setDescriptionId("oreCoal");
+    treeTrunk      = (new TreeTile(17))->init()->setDestroyTime(2.0f)->setSoundType(SOUND_WOOD)->setCategory(ItemCategory::Structures)->setDescriptionId("log");
+    leaves         = (LeafTile*) (new LeafTile(18, 4 + 3 * 16))->init()->setDestroyTime(0.2f)->setLightBlock(1)->setSoundType(SOUND_GRASS)->setCategory(ItemCategory::Structures)->setDescriptionId("leaves");
+
+    glass          = (new GlassTile(20, 49, Material::glass, false))->init()->setDestroyTime(0.3f)->setSoundType(SOUND_GLASS)->setCategory(ItemCategory::Structures)->setDescriptionId("glass");
+    lapisOre       = (new OreTile(21, 10 * 16))->init()->setDestroyTime(3.0f)->setExplodeable(5)->setSoundType(SOUND_STONE)->setCategory(ItemCategory::Structures)->setDescriptionId("oreLapis");
+    lapisBlock     = (new Tile(22, 9 * 16, Material::stone))->init()->setDestroyTime(3.0f)->setExplodeable(5)->setSoundType(SOUND_STONE)->setCategory(ItemCategory::Decorations)->setDescriptionId("blockLapis");
+    sandStone      = (new SandStoneTile(24, (const int*)&SANDSTONE_TEXTURES, SANDSTONE_TEXTURE_COUNT))->init()->setSoundType(SOUND_STONE)->setDestroyTime(0.8f)->setCategory(ItemCategory::Structures)->setDescriptionId("sandStone");
+    bed            = (new BedTile(26))->init()->setDestroyTime(0.2f)->setCategory(ItemCategory::Structures)->setDescriptionId("bed");
+    web            = (new WebTile(30, 11))->init()->setLightBlock(1)->setDestroyTime(4.0f)->setCategory(ItemCategory::Decorations)->setDescriptionId("web");
+    tallgrass      = (new TallGrass(31, 2 * 16 + 7))->init()->setDestroyTime(0.0f)->setSoundType(SOUND_GRASS)->setCategory(ItemCategory::Decorations)->setDescriptionId("tallgrass");
+    cloth          = (new ClothTile(35))->init()->setDestroyTime(0.8f)->setSoundType(SOUND_CLOTH)->setCategory(ItemCategory::Structures)->setDescriptionId("cloth");
+
+    flower         = (new Bush(37, 13))->init()->setDestroyTime(0.0f)->setSoundType(SOUND_GRASS)->setCategory(ItemCategory::Decorations)->setDescriptionId("flower");
+    rose           = (new Bush(38, 12))->init()->setDestroyTime(0.0f)->setSoundType(SOUND_GRASS)->setCategory(ItemCategory::Decorations)->setDescriptionId("rose");
+    mushroom1      = (new Mushroom(39, 13 + 16))->init()->setDestroyTime(0.0f)->setSoundType(SOUND_GRASS)->setLightEmission(2 / 16.0f)->setCategory(ItemCategory::Decorations)->setDescriptionId("mushroom");
+    mushroom2      = (new Mushroom(40, 12 + 16))->init()->setDestroyTime(0.0f)->setSoundType(SOUND_GRASS)->setCategory(ItemCategory::Decorations)->setDescriptionId("mushroom");
+    goldBlock     = (new MetalTile(41, 39 - 16))->init()->setDestroyTime(3.0f)->setExplodeable(10)->setSoundType(SOUND_METAL)->setCategory(ItemCategory::Decorations)->setDescriptionId("blockGold");
+    ironBlock     = (new MetalTile(42, 38 - 16))->init()->setDestroyTime(5.0f)->setExplodeable(10)->setSoundType(SOUND_METAL)->setCategory(ItemCategory::Decorations)->setDescriptionId("blockIron");
+    stoneSlab     = (new StoneSlabTile(43, true))->init()->setDestroyTime(2.0f)->setExplodeable(10)->setSoundType(SOUND_STONE)->setCategory(ItemCategory::Structures)->setDescriptionId("stoneSlab");
+    stoneSlabHalf = (new StoneSlabTile(44, false))->init()->setDestroyTime(2.0f)->setExplodeable(10)->setSoundType(SOUND_STONE)->setCategory(ItemCategory::Structures)->setDescriptionId("stoneSlab");
+    redBrick      = (new Tile(45, 7, Material::stone))->init()->setDestroyTime(2.0f)->setExplodeable(10)->setSoundType(SOUND_STONE)->setCategory(ItemCategory::Structures)->setDescriptionId("brick");
+    tnt           = (new TntTile(46, 8))->init()->setDestroyTime(0.0f)->setSoundType(SOUND_GRASS)->setCategory(ItemCategory::Tools)->setDescriptionId("tnt");
+    bookshelf     = (new BookshelfTile(47, 35))->init()->setDestroyTime(1.5f)->setSoundType(SOUND_WOOD)->setCategory(ItemCategory::Decorations)->setDescriptionId("bookshelf");
+    mossStone     = (new Tile(48, 36, Material::stone))->init()->setDestroyTime(2.0f)->setExplodeable(10)->setSoundType(SOUND_STONE)->setCategory(ItemCategory::Structures)->setDescriptionId("stoneMoss");
+    obsidian      = (new ObsidianTile(49, 37, false))->init()->setDestroyTime(10.0f)->setExplodeable(2000)->setSoundType(SOUND_STONE)->setCategory(ItemCategory::Structures)->setDescriptionId("obsidian");
+    torch         = (new TorchTile(50, 5 * 16))->init()->setDestroyTime(0.0f)->setLightEmission(15 / 16.0f)->setSoundType(SOUND_WOOD)->setCategory(ItemCategory::Tools)->setDescriptionId("torch");
+
+    stairs_wood   = (new StairTile(53, wood))->init()->setCategory(ItemCategory::Structures)->setDescriptionId("stairsWood");
+    chest         = (new ChestTile(54))->init()->setCategory(ItemCategory::Structures)->setDestroyTime(2.5f)->setSoundType(SOUND_WOOD)->setDescriptionId("chest");
+
+    emeraldOre    = (new OreTile(56, 16 * 3 + 2))->init()->setDestroyTime(3.0f)->setExplodeable(5)->setSoundType(SOUND_STONE)->setCategory(ItemCategory::Decorations)->setDescriptionId("oreDiamond");
+    emeraldBlock  = (new MetalTile(57, 40 - 16))->init()->setDestroyTime(5.0f)->setExplodeable(10)->setSoundType(SOUND_METAL)->setCategory(ItemCategory::Decorations)->setDescriptionId("blockDiamond");
+    workBench     = (new WorkbenchTile(58))->init()->setDestroyTime(2.5f)->setSoundType(SOUND_WOOD)->setCategory(ItemCategory::Structures)->setDescriptionId("workbench");
+    crops         = (new CropTile(59, 8 + 5 * 16))->init()->setDestroyTime(0.0f)->setSoundType(SOUND_GRASS)->setCategory(ItemCategory::Structures)->setDescriptionId("crops");
+    farmland      = (new FarmTile(60))->init()->setDestroyTime(0.6f)->setSoundType(SOUND_GRAVEL)->setCategory(ItemCategory::Structures)->setDescriptionId("farmland");
+    furnace       = (new FurnaceTile(61, false))->init()->setDestroyTime(3.5f)->setSoundType(SOUND_STONE)->setCategory(ItemCategory::Structures)->setDescriptionId("furnace");
+    furnace_lit   = (new FurnaceTile(62, true))->init()->setDestroyTime(3.5f)->setSoundType(SOUND_STONE)->setLightEmission(14 / 16.0f)->setCategory(ItemCategory::Structures)->setDescriptionId("furnace");
+    sign          = (new SignTile(63, TileEntityType::Sign, true))->init()->setDestroyTime(1.0f)->setSoundType(SOUND_WOOD)->setCategory(ItemCategory::Decorations)->setDescriptionId("sign");
+    door_wood     = (new DoorTile(64, Material::wood))->init()->setDestroyTime(3.0f)->setSoundType(SOUND_WOOD)->setCategory(ItemCategory::Structures)->setDescriptionId("doorWood");
+    ladder        = (new LadderTile(65, 3 + 5 * 16))->init()->setDestroyTime(0.4f)->setSoundType(SOUND_WOOD)->setCategory(ItemCategory::Structures)->setDescriptionId("ladder");
+
+    stairs_stone  = (new StairTile(67, stoneBrick))->init()->setCategory(ItemCategory::Structures)->setDescriptionId("stairsStone");
+    wallSign      = (new SignTile(68, TileEntityType::Sign, false))->init()->setDestroyTime(1.0f)->setSoundType(SOUND_WOOD)->setCategory(ItemCategory::Decorations)->setDescriptionId("sign");
+
+    door_iron     = (new DoorTile(71, Material::metal))->init()->setDestroyTime(5.0f)->setSoundType(SOUND_METAL)->setCategory(ItemCategory::Structures)->setDescriptionId("doorIron");
+
+    redStoneOre      = (new RedStoneOreTile(73, 16 * 3 + 3, false))->init()->setDestroyTime(3.0f)->setExplodeable(5)->setSoundType(SOUND_STONE)->setCategory(ItemCategory::Mechanisms)->setDescriptionId("oreRedstone");
+    redStoneOre_lit  = (new RedStoneOreTile(74, 16 * 3 + 3, true))->init()->setDestroyTime(3.0f)->setLightEmission(10 / 16.0f)->setExplodeable(5)->setSoundType(SOUND_STONE)->setCategory(ItemCategory::Mechanisms)->setDescriptionId("oreRedstone");
+
+    topSnow       = (new TopSnowTile(78, 16 * 4 + 2))->init()->setDestroyTime(0.1f)->setSoundType(SOUND_CLOTH)->setCategory(ItemCategory::Structures)->setDescriptionId("snow");
+    ice           = (new IceTile(79, 16 * 4 + 3))->init()->setDestroyTime(0.5f)->setLightBlock(3)->setSoundType(SOUND_GLASS)->setCategory(ItemCategory::Structures)->setDescriptionId("ice");
+    snow          = (new SnowTile(80, 16 * 4 + 2))->init()->setDestroyTime(0.2f)->setSoundType(SOUND_CLOTH)->setCategory(ItemCategory::Structures)->setDescriptionId("snow");
+    cactus        = (new CactusTile(81, 16 * 4 + 6))->init()->setDestroyTime(0.4f)->setSoundType(SOUND_CLOTH)->setCategory(ItemCategory::Structures)->setDescriptionId("cactus");
+    clay          = (new ClayTile(82, 16 * 4 + 8))->init()->setDestroyTime(0.6f)->setSoundType(SOUND_GRAVEL)->setCategory(ItemCategory::Structures)->setDescriptionId("clay");
+    reeds         = (new ReedTile(83, 16 * 4 + 9))->init()->setDestroyTime(0.0f)->setSoundType(SOUND_GRASS)->setCategory(ItemCategory::Structures)->setDescriptionId("reeds");
+
+    fence         = (new FenceTile(85, 4))->init()->setDestroyTime(2.0f)->setExplodeable(5)->setSoundType(SOUND_WOOD)->setCategory(ItemCategory::Structures)->setDescriptionId("fence");
+
+    netherrack    = (new Tile(87, 7 + 6 * 16, Material::stone))->init()->setDestroyTime(0.4f)->setSoundType(SOUND_STONE)->setDescriptionId("hellrock");
+
+    lightGem      = (new LightGemTile(89, 9 + 16 * 6, Material::glass))->init()->setDestroyTime(0.3f)->setCategory(ItemCategory::Structures)->setSoundType(SOUND_GLASS)->setLightEmission(1.0f)->setDescriptionId("lightgem");
+    invisible_bedrock = (new InvisibleTile(95, 0, Material::stone))->init()->setDestroyTime(-1)->setExplodeable(6000000);
+    trapdoor      = (new TrapDoorTile(96, Material::wood))->init()->setDestroyTime(3.0f)->setSoundType(SOUND_WOOD)->setCategory(ItemCategory::Structures)->setDescriptionId("trapdoor");
+
+    stoneBrickSmooth = (new MultiTextureTile(98, (const int*)&STONE_BRICK_TEXTURES, STONE_BRICK_TEXTURE_COUNT, Material::stone))->init()->setDestroyTime(1.5f)->setExplodeable(10)->setSoundType(SOUND_STONE)->setCategory(ItemCategory::Structures)->setDescriptionId("stonebricksmooth");
+
+    thinGlass     = (new ThinFenceTile(102, 1 + 3 * 16, 4 + 9 * 16, Material::glass, false))->init()->setDestroyTime(0.3f)->setSoundType(SOUND_GLASS)->setCategory(ItemCategory::Structures)->setDescriptionId("thinGlass");
+    melon         = (new MelonTile(103))->init()->setDestroyTime(1.0f)->setSoundType(SOUND_WOOD)->setCategory(ItemCategory::FoodArmor)->setDescriptionId("melon");
+    melonStem     = (new StemTile(105, Tile::melon))->init()->setDestroyTime(0.0f)->setSoundType(SOUND_WOOD)->setCategory(ItemCategory::FoodArmor)->setDescriptionId("pumpkinStem");
+    fenceGate     = (new FenceGateTile(107, 4))->init()->setDestroyTime(2.0f)->setExplodeable(5)->setSoundType(SOUND_WOOD)->setCategory(ItemCategory::Structures)->setDescriptionId("fenceGate");
+    stairs_brick  = (new StairTile(108, Tile::redBrick))->init()->setCategory(ItemCategory::Structures)->setDescriptionId("stairsBrick");
+
+    stairs_stoneBrickSmooth = (new StairTile(109, Tile::stoneBrickSmooth))->init()->setCategory(ItemCategory::Structures)->setDescriptionId("stairsStoneBrickSmooth");
+    netherBrick  = (new Tile(112, 0 + 14 * 16, Material::stone))->init()->setDestroyTime(2.0f)->setExplodeable(10)->setSoundType(SOUND_STONE)->setCategory(ItemCategory::Structures)->setDescriptionId("netherBrick");
+    stairs_netherBricks = (new StairTile(114, Tile::netherBrick))->init()->setCategory(ItemCategory::Structures)->setDescriptionId("stairsNetherBrick");
+    stairs_sandStone = (new StairTile(128, Tile::sandStone))->init()->setCategory(ItemCategory::Structures)->setDescriptionId("stairsSandStone");
+
+    quartzBlock  = (new QuartzBlockTile(155))->init()->setSoundType(SOUND_STONE)->setDestroyTime(0.8f)->setCategory(ItemCategory::Structures)->setDescriptionId("quartzBlock");
+    stairs_quartz = (new StairTile(156, Tile::quartzBlock))->init()->setCategory(ItemCategory::Structures)->setDescriptionId("stairsQuartz");
+
+    //
+    // Special tiles for Pocket Edition at high IDs:
+    //
+    stonecutterBench = (new StonecutterTile(245))->init()->setDestroyTime(2.5f)->setSoundType(SOUND_STONE)->setCategory(ItemCategory::Structures)->setDescriptionId("stonecutter");
+    glowingObsidian = (new ObsidianTile(246, 10 + 16 * 13, true))->init()->setDestroyTime(10.0f)->setLightEmission(14 / 16.0f)->setExplodeable(2000)->setSoundType(SOUND_STONE)->setCategory(ItemCategory::Structures)->setDescriptionId("glowingobsidian");
+    netherReactor   = (new NetherReactor(247, 10 + 14 * 16, Material::metal))->init()->setDestroyTime(3.0f)->setSoundType(SOUND_METAL)->setCategory(ItemCategory::Structures)->setDescriptionId("netherreactor");
+    info_updateGame1 = (new Tile(248, 252, Material::dirt))->init()->setDestroyTime(1.0f)->setSoundType(SOUND_GRAVEL)->setCategory(ItemCategory::Structures)->setDescriptionId("info_update");
+    info_updateGame2 = (new Tile(249, 253, Material::dirt))->init()->setDestroyTime(1.0f)->setSoundType(SOUND_GRAVEL)->setCategory(ItemCategory::Structures)->setDescriptionId("info_update");
+    grass_carried  = (new CarriedTile(253, 3, 12*16 + 12))->init()->setDescriptionId("grass");
+    leaves_carried = (LeafTile*) (new LeafTile(254, 11 + 14 * 16))->init()->setDestroyTime(0.2f)->setLightBlock(1)->setSoundType(SOUND_GRASS)->setCategory(ItemCategory::Structures)->setDescriptionId("leaves");
+    info_reserved6 = (new Tile(255, Material::dirt))->init();
+
+    //
+    // Stuff that need to be inited in a specific order (i.e. after the other tiles have been created):
+    //
+    fire     = (FireTile*) (new FireTile(51, 1 * 16 + 15))->init()->setDestroyTime(0.0f)->setLightEmission(1.0f)->setSoundType(SOUND_WOOD)->setCategory(ItemCategory::Structures)->setDescriptionId("fire");
+
+    // (Item-side special item bindings omitted — handled in Item::init)
+    Item::items[cloth->id]           = (new ClothTileItem(cloth->id - 256))->setCategory(ItemCategory::Structures)->setDescriptionId("cloth");
+    Item::items[treeTrunk->id]       = (new AuxDataTileItem(treeTrunk->id - 256, treeTrunk))->setCategory(ItemCategory::Structures)->setDescriptionId("log");
+    Item::items[stoneBrickSmooth->id] = (new AuxDataTileItem(stoneBrickSmooth->id - 256, stoneBrickSmooth))->setCategory(ItemCategory::Structures)->setDescriptionId("stonebricksmooth");
+    Item::items[stoneSlabHalf->id]   = (new StoneSlabTileItem(stoneSlabHalf->id - 256))->setCategory(ItemCategory::Structures)->setDescriptionId("stoneSlab");
+    Item::items[sapling->id]         = (new SaplingTileItem(sapling->id - 256))->setCategory(ItemCategory::Structures)->setDescriptionId("sapling");
+    Item::items[leaves->id]          = (new LeafTileItem(leaves->id - 256))->setCategory(ItemCategory::Decorations)->setDescriptionId("leaves");
+    Item::items[sandStone->id]       = (new AuxDataTileItem(sandStone->id - 256, sandStone))->setCategory(ItemCategory::Structures)->setDescriptionId("sandStone");
+    Item::items[quartzBlock->id]     = (new AuxDataTileItem(quartzBlock->id - 256, quartzBlock))->setCategory(ItemCategory::Structures)->setDescriptionId("quartzBlock");
+
+    for (int i = 0; i < 256; i++) {
+        if (Tile::tiles[i] != NULL) {
+            if (Item::items[i] == NULL) {
+                Item::items[i] = new TileItem(i - 256);
+                Item::items[i]->category = Tile::tiles[i]->category;
+            }
+            if (Item::items[i]->category == -1)
+                LOGE("Error: Missing category for tile %d: %s\n", tiles[i]->id, tiles[i]->getDescriptionId().c_str());
+        }
+    }
+}
+```
+
+### Tile registry — VERIFIED full table (id, name, texture, material, destroyTime, explodeable, soundType, lightBlock override, lightEmission override)
+
+| id  | name                | tile subclass         | tex          | material        | destroySpeed | explodeable(×3) | soundType         | lightBlock | lightEmission | notes |
+|-----|---------------------|----------------------|--------------|-----------------|--------------|----------------|-------------------|------------|---------------|-------|
+| 1   | stone               | StoneTile            | 1            | stone           | 1.5          | 10             | SOUND_STONE       | (255 solid)| —             | |
+| 2   | grass               | GrassTile            | (per-face)   | dirt            | 0.6          | —              | SOUND_GRASS       | (255 solid)| —             | tex set in GrassTile.cpp |
+| 3   | dirt                | DirtTile             | 2            | dirt            | 0.5          | —              | SOUND_GRAVEL      | (255 solid)| —             | |
+| 4   | stonebrick (cobble) | Tile                 | 16           | stone           | 2.0          | 10             | SOUND_STONE       | (255 solid)| —             | |
+| 5   | wood (planks)       | Tile                 | 4            | wood            | 2.0          | 5              | SOUND_WOOD        | (255 solid)| —             | |
+| 6   | sapling             | Sapling              | 15           | plant?          | 0.0          | —              | SOUND_GRASS       | 0 (non-solid)| —            | |
+| 7   | bedrock             | Tile                 | 17           | stone           | -1 (indestructible)| 6000000   | SOUND_STONE       | (255 solid)| —             | destroySpeed = -1 → unbreakable |
+| 8   | water (flowing)     | LiquidTileDynamic    | (liquid)     | water           | 100.0        | —              | SOUND_SILENT      | 3          | —             | |
+| 9   | water (calm)        | LiquidTileStatic     | (liquid)     | water           | 100.0        | —              | SOUND_SILENT      | 3          | —             | |
+| 10  | lava (flowing)      | LiquidTileDynamic    | (liquid)     | lava            | 0.0          | —              | SOUND_SILENT      | 255        | 1.0 (15)      | full light emission |
+| 11  | lava (calm)         | LiquidTileStatic     | (liquid)     | lava            | 100.0        | —              | SOUND_SILENT      | 255        | 1.0 (15)      | |
+| 12  | sand                | HeavyTile            | 18           | sand            | 0.5          | —              | SOUND_SAND        | (255 solid)| —             | gravity-affected |
+| 13  | gravel              | GravelTile           | 19           | ?               | 0.6          | —              | SOUND_GRAVEL      | (255 solid)| —             | gravity-affected |
+| 14  | goldOre             | OreTile              | 32           | stone           | 3.0          | 5              | SOUND_STONE       | (255 solid)| —             | Decorations |
+| 15  | ironOre             | OreTile              | 33           | stone           | 3.0          | 5              | SOUND_STONE       | (255 solid)| —             | Decorations |
+| 16  | coalOre             | OreTile              | 34           | stone           | 3.0          | 5              | SOUND_STONE       | (255 solid)| —             | Structures |
+| 17  | log (treeTrunk)     | TreeTile             | (per-face)   | wood            | 2.0          | —              | SOUND_WOOD        | (255 solid)| —             | |
+| 18  | leaves              | LeafTile             | 4 + 3*16     | leaves          | 0.2          | —              | SOUND_GRASS       | 1          | —             | |
+| 20  | glass               | GlassTile            | 49           | glass           | 0.3          | —              | SOUND_GLASS       | (255 solid)| —             | break sound = random.glass |
+| 21  | lapisOre            | OreTile              | 10*16        | stone           | 3.0          | 5              | SOUND_STONE       | (255 solid)| —             | |
+| 22  | lapisBlock          | Tile                 | 9*16         | stone           | 3.0          | 5              | SOUND_STONE       | (255 solid)| —             | |
+| 24  | sandStone           | SandStoneTile        | SANDSTONE_TEX[3]| stone        | 0.8          | —              | SOUND_STONE       | (255 solid)| —             | 3 textures {0+16*12, 5+16*14, 6+16*14} |
+| 26  | bed                 | BedTile              | (multi)      | ?               | 0.2          | —              | SOUND_SILENT?     | —          | —             | no sound set (default SOUND_NORMAL via constructor? Actually inherited — verify) |
+| 30  | web                 | WebTile              | 11           | web             | 4.0          | —              | SOUND_SILENT?     | 1          | —             | |
+| 31  | tallgrass           | TallGrass            | 2*16+7       | ?               | 0.0          | —              | SOUND_GRASS       | —          | —             | cross-texture shape |
+| 35  | cloth (wool)        | ClothTile            | (per-color)  | cloth           | 0.8          | —              | SOUND_CLOTH       | (255 solid)| —             | |
+| 37  | flower              | Bush                 | 13           | plant           | 0.0          | —              | SOUND_GRASS       | —          | —             | cross-texture |
+| 38  | rose                | Bush                 | 12           | plant           | 0.0          | —              | SOUND_GRASS       | —          | —             | cross-texture |
+| 39  | mushroom1           | Mushroom            | 13+16        | ?               | 0.0          | —              | SOUND_GRASS       | —          | 2/16 (=0.125 → emission 1) | |
+| 40  | mushroom2           | Mushroom            | 12+16        | ?               | 0.0          | —              | SOUND_GRASS       | —          | —             | |
+| 41  | goldBlock           | MetalTile            | 39-16=23     | metal           | 3.0          | 10             | SOUND_METAL       | (255 solid)| —             | pitch 1.5 |
+| 42  | ironBlock           | MetalTile            | 38-16=22     | metal           | 5.0          | 10             | SOUND_METAL       | (255 solid)| —             | |
+| 43  | stoneSlab (double)  | StoneSlabTile(true)  | (per-type)   | stone           | 2.0          | 10             | SOUND_STONE       | (255 solid)| —             | double slab |
+| 44  | stoneSlabHalf       | StoneSlabTile(false) | (per-type)   | stone           | 2.0          | 10             | SOUND_STONE       | 0 (non-solid? — see Level::getRawBrightness special-case)| —      | half slab |
+| 45  | brick (redBrick)    | Tile                 | 7            | stone           | 2.0          | 10             | SOUND_STONE       | (255 solid)| —             | |
+| 46  | tnt                 | TntTile             | 8            | explosive       | 0.0          | —              | SOUND_GRASS       | (255 solid)| —             | Tools category |
+| 47  | bookshelf           | BookshelfTile        | 35           | wood            | 1.5          | —              | SOUND_WOOD        | (255 solid)| —             | Decorations |
+| 48  | mossStone           | Tile                 | 36           | stone           | 2.0          | 10             | SOUND_STONE       | (255 solid)| —             | |
+| 49  | obsidian            | ObsidianTile(false)  | 37           | stone           | 10.0         | 2000           | SOUND_STONE       | (255 solid)| —             | |
+| 50  | torch               | TorchTile           | 5*16=80      | wood            | 0.0          | —              | SOUND_WOOD        | 0 (non-solid)| 15/16 (emission 14) | Tools |
+| 51  | fire                | FireTile            | 1*16+15=31   | fire            | 0.0          | —              | SOUND_WOOD        | 0          | 1.0 (emission 15) | created LAST in initTiles (after other tiles) |
+| 53  | stairsWood          | StairTile(wood)     | (inherits wood)| wood          | (inherits)   | (inherits)     | SOUND_WOOD        | stair shape| —             | stairs — destroyTime inherited from source tile |
+| 54  | chest               | ChestTile           | (multi)      | wood            | 2.5          | —              | SOUND_WOOD        | (255 solid)| —             | entity tile |
+| 56  | emeraldOre (diamond ore)| OreTile         | 16*3+2=50    | stone           | 3.0          | 5              | SOUND_STONE       | (255 solid)| —             | "oreDiamond" desc id (MCPE naming oddity) |
+| 57  | emeraldBlock (diamond)| MetalTile         | 40-16=24     | metal           | 5.0          | 10             | SOUND_METAL       | (255 solid)| —             | "blockDiamond" |
+| 58  | workBench (crafting table)| WorkbenchTile | (multi)      | wood            | 2.5          | —              | SOUND_WOOD        | (255 solid)| —             | |
+| 59  | crops (wheat)       | CropTile            | 8+5*16=88    | ?               | 0.0          | —              | SOUND_GRASS       | 0 (non-solid)| —            | cross-texture, grows |
+| 60  | farmland            | FarmTile            | (per-moisture)| dirt           | 0.6          | —              | SOUND_GRAVEL      | 0 (non-solid, special-cased in getRawBrightness) | —      | |
+| 61  | furnace             | FurnaceTile(false)  | (front/side/top)| stone        | 3.5          | —              | SOUND_STONE       | (255 solid)| —             | entity tile |
+| 62  | furnace_lit         | FurnaceTile(true)   | (front/side/top)| stone        | 3.5          | —              | SOUND_STONE       | (255 solid)| 14/16 (emission 13) | entity tile |
+| 63  | sign (standing)     | SignTile(Sign,true) | (multi)      | wood            | 1.0          | —              | SOUND_WOOD        | 0 (non-solid)| —            | entity tile |
+| 64  | doorWood            | DoorTile(wood)      | (top/bottom) | wood            | 3.0          | —              | SOUND_WOOD        | door shape | —             | |
+| 65  | ladder              | LadderTile          | 3+5*16=83    | ?               | 0.4          | —              | SOUND_WOOD        | 0 (non-solid)| —            | ladder shape |
+| 67  | stairsStone (cobble stairs)| StairTile(stoneBrick) | (inherits)| stone     | (inherits)   | (inherits)     | SOUND_STONE       | stair shape| —             | |
+| 68  | wallSign            | SignTile(Sign,false)| (multi)      | wood            | 1.0          | —              | SOUND_WOOD        | 0 (non-solid)| —            | entity tile |
+| 71  | doorIron           | DoorTile(metal)     | (top/bottom) | metal           | 5.0          | —              | SOUND_METAL       | door shape | —             | pitch 1.5 |
+| 73  | redStoneOre        | RedStoneOreTile(false)| 16*3+3=51  | stone           | 3.0          | 5              | SOUND_STONE       | (255 solid)| —             | Mechanisms |
+| 74  | redStoneOre_lit    | RedStoneOreTile(true)| 16*3+3=51   | stone           | 3.0          | 5              | SOUND_STONE       | (255 solid)| 10/16 (emission 9) | |
+| 78  | topSnow (snow layer)| TopSnowTile        | 16*4+2=66   | topSnow         | 0.1          | —              | SOUND_CLOTH       | (non-solid)| —             | |
+| 79  | ice                | IceTile             | 16*4+3=67   | ice             | 0.5          | —              | SOUND_GLASS       | 3          | —             | friction = 0.98 (set in IceTile.h:18) |
+| 80  | snow (snow block)  | SnowTile            | 16*4+2=66   | snow            | 0.2          | —              | SOUND_CLOTH       | (255 solid)| —             | |
+| 81  | cactus             | CactusTile          | 16*4+6=70   | cactus          | 0.4          | —              | SOUND_CLOTH       | cactus shape| —             | |
+| 82  | clay               | ClayTile            | 16*4+8=72   | clay            | 0.6          | —              | SOUND_GRAVEL      | (255 solid)| —             | |

@@ -1,0 +1,953 @@
+     1→#include "GameRenderer.h"
+     2→#include "gles.h"
+     3→
+     4→#include "../../util/PerfTimer.h"
+     5→
+     6→#include "LevelRenderer.h"
+     7→#include "ItemInHandRenderer.h"
+     8→#include "culling/AllowAllCuller.h"
+     9→#include "culling/FrustumCuller.h"
+    10→#include "entity/EntityRenderDispatcher.h"
+    11→#include "../Minecraft.h"
+    12→#include "../gamemode/GameMode.h"
+    13→#include "../particle/ParticleEngine.h"
+    14→#include "../player/LocalPlayer.h"
+    15→#include "../gui/Screen.h"
+    16→#include "../../world/level/Level.h"
+    17→#include "../../world/entity/Mob.h"
+    18→#include "../../world/level/chunk/ChunkCache.h"
+    19→#include "../../world/level/material/Material.h"
+    20→#include "../../world/Facing.h"
+    21→#include "../../platform/input/Controller.h"
+    22→#include "../../platform/input/Mouse.h"
+    23→#include "../../platform/input/Multitouch.h"
+    24→#include "../../NinecraftApp.h"
+    25→#include "../../world/level/tile/Tile.h"
+    26→#include "../player/input/IInputHolder.h"
+    27→#include "Textures.h"
+    28→#include "../gui/components/ImageButton.h"
+    29→#include "Tesselator.h"
+    30→
+    31→static int _shTicks = -1;
+    32→
+    33→GameRenderer::GameRenderer( Minecraft* mc )
+    34→:       mc(mc),
+    35→        renderDistance(0),
+    36→        _tick(0),
+    37→        _lastTickT(0),
+    38→        fovOffset(0),
+    39→        fovOffsetO(0),
+    40→        fov(1), oFov(1),
+    41→        _setupCameraFov(0),
+    42→        zoom(1), zoom_x(0), zoom_y(0),
+    43→        cameraRoll(0), cameraRollO(0),
+    44→        pickDirection(1, 0, 0),
+    45→
+    46→        thirdDistance(4), thirdDistanceO(4),
+    47→        thirdRotation(0), thirdRotationO(0),
+    48→        thirdTilt(0), thirdTiltO(0),
+    49→
+    50→        fogBr(0), fogBrO(0),
+    51→
+    52→        fr(0), fg(0), fb(0),
+    53→        _rotX(0), _rotY(0),
+    54→        _rotXlast(0), _rotYlast(0),
+    55→        useScreenScissor(false)
+    56→{
+    57→        saveMatrices();
+    58→
+    59→        itemInHandRenderer = new ItemInHandRenderer(mc);
+    60→
+    61→        EntityRenderDispatcher* e = EntityRenderDispatcher::getInstance();
+    62→        e->itemInHandRenderer = itemInHandRenderer;
+    63→        e->textures = mc->textures;
+    64→}
+    65→
+    66→GameRenderer::~GameRenderer() {
+    67→        delete itemInHandRenderer;
+    68→}
+    69→
+    70→void renderCursor(float x, float y, Minecraft* minecraft) {
+    71→        Tesselator& t = Tesselator::instance;
+    72→
+    73→        minecraft->textures->loadAndBindTexture("gui/cursor.png");
+    74→        glEnable(GL_BLEND);
+    75→
+    76→        const float s = 32;
+    77→        const float width = 16;
+    78→        const float height = 16;
+    79→        t.begin();
+    80→        t.color(0xffffffff);
+    81→        t.vertexUV(x, y + (float)height, 0, 0, 1);
+    82→        t.vertexUV(x + (float)width, y + (float)height, 0, 1, 1);
+    83→        t.vertexUV(x + (float)width, y, 0, 1, 0);
+    84→        t.vertexUV(x, y, 0, 0, 0);
+    85→        t.draw();
+    86→
+    87→        glDisable(GL_BLEND);
+    88→}
+    89→
+    90→/*private*/
+    91→void GameRenderer::setupCamera(float a, int eye) {
+    92→    renderDistance = (float) (16 * 16 >> (mc->options.viewDistance));
+    93→#if defined(ANDROID)
+    94→    if (mc->isPowerVR() && mc->options.viewDistance <= 2)
+    95→                renderDistance *= 0.8f;
+    96→#endif
+    97→
+    98→        glMatrixMode(GL_PROJECTION);
+    99→    glLoadIdentity2();
+   100→
+   101→    float stereoScale = 0.07f;
+   102→    if (mc->options.anaglyph3d) glTranslatef2(-(eye * 2 - 1) * stereoScale, 0, 0);
+   103→    if (zoom != 1) {
+   104→        glTranslatef2((float) zoom_x, (float) -zoom_y, 0);
+   105→                glScalef2(zoom, zoom, 1);
+   106→        gluPerspective(_setupCameraFov = getFov(a, true), mc->width / (float) mc->height, 0.05f, renderDistance);
+   107→    } else {
+   108→        gluPerspective(_setupCameraFov = getFov(a, true), mc->width / (float) mc->height, 0.05f, renderDistance);
+   109→    }
+   110→
+   111→    glMatrixMode(GL_MODELVIEW);
+   112→    glLoadIdentity2();
+   113→    if (mc->options.anaglyph3d) glTranslatef2((eye * 2 - 1) * 0.10f, 0, 0);
+   114→
+   115→    bobHurt(a);
+   116→    if (mc->options.bobView) bobView(a);
+   117→         
+   118→        moveCameraToPlayer(a);
+   119→}
+   120→
+   121→extern int _t_keepPic;
+   122→
+   123→/*public*/
+   124→void GameRenderer::render(float a) {
+   125→        TIMER_PUSH("mouse");
+   126→        if (mc->player && mc->mouseGrabbed) {
+   127→        mc->mouseHandler.poll();
+   128→        //printf("Controller.x,y : %f,%f\n", Controller::getX(0), Controller::getY(0));
+   129→
+   130→        float ss = mc->options.sensitivity * 0.6f + 0.2f;
+   131→        float sens = (ss * ss * ss) * 8;
+   132→        float xo = mc->mouseHandler.xd * sens * 4.f;
+   133→        float yo = mc->mouseHandler.yd * sens * 4.f;
+   134→
+   135→                const float now = _tick + a;
+   136→                float deltaT = now - _lastTickT;
+   137→                if (deltaT > 3.0f) deltaT = 3.0f;
+   138→                _lastTickT = now;
+   139→
+   140→                _rotX += xo;
+   141→                _rotY += yo;
+   142→
+   143→        int yAxis = -1;
+   144→        if (mc->options.invertYMouse) yAxis = 1;
+   145→
+   146→                bool screenCovering = mc->screen && !mc->screen->passEvents;
+   147→                if (!screenCovering)
+   148→                {
+   149→                        mc->player->turn(deltaT * _rotXlast, deltaT * _rotYlast * yAxis);
+   150→                }
+   151→    }
+   152→
+   153→        int xMouse = (int)(Mouse::getX() * Gui::InvGuiScale);
+   154→        int yMouse = (int)(Mouse::getY() * Gui::InvGuiScale);
+   155→        if (mc->useTouchscreen()) {
+   156→                const int pid = Multitouch::getFirstActivePointerIdExThisUpdate();
+   157→                if (pid >= 0) {
+   158→                        xMouse = (int)(Multitouch::getX(pid) * Gui::InvGuiScale);
+   159→                        yMouse = (int)(Multitouch::getY(pid) * Gui::InvGuiScale);
+   160→                } else {
+   161→                        xMouse = -9999;
+   162→                        yMouse = -9999;
+   163→                }
+   164→        }
+   165→        TIMER_POP();
+   166→
+   167→        bool hasClearedColorBuffer = false;
+   168→        bool hasSetupGuiScreen = false;
+   169→        useScreenScissor = false;
+   170→        if (mc->isLevelGenerated()) {
+   171→
+   172→                TIMER_PUSH("level");
+   173→                if (_t_keepPic < 0) {
+   174→                if (!(mc->screen && !mc->screen->renderGameBehind())) {
+   175→
+   176→                        if (mc->screen && mc->screen->hasClippingArea(screenScissorArea))
+   177→                                useScreenScissor = true;
+   178→
+   179→                        renderLevel(a);
+   180→                        hasClearedColorBuffer = true;
+   181→
+   182→                        if (!mc->options.hideGui) {
+   183→                                TIMER_POP_PUSH("gui");
+   184→                                setupGuiScreen(false);
+   185→                                hasSetupGuiScreen = true;
+   186→                                mc->gui.render(a, mc->screen != NULL, xMouse, yMouse);
+   187→                        }
+   188→                }}
+   189→                TIMER_POP();
+   190→
+   191→        } else {
+   192→        glViewport(0, 0, mc->width, mc->height);
+   193→        glMatrixMode(GL_PROJECTION);
+   194→        glLoadIdentity2();
+   195→        glMatrixMode(GL_MODELVIEW);
+   196→        glLoadIdentity2();
+   197→        setupGuiScreen(true);
+   198→                hasSetupGuiScreen = true;
+   199→                hasClearedColorBuffer = true;
+   200→    }
+   201→        //@todo
+   202→        if (!hasSetupGuiScreen)
+   203→                setupGuiScreen(!hasClearedColorBuffer);
+   204→
+   205→        if (mc->player && mc->screen == NULL) {
+   206→                if (mc->inputHolder) mc->inputHolder->render(a);
+   207→                if (mc->player->input) mc->player->input->render(a);
+   208→        }
+   209→
+   210→    if (mc->screen != NULL) {
+   211→                if (useScreenScissor)
+   212→                        glDisable2(GL_SCISSOR_TEST);
+   213→
+   214→                mc->screen->render(xMouse, yMouse, a);
+   215→#ifdef RPI
+   216→                renderCursor(xMouse, yMouse, mc);
+   217→#endif
+   218→                // Screen might have been removed, so check it again
+   219→                if (mc->screen && !mc->screen->isInGameScreen())
+   220→                        sleepMs(15);
+   221→    }
+   222→}
+   223→
+   224→/*public*/
+   225→void GameRenderer::renderLevel(float a) {
+   226→
+   227→    if (mc->cameraTargetPlayer == NULL) {
+   228→                if (mc->player)
+   229→                {
+   230→                        mc->cameraTargetPlayer = mc->player;
+   231→                }
+   232→                else
+   233→                {
+   234→                        return;
+   235→                }
+   236→    }
+   237→
+   238→        TIMER_PUSH("pick");
+   239→    pick(a);
+   240→
+   241→    Mob* cameraEntity = mc->cameraTargetPlayer;
+   242→    LevelRenderer* levelRenderer = mc->levelRenderer;
+   243→    ParticleEngine* particleEngine = mc->particleEngine;
+   244→    float xOff = cameraEntity->xOld + (cameraEntity->x - cameraEntity->xOld) * a;
+   245→    float yOff = cameraEntity->yOld + (cameraEntity->y - cameraEntity->yOld) * a;
+   246→    float zOff = cameraEntity->zOld + (cameraEntity->z - cameraEntity->zOld) * a;
+   247→
+   248→    for (int i = 0; i < 2; i++) {
+   249→        if (mc->options.anaglyph3d) {
+   250→            if (i == 0) glColorMask(false, true, true, false);
+   251→            else glColorMask(true, false, false, false);
+   252→        }
+   253→
+   254→                TIMER_POP_PUSH("clear");
+   255→                glViewport(0, 0, mc->width, mc->height);
+   256→                setupClearColor(a);
+   257→
+   258→        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+   259→        glEnable2(GL_CULL_FACE);
+   260→
+   261→                TIMER_POP_PUSH("camera");
+   262→        setupCamera(a, i);
+   263→                saveMatrices();
+   264→
+   265→                if (useScreenScissor) {
+   266→                        glEnable2(GL_SCISSOR_TEST);
+   267→                        glScissor(      screenScissorArea.x, screenScissorArea.y,
+   268→                                                screenScissorArea.w, screenScissorArea.h);
+   269→                }
+   270→                
+   271→//         if(mc->options.fancyGraphics) {
+   272→//                      setupFog(-1);
+   273→//                      TIMER_POP_PUSH("sky");
+   274→//                      glFogf(GL_FOG_START, renderDistance  * 0.2f);
+   275→//                      glFogf(GL_FOG_END, renderDistance *0.75);
+   276→//             levelRenderer->renderSky(a);
+   277→//                      glFogf(GL_FOG_START, renderDistance  * 0.6f);
+   278→//                      glFogf(GL_FOG_END, renderDistance);
+   279→//         }
+   280→        glEnable2(GL_FOG);
+   281→        setupFog(1);
+   282→
+   283→        if (mc->options.ambientOcclusion) {
+   284→            glShadeModel2(GL_SMOOTH);
+   285→                }
+   286→        
+   287→                TIMER_POP_PUSH("frustrum");
+   288→                FrustumCuller frustum;
+   289→        frustum.prepare(xOff, yOff, zOff);
+   290→
+   291→                TIMER_POP_PUSH("culling");
+   292→        mc->levelRenderer->cull(&frustum, a);
+   293→        mc->levelRenderer->updateDirtyChunks(cameraEntity, false);
+   294→
+   295→                if(mc->options.fancyGraphics) {
+   296→                        prepareAndRenderClouds(levelRenderer, a);
+   297→                }
+   298→
+   299→        setupFog(0);
+   300→        glEnable2(GL_FOG);
+   301→
+   302→                mc->textures->loadAndBindTexture("terrain.png");
+   303→        glDisable2(GL_ALPHA_TEST);
+   304→        glDisable2(GL_BLEND);
+   305→        glEnable2(GL_CULL_FACE);
+   306→                TIMER_POP_PUSH("terrain-0");
+   307→        levelRenderer->render(cameraEntity, 0, a);
+   308→
+   309→                TIMER_POP_PUSH("terrain-1");
+   310→        glEnable2(GL_ALPHA_TEST);
+   311→        levelRenderer->render(cameraEntity, 1, a);
+   312→        
+   313→        glShadeModel2(GL_FLAT);
+   314→                TIMER_POP_PUSH("entities");
+   315→                mc->levelRenderer->renderEntities(cameraEntity->getPos(a), &frustum, a);
+   316→//        setupFog(0);
+   317→                TIMER_POP_PUSH("particles");
+   318→        particleEngine->render(cameraEntity, a);
+   319→
+   320→                glDisable2(GL_BLEND);
+   321→        glBlendFunc2(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+   322→        setupFog(0);
+   323→        glEnable2(GL_BLEND);
+   324→        glDisable2(GL_CULL_FACE);
+   325→                glDepthMask(GL_FALSE);
+   326→        glDisable2(GL_ALPHA_TEST);
+   327→                mc->textures->loadAndBindTexture("terrain.png");
+   328→        //if (mc->options.fancyGraphics) {
+   329→        //    glColorMask(false, false, false, false);
+   330→        //    int visibleWaterChunks = levelRenderer->render(cameraEntity, 1, a);
+   331→        //    glColorMask(true, true, true, true);
+   332→        //    if (mc->options.anaglyph3d) {
+   333→        //        if (i == 0) glColorMask(false, true, true, false);
+   334→        //        else glColorMask(true, false, false, false);
+   335→        //    }
+   336→        //    if (visibleWaterChunks > 0) {
+   337→        //        levelRenderer->renderSameAsLast(1, a);
+   338→        //    }
+   339→        //} else
+   340→                {
+   341→                        //glDepthRangef(0.1f, 1.0f);
+   342→                        //glDepthMask(GL_FALSE);
+   343→                        TIMER_POP_PUSH("terrain-water");
+   344→                        glEnable2(GL_DEPTH_TEST);
+   345→            levelRenderer->render(cameraEntity, 2, a);
+   346→                        //glDepthRangef(0, 1);
+   347→
+   348→        }
+   349→        
+   350→                glDepthMask(GL_TRUE);
+   351→        glEnable2(GL_CULL_FACE);
+   352→        glDisable2(GL_BLEND);
+   353→        glEnable2(GL_ALPHA_TEST);
+   354→
+   355→                if (/*!Minecraft::FLYBY_MODE &&*/ zoom == 1 && cameraEntity->isPlayer()) {
+   356→                        if (mc->hitResult.isHit() && !cameraEntity->isUnderLiquid(Material::water)) {
+   357→                                TIMER_POP_PUSH("select");
+   358→                                Player* player = (Player*) cameraEntity;
+   359→                                if (mc->useTouchscreen()) {
+   360→                                        levelRenderer->renderHitSelect(player, mc->hitResult, 0, NULL, a); //player.inventory->getSelected(), a);
+   361→                                }
+   362→                                levelRenderer->renderHit(player, mc->hitResult, 0, NULL, a);//player->inventory.getSelected(), a);
+   363→                        }
+   364→                }
+   365→
+   366→                glDisable2(GL_FOG);
+   367→//
+   368→//        setupFog(0);
+   369→//        glEnable2(GL_FOG);
+   370→////        levelRenderer->renderClouds(a);
+   371→//        glDisable2(GL_FOG);
+   372→        setupFog(1);
+   373→
+   374→        if (zoom == 1) {
+   375→                        TIMER_POP_PUSH("hand");
+   376→            glClear(GL_DEPTH_BUFFER_BIT);
+   377→            renderItemInHand(a, i);
+   378→        }
+   379→
+   380→        if (!mc->options.anaglyph3d) {
+   381→                        TIMER_POP();
+   382→            return;
+   383→        }
+   384→    }
+   385→    glColorMask(true, true, true, false);
+   386→        TIMER_POP();
+   387→}
+   388→
+   389→void GameRenderer::tickFov() {
+   390→        if (mc->cameraTargetPlayer != mc->player)
+   391→                return;
+   392→
+   393→        oFov = fov;
+   394→        fov += (mc->player->getFieldOfViewModifier() - fov) * 0.5f;
+   395→}
+   396→
+   397→/*private*/
+   398→float GameRenderer::getFov(float a, bool applyEffects) {
+   399→    Mob* player = mc->cameraTargetPlayer;
+   400→    float fov = 70;
+   401→
+   402→        if (applyEffects)
+   403→                fov *= this->oFov + (this->fov - this->oFov) * a;
+   404→
+   405→    if (player->isUnderLiquid(Material::water)) fov = 60;
+   406→    if (player->health <= 0) {
+   407→        float duration = player->deathTime + a;
+   408→
+   409→        fov /= ((1 - 500 / (duration + 500)) * 2.0f + 1);
+   410→    }
+   411→    return fov + fovOffsetO + (fovOffset - fovOffsetO) * a;
+   412→}
+   413→
+   414→/*private*/
+   415→void GameRenderer::moveCameraToPlayer(float a) {
+   416→    Entity* player = mc->cameraTargetPlayer;
+   417→
+   418→    float heightOffset = player->heightOffset - 1.62f;
+   419→
+   420→    float x = player->xo + (player->x - player->xo) * a;
+   421→    float y = player->yo + (player->y - player->yo) * a - heightOffset;
+   422→        //printf("camera y: %f\n", y);
+   423→    float z = player->zo + (player->z - player->zo) * a;
+   424→
+   425→        //printf("rot: %f %f\n", cameraRollO, cameraRoll);
+   426→    glRotatef2(cameraRollO + (cameraRoll - cameraRollO) * a, 0, 0, 1);
+   427→
+   428→        //LOGI("player. alive, removed: %d, %d\n", player->isAlive(), player->removed);
+   429→        if(player->isPlayer() && ((Player*)player)->isSleeping()) {
+   430→                heightOffset += 1.0;
+   431→                glTranslatef(0.0f, 0.3f, 0);
+   432→                if (!mc->options.fixedCamera) {
+   433→                        int t = mc->level->getTile(Mth::floor(player->x), Mth::floor(player->y), Mth::floor(player->z));
+   434→                        if (t == Tile::bed->id) {
+   435→                                int data = mc->level->getData(Mth::floor(player->x), Mth::floor(player->y), Mth::floor(player->z));
+   436→
+   437→                                int direction = data & 3;
+   438→                                glRotatef(float(direction * 90), 0, 1, 0);
+   439→                        }
+   440→                        glRotatef(player->yRotO + (player->yRot - player->yRotO) * a + 180, 0, -1, 0);
+   441→                        glRotatef(player->xRotO + (player->xRot - player->xRotO) * a, -1, 0, 0);
+   442→                }
+   443→        } else if (mc->options.thirdPersonView/* || (player->isPlayer() && !player->isAlive())*/) {
+   444→        float cameraDist = thirdDistanceO + (thirdDistance - thirdDistanceO) * a;
+   445→
+   446→        if (mc->options.fixedCamera) {
+   447→
+   448→            float rotationY = thirdRotationO + (thirdRotation - thirdRotationO) * a;
+   449→            float xRot = thirdTiltO + (thirdTilt - thirdTiltO) * a;
+   450→
+   451→            glTranslatef2(0, 0, (float) -cameraDist);
+   452→            glRotatef2(xRot, 1, 0, 0);
+   453→            glRotatef2(rotationY, 0, 1, 0);
+   454→        } else {
+   455→            float yRot = player->yRot;
+   456→            float xRot = player->xRot/* + 180.0f*/;
+   457→            float xd = -Mth::sin(yRot / 180 * Mth::PI) * Mth::cos(xRot / 180 * Mth::PI) * cameraDist;
+   458→            float zd = Mth::cos(yRot / 180 * Mth::PI) * Mth::cos(xRot / 180 * Mth::PI) * cameraDist;
+   459→            float yd = -Mth::sin(xRot / 180 * Mth::PI) * cameraDist;
+   460→
+   461→            for (int i = 0; i < 8; i++) {
+   462→                float xo = (float)((i & 1) * 2 - 1);
+   463→                float yo = (float)(((i >> 1) & 1) * 2 - 1);
+   464→                float zo = (float)(((i >> 2) & 1) * 2 - 1);
+   465→
+   466→                xo *= 0.1f;
+   467→                yo *= 0.1f;
+   468→                zo *= 0.1f;
+   469→
+   470→                HitResult hr = mc->level->clip(Vec3(x + xo, y + yo, z + zo), Vec3(x - xd + xo + zo, y - yd + yo, z - zd + zo)); // newTemp
+   471→                                if (hr.type != NO_HIT) {
+   472→                    float dist = hr.pos.distanceTo(Vec3(x, y, z)); // newTemp
+   473→                    if (dist < cameraDist) cameraDist = dist;
+   474→                }
+   475→            }
+   476→
+   477→                        //glRotatef2(180, 0, 1, 0);
+   478→
+   479→                        glRotatef2(player->xRot - xRot, 1, 0, 0);
+   480→            glRotatef2(player->yRot - yRot, 0, 1, 0);
+   481→            glTranslatef2(0, 0, (float) -cameraDist);
+   482→            glRotatef2(yRot - player->yRot, 0, 1, 0);
+   483→            glRotatef2(xRot - player->xRot, 1, 0, 0);
+   484→        }
+   485→    } else {
+   486→        glTranslatef2(0, 0, -0.1f);
+   487→    }
+   488→
+   489→    if (!mc->options.fixedCamera) {
+   490→        glRotatef2(player->xRotO + (player->xRot - player->xRotO) * a, 1.0f, 0.0f, 0.0f);
+   491→        glRotatef2(player->yRotO + (player->yRot - player->yRotO) * a + 180, 0, 1, 0);
+   492→                //if (_t_keepPic > 0)
+   493→        }
+   494→    glTranslatef2(0, heightOffset, 0);
+   495→}
+   496→
+   497→/*private*/
+   498→void GameRenderer::bobHurt(float a) {
+   499→    Mob* player = mc->cameraTargetPlayer;
+   500→
+   501→    float hurt = player->hurtTime - a;
+   502→
+   503→    if (player->health <= 0) {
+   504→        float duration = player->deathTime + a;
+   505→        glRotatef2(40 - (40 * 200) / (duration + 200), 0, 0, 1);
+   506→    }
+   507→
+   508→    if (player->hurtTime <= 0) return;
+   509→
+   510→        hurt /= player->hurtDuration;
+   511→    hurt = (float) Mth::sin(hurt * hurt * hurt * hurt * Mth::PI);
+   512→
+   513→    float rr = player->hurtDir;
+   514→
+   515→    glRotatef2(-rr, 0, 1, 0);
+   516→    glRotatef2(-hurt * 14, 0, 0, 1);
+   517→    glRotatef2(+rr, 0, 1, 0);
+   518→}
+   519→
+   520→/*private*/
+   521→void GameRenderer::bobView(float a) {
+   522→    //if (mc->options.thirdPersonView) return;
+   523→        if (!(mc->cameraTargetPlayer->isPlayer())) {
+   524→        return;
+   525→    }
+   526→    Player* player = (Player*) mc->cameraTargetPlayer;
+   527→
+   528→    float wda = player->walkDist - player->walkDistO;
+   529→    float b = -(player->walkDist + wda * a);
+   530→    float bob = player->oBob + (player->bob - player->oBob) * a;
+   531→    float tilt = player->oTilt + (player->tilt - player->oTilt) * a;
+   532→    glTranslatef2((float) Mth::sin(b * Mth::PI) * bob * 0.5f, -(float) std::abs(Mth::cos(b * Mth::PI) * bob), 0);
+   533→    glRotatef2((float) Mth::sin(b * Mth::PI) * bob * 3, 0, 0, 1);
+   534→    glRotatef2((float) std::abs(Mth::cos(b * Mth::PI - 0.2f) * bob) * 5, 1, 0, 0);
+   535→    glRotatef2((float) tilt, 1, 0, 0);
+   536→}
+   537→
+   538→/*private*/
+   539→void GameRenderer::setupFog(int i) {
+   540→    Mob* player = mc->cameraTargetPlayer;
+   541→        float fogBuffer[4] = {fr, fg, fb, 1};
+   542→
+   543→    glFogfv(GL_FOG_COLOR, (GLfloat*)fogBuffer);
+   544→    glColor4f2(1, 1, 1, 1);
+   545→
+   546→    if (player->isUnderLiquid(Material::water)) {
+   547→        glFogx(GL_FOG_MODE, GL_EXP);
+   548→        glFogf(GL_FOG_DENSITY, 0.1f); // was 0.06
+   549→
+   550→//        float rr = 0.4f;
+   551→//        float gg = 0.4f;
+   552→//        float bb = 0.9f;
+   553→//
+   554→//        if (mc->options.anaglyph3d) {
+   555→//            float rrr = (rr * 30 + gg * 59 + bb * 11) / 100;
+   556→//            float ggg = (rr * 30 + gg * 70) / (100);
+   557→//            float bbb = (rr * 30 + bb * 70) / (100);
+   558→//
+   559→//            rr = rrr;
+   560→//            gg = ggg;
+   561→//            bb = bbb;
+   562→//        }
+   563→    } else if (player->isUnderLiquid(Material::lava)) {
+   564→        glFogx(GL_FOG_MODE, GL_EXP);
+   565→        glFogf(GL_FOG_DENSITY, 2.f); // was 0.06
+   566→//        float rr = 0.4f;
+   567→//        float gg = 0.3f;
+   568→//        float bb = 0.3f;
+   569→//
+   570→//        if (mc->options.anaglyph3d) {
+   571→//            float rrr = (rr * 30 + gg * 59 + bb * 11) / 100;
+   572→//            float ggg = (rr * 30 + gg * 70) / (100);
+   573→//            float bbb = (rr * 30 + bb * 70) / (100);
+   574→//
+   575→//            rr = rrr;
+   576→//            gg = ggg;
+   577→//            bb = bbb;
+   578→//        }
+   579→    } else {
+   580→        glFogx(GL_FOG_MODE, GL_LINEAR);
+   581→        glFogf(GL_FOG_START, renderDistance * 0.6f);
+   582→        glFogf(GL_FOG_END, renderDistance);
+   583→        if (i < 0) {
+   584→            glFogf(GL_FOG_START, 0);
+   585→            glFogf(GL_FOG_END, renderDistance * 1.0f);
+   586→        }
+   587→
+   588→        if (mc->level->dimension->foggy) {
+   589→            glFogf(GL_FOG_START, 0);
+   590→        }
+   591→    }
+   592→
+   593→    glEnable2(GL_COLOR_MATERIAL);
+   594→    //glColorMaterial(GL_FRONT, GL_AMBIENT);
+   595→}
+   596→
+   597→void GameRenderer::updateAllChunks() {
+   598→    mc->levelRenderer->updateDirtyChunks(mc->cameraTargetPlayer, true);
+   599→}
+   600→
+   601→bool GameRenderer::updateFreeformPickDirection(float a, Vec3& outDir) {
+   602→
+   603→    if (!mc->inputHolder->allowPicking()) {
+   604→        _shTicks = 1;
+   605→        return false;
+   606→    }
+   607→
+   608→    Vec3 c = mc->cameraTargetPlayer->getPos(a);
+   609→
+   610→    bool firstPerson = !mc->options.thirdPersonView;
+   611→    const float PickingDistance = firstPerson? 6.0f : 12.0f;
+   612→
+   613→    _shTicks = -1;
+   614→
+   615→    int vp[4] = {0, 0, mc->width, mc->height};
+   616→    float pt[3];
+   617→    float x = mc->inputHolder->mousex;
+   618→    float y = mc->height - mc->inputHolder->mousey;
+   619→
+   620→    //sw.start();
+   621→
+   622→    if (!glhUnProjectf(x, y, 1, lastModelMatrix, lastProjMatrix, vp, pt)) {
+   623→        return false;
+   624→    }
+   625→    Vec3 p1(pt[0] + c.x, pt[1] + c.y, pt[2] + c.z);
+   626→
+   627→    glhUnProjectf(x, y, 0, lastModelMatrix, lastProjMatrix, vp, pt);
+   628→    Vec3 p0(pt[0] + c.x, pt[1] + c.y, pt[2] + c.z);
+   629→
+   630→    outDir = (p1 - p0).normalized();
+   631→    p1 = p0 + outDir * PickingDistance;
+   632→
+   633→    //sw.stop();
+   634→    //sw.printEvery(30, "unproject ");
+   635→
+   636→    const HitResult& hit = mc->hitResult = mc->level->clip(p0, p1, false);
+   637→
+   638→    // If in 3rd person view - verify that the hit target is within range
+   639→    if (!firstPerson && hit.isHit()) {
+   640→        const float MaxSqrDist = PickingDistance*PickingDistance;
+   641→        if (mc->cameraTargetPlayer->distanceToSqr((float)hit.x, (float)hit.y, (float)hit.z) > MaxSqrDist)
+   642→            mc->hitResult.type = NO_HIT;
+   643→    }
+   644→    return true;
+   645→}
+   646→
+   647→/*public*/
+   648→void GameRenderer::pick(float a) {
+   649→        if (mc->level == NULL) return;
+   650→    if (mc->cameraTargetPlayer == NULL) return;
+   651→        if (!mc->cameraTargetPlayer->isAlive()) return;
+   652→
+   653→    float range = mc->gameMode->getPickRange();
+   654→    bool isPicking = true;
+   655→
+   656→    bool freeform = mc->useTouchscreen()  && !mc->options.isJoyTouchArea;
+   657→    if (freeform) {
+   658→        isPicking = updateFreeformPickDirection(a, pickDirection);
+   659→    } else {
+   660→        mc->hitResult = mc->cameraTargetPlayer->pick(range, a);
+   661→        pickDirection = mc->cameraTargetPlayer->getViewVector(a);
+   662→    }
+   663→
+   664→    Vec3  from = mc->cameraTargetPlayer->getPos(a);
+   665→    float dist = range;
+   666→        if (mc->hitResult.isHit()) {
+   667→        dist = mc->hitResult.pos.distanceTo(from);
+   668→    }
+   669→
+   670→        if (mc->gameMode->isCreativeType()) {
+   671→        /*dist =*/ range = 12;
+   672→    } else {
+   673→        if (dist > 3) dist = 3;
+   674→        range = dist;
+   675→    }
+   676→
+   677→    Vec3 pv = (pickDirection * range);
+   678→    Vec3 to  = from + pv;
+   679→    mc->cameraTargetPlayer->aimDirection = pickDirection;
+   680→
+   681→    Entity* hovered = NULL;
+   682→    const float g = 1;
+   683→    AABB aabb = mc->cameraTargetPlayer->bb.expand(pv.x, pv.y, pv.z).grow(g, g, g);
+   684→        EntityList& objects = mc->level->getEntities(mc->cameraTargetPlayer, aabb);
+   685→    float nearest = 0;
+   686→    for (unsigned int i = 0; i < objects.size(); i++) {
+   687→        Entity* e = objects[i];
+   688→        if (!e->isPickable()) continue;
+   689→
+   690→        float rr = e->getPickRadius();
+   691→        AABB bb = e->bb.grow(rr, rr, rr);
+   692→        HitResult p = bb.clip(from, to);
+   693→                //printf("Clip Hitresult %d (%d)\n", p.type, p.isHit());
+   694→
+   695→        if (bb.contains(from)) {
+   696→            //@todo: hovered = e; break; ?
+   697→            if (nearest >= 0) {
+   698→                hovered = e;
+   699→                nearest = 0;
+   700→            }
+   701→                } else if (p.isHit()) {
+   702→            float dd = from.distanceTo(p.pos);
+   703→            if (dd < nearest || nearest == 0) {
+   704→                hovered = e;
+   705→                nearest = dd;
+   706→            }
+   707→        }
+   708→    }
+   709→
+   710→    if (hovered != NULL) {
+   711→                if(nearest < dist) {
+   712→                        mc->hitResult = HitResult(hovered);
+   713→                }
+   714→    }
+   715→        else if (isPicking && !mc->hitResult.isHit()) {
+   716→                // if we don't have a hit result, attempt to hit the edge of the block we are standing on
+   717→                // (this is an pocket edition simplification to help building floors)
+   718→        //LOGI("hovered : %d (%f)\n", mc->hitResult.type, viewVec.y);
+   719→                if (pickDirection.y < -.7f) {
+   720→                        // looking down by more than roughly 45 degrees, fetch a hit to the block standing on
+   721→                        Vec3 to = from.add(0, -2.0f, 0);
+   722→
+   723→                        HitResult downHitResult = mc->level->clip(from, to);
+   724→                        if (downHitResult.isHit()) {
+   725→                                mc->hitResult = downHitResult;
+   726→                                mc->hitResult.indirectHit = true;
+   727→                                // change face (not up)
+   728→                                if (std::abs(pickDirection.x) > std::abs(pickDirection.z)) {
+   729→                    mc->hitResult.f = (pickDirection.x < 0)? 4 : 5;
+   730→                                } else {
+   731→                    mc->hitResult.f = (pickDirection.z < 0)? 2 : 3;
+   732→                                }
+   733→                        }
+   734→                }
+   735→        }
+   736→}
+   737→/*public*/
+   738→void GameRenderer::tick(int nTick, int maxTick) {
+   739→        --_t_keepPic;
+   740→
+   741→        if (!mc->player)
+   742→        {
+   743→                return;
+   744→        }
+   745→
+   746→        if (--_shTicks == 0)
+   747→                mc->hitResult.type = NO_HIT;
+   748→
+   749→        //_rotXlast = _rotX;
+   750→        //_rotYlast = _rotY;
+   751→
+   752→        //LOGI("x: %f\n", _rotX);
+   753→
+   754→    if (nTick == maxTick) {
+   755→        const float tickMult = 1.0f / (float)(1 + maxTick);
+   756→        _rotXlast = 0.4f * std::pow(std::abs(_rotX), 1.2f) * tickMult;
+   757→        if (_rotX < 0) _rotXlast = -_rotXlast;
+   758→
+   759→        _rotYlast = 0.4f * std::pow(std::abs(_rotY), 1.2f) * tickMult;
+   760→        if (_rotY < 0) _rotYlast = -_rotYlast;
+   761→
+   762→        _rotX = 0;
+   763→        _rotY = 0;
+   764→    }
+   765→
+   766→    fogBrO = fogBr;
+   767→    thirdDistanceO = thirdDistance;
+   768→    thirdRotationO = thirdRotation;
+   769→    thirdTiltO = thirdTilt;
+   770→    fovOffsetO = fovOffset;
+   771→    cameraRollO = cameraRoll;
+   772→
+   773→    if (mc->cameraTargetPlayer == NULL) {
+   774→        mc->cameraTargetPlayer = mc->player;
+   775→    }
+   776→
+   777→        tickFov();
+   778→
+   779→    float brr = mc->level->getBrightness(       Mth::floor(mc->cameraTargetPlayer->x),
+   780→                                                                                        Mth::floor(mc->cameraTargetPlayer->y),
+   781→                                                                                        Mth::floor(mc->cameraTargetPlayer->z));
+   782→
+   783→        float whiteness = (3 - mc->options.viewDistance) / 3.0f;
+   784→    float fogBrT = brr * (1 - whiteness) + whiteness;
+   785→    fogBr += (fogBrT - fogBr) * 0.1f;
+   786→
+   787→    _tick++;
+   788→
+   789→    itemInHandRenderer->tick();
+   790→//    if (mc->isRaining) tickRain();
+   791→}
+   792→
+   793→/*private*/
+   794→void GameRenderer::setupClearColor(float a) {
+   795→    Level* level = mc->level;
+   796→    Mob* player = mc->cameraTargetPlayer;
+   797→
+   798→    float whiteness = 1.0f / (4 - mc->options.viewDistance);
+   799→    whiteness = 1 - (float) pow(whiteness, 0.25f);
+   800→
+   801→    Vec3 skyColor = level->getSkyColor(mc->cameraTargetPlayer, a);
+   802→    float sr = (float) skyColor.x;
+   803→    float sg = (float) skyColor.y;
+   804→    float sb = (float) skyColor.z;
+   805→
+   806→    Vec3 fogColor = level->getFogColor(a);
+   807→    fr = (float) fogColor.x;
+   808→    fg = (float) fogColor.y;
+   809→    fb = (float) fogColor.z;
+   810→
+   811→    fr += (sr - fr) * whiteness;
+   812→    fg += (sg - fg) * whiteness;
+   813→    fb += (sb - fb) * whiteness;
+   814→
+   815→    if (player->isUnderLiquid(Material::water)) {
+   816→        fr = 0.02f;
+   817→        fg = 0.02f;
+   818→        fb = 0.2f;
+   819→    } else if (player->isUnderLiquid(Material::lava)) {
+   820→        fr = 0.6f;
+   821→        fg = 0.1f;
+   822→        fb = 0.00f;
+   823→    }
+   824→
+   825→    float brr = fogBrO + (fogBr - fogBrO) * a;
+   826→    fr *= brr;
+   827→    fg *= brr;
+   828→    fb *= brr;
+   829→
+   830→    if (mc->options.anaglyph3d) {
+   831→        float frr = (fr * 30 + fg * 59 + fb * 11) / 100;
+   832→        float fgg = (fr * 30 + fg * 70) / (100);
+   833→        float fbb = (fr * 30 + fb * 70) / (100);
+   834→
+   835→        fr = frr;
+   836→        fg = fgg;
+   837→        fb = fbb;
+   838→    }
+   839→
+   840→    glClearColor(fr, fg, fb, 1.0f);
+   841→}
+   842→
+   843→void GameRenderer::zoomRegion( float zoom, float xa, float ya )
+   844→{
+   845→        this->zoom = zoom;
+   846→        this->zoom_x = xa;
+   847→        this->zoom_y = ya;
+   848→}
+   849→
+   850→void GameRenderer::unZoomRegion()
+   851→{
+   852→        zoom = 1;
+   853→}
+   854→
+   855→void GameRenderer::setupGuiScreen( bool clearColorBuffer )
+   856→{
+   857→        int screenWidth = (int)(mc->width * Gui::InvGuiScale);
+   858→        int screenHeight = (int)(mc->height * Gui::InvGuiScale);
+   859→
+   860→        // Setup GUI render mode
+   861→        GLbitfield clearBits = clearColorBuffer?
+   862→                        GL_DEPTH_BUFFER_BIT|GL_COLOR_BUFFER_BIT
+   863→                :       GL_DEPTH_BUFFER_BIT;
+   864→        glClear(clearBits);
+   865→        glMatrixMode(GL_PROJECTION);
+   866→        glLoadIdentity2();
+   867→        glOrthof(0, (GLfloat)screenWidth, (GLfloat)screenHeight, 0, 2000, 3000);
+   868→        glMatrixMode(GL_MODELVIEW);
+   869→        glLoadIdentity2();
+   870→        glTranslatef2(0, 0, -2000);
+   871→}
+   872→
+   873→/*private*/
+   874→void GameRenderer::renderItemInHand(float a, int eye) {
+   875→    glLoadIdentity2();
+   876→    if (mc->options.anaglyph3d) glTranslatef2((eye * 2 - 1) * 0.10f, 0, 0);
+   877→
+   878→    glPushMatrix2();
+   879→    bobHurt(a);
+   880→    if (mc->options.bobView) bobView(a);
+   881→
+   882→    if (!mc->options.thirdPersonView && (mc->cameraTargetPlayer->isPlayer() && !((Player*)mc->cameraTargetPlayer)->isSleeping())) {
+   883→        if (!mc->options.hideGui) {
+   884→                        float fov = getFov(a, false);
+   885→                        if (fov != _setupCameraFov) {
+   886→                                glMatrixMode(GL_PROJECTION);
+   887→                                glLoadIdentity();
+   888→                                gluPerspective(fov, mc->width / (float) mc->height, 0.05f, renderDistance);
+   889→                                glMatrixMode(GL_MODELVIEW);
+   890→                        }
+   891→            itemInHandRenderer->render(a);
+   892→        }
+   893→    }
+   894→
+   895→    glPopMatrix2();
+   896→    if (!mc->options.thirdPersonView && (mc->cameraTargetPlayer->isPlayer() && !((Player*)mc->cameraTargetPlayer)->isSleeping())) {
+   897→        itemInHandRenderer->renderScreenEffect(a);
+   898→        bobHurt(a);
+   899→    }
+   900→    if (mc->options.bobView) bobView(a);
+   901→}
+   902→
+   903→void GameRenderer::onGraphicsReset()
+   904→{
+   905→        if (itemInHandRenderer) itemInHandRenderer->onGraphicsReset();
+   906→}
+   907→
+   908→void GameRenderer::saveMatrices()
+   909→{
+   910→        #if defined(RPI)
+   911→                return;
+   912→        #endif
+   913→
+   914→        static bool saved = false;
+   915→        //if (saved) return;
+   916→
+   917→        saved = true;
+   918→
+   919→        glGetFloatv(GL_PROJECTION_MATRIX, lastProjMatrix);
+   920→        glGetFloatv(GL_MODELVIEW_MATRIX, lastModelMatrix);
+   921→}
+   922→
+   923→void GameRenderer::prepareAndRenderClouds( LevelRenderer* levelRenderer, float a ) {
+   924→        //if(mc->options.isCloudsOn()) {
+   925→        TIMER_PUSH("clouds");
+   926→        glMatrixMode(GL_PROJECTION);
+   927→        glPushMatrix2();
+   928→        glLoadIdentity2();
+   929→        gluPerspective(_setupCameraFov = getFov(a, true), mc->width / (float) mc->height, 2, renderDistance * 512);
+   930→        glMatrixMode(GL_MODELVIEW);
+   931→        glPushMatrix2();
+   932→        setupFog(0);
+   933→        glDepthMask(false);
+   934→        glEnable2(GL_FOG);
+   935→        glFogf(GL_FOG_START, renderDistance  * 0.2f);
+   936→        glFogf(GL_FOG_END, renderDistance * 0.75f);
+   937→        levelRenderer->renderSky(a);
+   938→        glFogf(GL_FOG_START, renderDistance * 4.2f * 0.6f);
+   939→        glFogf(GL_FOG_END, renderDistance * 4.2f);
+   940→        levelRenderer->renderClouds(a);
+   941→        glFogf(GL_FOG_START, renderDistance  * 0.6f);
+   942→        glFogf(GL_FOG_END, renderDistance);
+   943→        glDisable2(GL_FOG);
+   944→        glDepthMask(true);
+   945→        setupFog(1);
+   946→        glPopMatrix2();
+   947→        glMatrixMode(GL_PROJECTION);
+   948→        glPopMatrix2();
+   949→        glMatrixMode(GL_MODELVIEW);
+   950→        TIMER_POP();
+   951→        //}
+   952→}
+   953→

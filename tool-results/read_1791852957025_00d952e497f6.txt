@@ -1,0 +1,1557 @@
+     1→     1→#include "Minecraft.h"
+     2→     2→
+     3→     3→#if defined(APPLE_DEMO_PROMOTION)
+     4→     4→    #define NO_NETWORK
+     5→     5→#endif
+     6→     6→
+     7→     7→#if defined(RPI)
+     8→     8→        #define CREATORMODE
+     9→     9→#endif
+    10→    10→
+    11→    11→#include "../network/RakNetInstance.h"
+    12→    12→#include "../network/ClientSideNetworkHandler.h"
+    13→    13→#include "../network/ServerSideNetworkHandler.h"
+    14→    14→//#include "../network/Packet.h"
+    15→    15→#include "../world/entity/player/Inventory.h"
+    16→    16→#include "../world/level/chunk/ChunkCache.h"
+    17→    17→#include "../world/level/tile/Tile.h"
+    18→    18→#include "../world/level/storage/LevelStorageSource.h"
+    19→    19→#include "../world/level/storage/LevelStorage.h"
+    20→    20→#include "player/input/KeyboardInput.h"
+    21→    21→#ifndef STANDALONE_SERVER
+    22→    22→#include "player/input/touchscreen/TouchInputHolder.h"
+    23→    23→#endif
+    24→    24→#include "player/LocalPlayer.h"
+    25→    25→#include "gamemode/CreativeMode.h"
+    26→    26→#include "gamemode/SurvivalMode.h"
+    27→    27→#include "player/LocalPlayer.h"
+    28→    28→#ifndef STANDALONE_SERVER
+    29→    29→#include "particle/ParticleEngine.h"
+    30→    30→#include "gui/Screen.h"
+    31→    31→#include "gui/Font.h"
+    32→    32→#include "gui/screens/RenameMPLevelScreen.h"
+    33→    33→#include "sound/SoundEngine.h"
+    34→    34→#endif
+    35→    35→#include "../platform/CThread.h"
+    36→    36→#include "../platform/input/Mouse.h"
+    37→    37→#include "../AppPlatform.h"
+    38→    38→#include "../Performance.h"
+    39→    39→#include "../LicenseCodes.h"
+    40→    40→#include "../util/PerfTimer.h"
+    41→    41→#include "../util/PerfRenderer.h"
+    42→    42→#include "player/input/MouseBuildInput.h"
+    43→    43→
+    44→    44→#include "../world/Facing.h"
+    45→    45→
+    46→    46→#include "../network/packet/PlaceBlockPacket.h"
+    47→    47→
+    48→    48→#include "player/input/IInputHolder.h"
+    49→    49→#ifndef STANDALONE_SERVER
+    50→    50→#include "player/input/touchscreen/TouchscreenInput.h"
+    51→    51→
+    52→    52→#include "player/input/ControllerTurnInput.h"
+    53→    53→#include "player/input/XperiaPlayInput.h"
+    54→    54→
+    55→    55→#endif
+    56→    56→
+    57→    57→#include "player/input/MouseTurnInput.h"
+    58→    58→#include "../world/entity/MobFactory.h"
+    59→    59→#include "../world/level/MobSpawner.h"
+    60→    60→#include "../util/Mth.h"
+    61→    61→#include "../network/packet/InteractPacket.h"
+    62→    62→#ifndef STANDALONE_SERVER
+    63→    63→#include "gui/screens/PrerenderTilesScreen.h"
+    64→    64→#include "renderer/Textures.h"
+    65→    65→#include "gui/screens/DeathScreen.h"
+    66→    66→#endif
+    67→    67→
+    68→    68→#include "../network/packet/RespawnPacket.h"
+    69→    69→#include "IConfigListener.h"
+    70→    70→#include "../world/entity/MobCategory.h"
+    71→    71→#ifndef STANDALONE_SERVER
+    72→    72→#include "gui/screens/FurnaceScreen.h"
+    73→    73→#endif
+    74→    74→#include "../world/Difficulty.h"
+    75→    75→#include "../server/ServerLevel.h"
+    76→    76→#ifdef CREATORMODE
+    77→    77→#include "../server/CreatorLevel.h"
+    78→    78→#endif
+    79→    79→#include "../network/packet/AdventureSettingsPacket.h"
+    80→    80→#include "../network/packet/SetSpawnPositionPacket.h"
+    81→    81→#include "../network/command/CommandServer.h"
+    82→    82→#include "gamemode/CreatorMode.h"
+    83→    83→#ifndef STANDALONE_SERVER
+    84→    84→#include "gui/screens/ArmorScreen.h"
+    85→    85→#endif
+    86→    86→#include "../world/level/levelgen/synth/ImprovedNoise.h"
+    87→    87→#ifndef STANDALONE_SERVER
+    88→    88→#include "renderer/tileentity/TileEntityRenderDispatcher.h"
+    89→    89→#endif
+    90→    90→
+    91→    91→#ifndef STANDALONE_SERVER
+    92→    92→#include "renderer/ptexture/DynamicTexture.h"
+    93→    93→#include "renderer/GameRenderer.h"
+    94→    94→#include "renderer/ItemInHandRenderer.h"
+    95→    95→#include "renderer/LevelRenderer.h"
+    96→    96→#include "renderer/entity/EntityRenderDispatcher.h"
+    97→    97→#include "gui/Screen.h"
+    98→    98→#include "gui/Font.h"
+    99→    99→#include "gui/screens/RenameMPLevelScreen.h"
+   100→   100→#include "sound/SoundEngine.h"
+   101→   101→#endif
+   102→   102→
+   103→   103→static void checkGlError(const char* tag) {
+   104→   104→#ifdef GLDEBUG
+   105→   105→        while (1) {
+   106→   106→        const int errCode = glGetError();
+   107→   107→        if (errCode == GL_NO_ERROR) break;
+   108→   108→
+   109→   109→                LOGE("################\nOpenGL-error @ %s : #%d\n", tag, errCode);
+   110→   110→        }
+   111→   111→#endif /*GLDEBUG*/
+   112→   112→}
+   113→   113→
+   114→   114→/*static*/
+   115→   115→const char* Minecraft::progressMessages[] = {
+   116→   116→        "Locating server",
+   117→   117→        "Building terrain",
+   118→   118→        "Preparing",
+   119→   119→        "Saving chunks"
+   120→   120→};
+   121→   121→
+   122→   122→int Minecraft::customDebugId = Minecraft::CDI_NONE;
+   123→   123→
+   124→   124→#if defined(_MSC_VER)
+   125→   125→        #pragma warning( disable : 4355 ) // 'this' pointer in initialization list which is perfectly legal
+   126→   126→#endif
+   127→   127→
+   128→   128→bool Minecraft::useAmbientOcclusion = false;
+   129→   129→
+   130→   130→Minecraft::Minecraft()
+   131→   131→:       user(NULL),
+   132→   132→        level(NULL),
+   133→   133→        player(NULL),
+   134→   134→        cameraTargetPlayer(NULL),
+   135→   135→        levelRenderer(NULL),
+   136→   136→        gameRenderer(NULL),
+   137→   137→#ifndef STANDALONE_SERVER
+   138→   138→        particleEngine(NULL),
+   139→   139→        _perfRenderer(NULL),
+   140→   140→#endif
+   141→   141→        _commandServer(NULL),
+   142→   142→#ifndef STANDALONE_SERVER
+   143→   143→        textures(NULL),
+   144→   144→#endif
+   145→   145→        lastTickTime(-1),
+   146→   146→        lastTime(0),
+   147→   147→        ticksSinceLastUpdate(0),
+   148→   148→        gameMode(NULL),
+   149→   149→        mouseGrabbed(true),
+   150→   150→        missTime(0),
+   151→   151→        pause(false),
+   152→   152→        _running(false),
+   153→   153→        timer(20),
+   154→   154→#ifndef STANDALONE_SERVER
+   155→   155→        gui(this),
+   156→   156→#endif
+   157→   157→        netCallback(NULL),
+   158→   158→#ifndef STANDALONE_SERVER
+   159→   159→        screen(NULL),
+   160→   160→        font(NULL),
+   161→   161→#endif
+   162→   162→        screenMutex(false),
+   163→   163→#ifndef STANDALONE_SERVER
+   164→   164→        scheduledScreen(NULL),
+   165→   165→        hasScheduledScreen(false),
+   166→   166→        soundEngine(NULL),
+   167→   167→#endif
+   168→   168→        ticks(0),
+   169→   169→        isGeneratingLevel(false),
+   170→   170→        _hasSignaledGeneratingLevelFinished(true),
+   171→   171→        generateLevelThread(NULL),
+   172→   172→        progressStagePercentage(0),
+   173→   173→        progressStageStatusId(0),
+   174→   174→        isLookingForMultiplayer(false),
+   175→   175→        _licenseId(LicenseCodes::WAIT_PLATFORM_NOT_READY),
+   176→   176→        inputHolder(0),
+   177→   177→        _supportsNonTouchscreen(false),
+   178→   178→#ifndef STANDALONE_SERVER
+   179→   179→        screenChooser(this),
+   180→   180→#endif
+   181→   181→        width(1), height(1),
+   182→   182→        //_respawnPlayerTicks(-1),
+   183→   183→#ifdef __APPLE__
+   184→   184→    _isSuperFast(false),
+   185→   185→#endif
+   186→   186→        _powerVr(false),
+   187→   187→        commandPort(4711),
+   188→   188→        reserved_d1(0),reserved_d2(0),
+   189→   189→        reserved_f1(0),reserved_f2(0)
+   190→   190→{
+   191→   191→//#ifdef ANDROID
+   192→   192→
+   193→   193→#if defined(NO_NETWORK)
+   194→   194→    raknetInstance = new IRakNetInstance();
+   195→   195→#else
+   196→   196→        raknetInstance = new RakNetInstance();
+   197→   197→#endif
+   198→   198→#ifndef STANDALONE_SERVER
+   199→   199→        soundEngine = new SoundEngine(20.0f);
+   200→   200→        soundEngine->init(this, &options);
+   201→   201→#endif
+   202→   202→        //setupPieces();
+   203→   203→}
+   204→   204→
+   205→   205→Minecraft::~Minecraft()
+   206→   206→{
+   207→   207→        delete netCallback;
+   208→   208→        delete raknetInstance;
+   209→   209→#ifndef STANDALONE_SERVER
+   210→   210→        delete levelRenderer;
+   211→   211→        delete gameRenderer;
+   212→   212→        delete particleEngine;
+   213→   213→
+   214→   214→        delete soundEngine;
+   215→   215→#endif
+   216→   216→        delete gameMode;
+   217→   217→#ifndef STANDALONE_SERVER
+   218→   218→        delete font;
+   219→   219→        delete textures;
+   220→   220→
+   221→   221→        if (screen != NULL) {
+   222→   222→                delete screen;
+   223→   223→                screen = NULL;
+   224→   224→        }
+   225→   225→#endif
+   226→   226→        if (level != NULL) {
+   227→   227→                level->saveGame();
+   228→   228→                if (level->getChunkSource())
+   229→   229→                        level->getChunkSource()->saveAll(true);
+   230→   230→                delete level->getLevelStorage();
+   231→   231→                delete level;
+   232→   232→                level = NULL;
+   233→   233→        }
+   234→   234→
+   235→   235→        //delete player;
+   236→   236→        delete user;
+   237→   237→        delete inputHolder;
+   238→   238→
+   239→   239→        delete storageSource;
+   240→   240→        delete _perfRenderer;
+   241→   241→        delete _commandServer;
+   242→   242→
+   243→   243→        MobFactory::clearStaticTestMobs();
+   244→   244→#ifndef STANDALONE_SERVER
+   245→   245→        EntityRenderDispatcher::destroy();
+   246→   246→#endif
+   247→   247→}
+   248→   248→
+   249→   249→// Only called by server
+   250→   250→void Minecraft::selectLevel( const std::string& levelId, const std::string& levelName, const LevelSettings& settings )
+   251→   251→{
+   252→   252→#if defined(CREATORMODE)
+   253→   253→        level = new CreatorLevel(
+   254→   254→#else
+   255→   255→        level = new ServerLevel(
+   256→   256→#endif
+   257→   257→                storageSource->selectLevel(levelId, false),
+   258→   258→                levelName,
+   259→   259→                settings,
+   260→   260→                SharedConstants::GeneratorVersion);
+   261→   261→
+   262→   262→        // note: settings is useless beyond this point, since it's
+   263→   263→        //       either copied to LevelData (or LevelData read from file)
+   264→   264→        setLevel(level, "Generating level");
+   265→   265→        setIsCreativeMode(level->getLevelData()->getGameType() == GameType::Creative);
+   266→   266→        _running = true;
+   267→   267→}
+   268→   268→
+   269→   269→void Minecraft::setLevel(Level* level, const std::string& message /* ="" */, LocalPlayer* forceInsertPlayer /* = NULL */) {
+   270→   270→        cameraTargetPlayer = NULL;
+   271→   271→        LOGI("Seed is %ld\n", level->getSeed());
+   272→   272→
+   273→   273→        if (level != NULL) {
+   274→   274→                level->raknetInstance = raknetInstance;
+   275→   275→        gameMode->initLevel(level);
+   276→   276→
+   277→   277→                if (!player && forceInsertPlayer)
+   278→   278→                {
+   279→   279→                        player = forceInsertPlayer;
+   280→   280→                        player->resetPos(false);
+   281→   281→                        //level->addEntity(forceInsertPlayer);
+   282→   282→                }
+   283→   283→                else if (player != NULL) {
+   284→   284→                        player->resetPos(false);
+   285→   285→                        if (level != NULL) {
+   286→   286→                                level->addEntity(player);
+   287→   287→                        }
+   288→   288→                }
+   289→   289→                this->level = level;
+   290→   290→                _hasSignaledGeneratingLevelFinished = false;
+   291→   291→#ifdef STANDALONE_SERVER
+   292→   292→                const bool threadedLevelCreation = false;
+   293→   293→#else
+   294→   294→                const bool threadedLevelCreation = true;
+   295→   295→#endif
+   296→   296→
+   297→   297→                if (threadedLevelCreation) {
+   298→   298→                        // Threaded
+   299→   299→                        // "Lock"
+   300→   300→                        isGeneratingLevel = true;
+   301→   301→                        generateLevelThread = new CThread(Minecraft::prepareLevel_tspawn, this);
+   302→   302→                } else {
+   303→   303→                        // Non-threaded
+   304→   304→                        generateLevel("Currently not used", level);
+   305→   305→                }
+   306→   306→    } else {
+   307→   307→        player = NULL;
+   308→   308→    }
+   309→   309→
+   310→   310→    this->lastTickTime = 0;
+   311→   311→        this->_running = true;
+   312→   312→}
+   313→   313→
+   314→   314→void Minecraft::leaveGame(bool renameLevel /*=false*/)
+   315→   315→{
+   316→   316→    if (isGeneratingLevel || !_hasSignaledGeneratingLevelFinished)
+   317→   317→        return;
+   318→   318→    
+   319→   319→        isGeneratingLevel = false;
+   320→   320→        bool saveLevel = level && (!level->isClientSide || renameLevel);
+   321→   321→
+   322→   322→        raknetInstance->disconnect();
+   323→   323→        if (saveLevel) {
+   324→   324→                // If server or wanting to save level as client, save all unsaved chunks!
+   325→   325→                level->getChunkSource()->saveAll(true);
+   326→   326→        }
+   327→   327→
+   328→   328→        LOGI("Clearing levels\n");
+   329→   329→
+   330→   330→        cameraTargetPlayer = NULL;
+   331→   331→#ifndef STANDALONE_SERVER
+   332→   332→        levelRenderer->setLevel(NULL);
+   333→   333→        particleEngine->setLevel(NULL);
+   334→   334→#endif
+   335→   335→        LOGI("Erasing callback\n");
+   336→   336→        delete netCallback;
+   337→   337→        netCallback = NULL;
+   338→   338→
+   339→   339→        LOGI("Erasing level\n");
+   340→   340→        if (level != NULL) {
+   341→   341→                delete level->getLevelStorage();
+   342→   342→                delete level;
+   343→   343→                level = NULL;
+   344→   344→        }
+   345→   345→        //delete player;
+   346→   346→        player = NULL;
+   347→   347→        cameraTargetPlayer = NULL;
+   348→   348→
+   349→   349→        _running = false;
+   350→   350→#ifndef STANDALONE_SERVER
+   351→   351→        if (renameLevel) {
+   352→   352→                setScreen(new RenameMPLevelScreen(LevelStorageSource::TempLevelId));
+   353→   353→        }
+   354→   354→        else
+   355→   355→                screenChooser.setScreen(SCREEN_STARTMENU);
+   356→   356→#endif
+   357→   357→}
+   358→   358→
+   359→   359→void Minecraft::prepareLevel(const std::string& title) {
+   360→   360→        LOGI("status: 1\n");
+   361→   361→        progressStageStatusId = 1;
+   362→   362→
+   363→   363→        Stopwatch A, B, C, D;
+   364→   364→        A.start();
+   365→   365→
+   366→   366→        Stopwatch L;
+   367→   367→
+   368→   368→        // Dont update lights if we load the level (ok, actually just with leveldata version=1.+(?))
+   369→   369→        if (!level->isNew())
+   370→   370→                level->setUpdateLights(false);
+   371→   371→
+   372→   372→        int Max = CHUNK_CACHE_WIDTH * CHUNK_CACHE_WIDTH;
+   373→   373→        int pp = 0;
+   374→   374→        for (int x = 8; x < (CHUNK_CACHE_WIDTH * CHUNK_WIDTH); x += CHUNK_WIDTH) {
+   375→   375→        for (int z = 8; z < (CHUNK_CACHE_WIDTH * CHUNK_WIDTH); z += CHUNK_WIDTH) {
+   376→   376→            progressStagePercentage = 100 * pp++ / Max;
+   377→   377→            //printf("level generation progress %d\n", progressStagePercentage);
+   378→   378→                        B.start();
+   379→   379→            level->getTile(x, 64, z);
+   380→   380→                        B.stop();
+   381→   381→                        L.start();
+   382→   382→                        if (level->isNew())
+   383→   383→                                while (level->updateLights())
+   384→   384→                                        ;
+   385→   385→                        L.stop();
+   386→   386→        }
+   387→   387→    }
+   388→   388→        A.stop();
+   389→   389→        level->setUpdateLights(true);
+   390→   390→
+   391→   391→        C.start();
+   392→   392→        for (int x = 0; x < CHUNK_CACHE_WIDTH; x++)
+   393→   393→        {
+   394→   394→                for (int z = 0; z < CHUNK_CACHE_WIDTH; z++)
+   395→   395→                {
+   396→   396→                        LevelChunk* chunk = level->getChunk(x, z);
+   397→   397→                        if (chunk && !chunk->createdFromSave)
+   398→   398→                        {
+   399→   399→                                chunk->unsaved = false;
+   400→   400→                                chunk->clearUpdateMap();
+   401→   401→                        }
+   402→   402→                }
+   403→   403→        }
+   404→   404→        C.stop();
+   405→   405→
+   406→   406→        LOGI("status: 3\n");
+   407→   407→        progressStageStatusId = 3;
+   408→   408→        if (level->isNew()) {
+   409→   409→                level->setInitialSpawn(); // @note: should obviously be called from Level itself
+   410→   410→                level->saveLevelData();
+   411→   411→                level->getChunkSource()->saveAll(false);
+   412→   412→                level->saveGame();
+   413→   413→        } else {
+   414→   414→                level->saveLevelData();
+   415→   415→                level->loadEntities();
+   416→   416→        }
+   417→   417→
+   418→   418→        progressStagePercentage = -1;
+   419→   419→        progressStageStatusId = 2;
+   420→   420→        LOGI("status: 2\n");
+   421→   421→
+   422→   422→        D.start();
+   423→   423→        level->prepare();
+   424→   424→        D.stop();
+   425→   425→
+   426→   426→        A.print("Generate level: ");
+   427→   427→        L.print(" - light: ");
+   428→   428→        B.print(" - getTl: ");
+   429→   429→        C.print(" - clear: ");
+   430→   430→        D.print(" - prepr: ");
+   431→   431→        progressStageStatusId = 0;
+   432→   432→}
+   433→   433→
+   434→   434→void Minecraft::update() {
+   435→   435→        //LOGI("Enter Update\n");
+   436→   436→
+   437→   437→        if (Options::debugGl)
+   438→   438→                LOGI(">>>>>>>>>>\n");
+   439→   439→
+   440→   440→        TIMER_PUSH("root");
+   441→   441→
+   442→   442→        //if (level) {
+   443→   443→        //      LOGI("numplayers: %d\n", level->players.size());
+   444→   444→        //      for (int i = 0; i < level->players.size(); ++i) {
+   445→   445→        //              Player* p = level->players[i];
+   446→   446→        //              bool inEnt = std::find(level->entities.begin(), level->entities.end(), p) != level->entities.end();
+   447→   447→        //              LOGI("  %p, %d, %d - in? %d\n", p, p->entityId, p->owner.ToUint32(p->owner), inEnt);
+   448→   448→        //      }
+   449→   449→        //}
+   450→   450→
+   451→   451→        if (pause && level != NULL) {
+   452→   452→                float lastA = timer.a;
+   453→   453→                timer.advanceTime();
+   454→   454→                timer.a = lastA;
+   455→   455→        } else {
+   456→   456→                timer.advanceTime();
+   457→   457→        }
+   458→   458→
+   459→   459→        if (raknetInstance) {
+   460→   460→                raknetInstance->runEvents(netCallback);
+   461→   461→        }
+   462→   462→
+   463→   463→        TIMER_PUSH("tick");
+   464→   464→        int toTick = timer.ticks;
+   465→   465→        for (int i = 0; i < toTick; ++i, ++ticks)
+   466→   466→                tick(i, toTick-1);
+   467→   467→
+   468→   468→        TIMER_POP_PUSH("updatelights");
+   469→   469→        if (level && !isGeneratingLevel) {
+   470→   470→                level->updateLights();
+   471→   471→        }
+   472→   472→        TIMER_POP();
+   473→   473→
+   474→   474→        #ifndef STANDALONE_SERVER
+   475→   475→                if (gameMode != NULL) gameMode->render(timer.a);
+   476→   476→                TIMER_PUSH("sound");
+   477→   477→                soundEngine->update(player, timer.a);
+   478→   478→                TIMER_POP_PUSH("render");
+   479→   479→                gameRenderer->render(timer.a);
+   480→   480→                TIMER_POP();
+   481→   481→        #else
+   482→   482→        CThread::sleep(1);
+   483→   483→        #endif
+   484→   484→#ifndef STANDALONE_SERVER
+   485→   485→        Multitouch::resetThisUpdate();
+   486→   486→#endif
+   487→   487→        TIMER_POP();
+   488→   488→#ifndef STANDALONE_SERVER
+   489→   489→        checkGlError("Update finished");
+   490→   490→
+   491→   491→        if (options.renderDebug) {
+   492→   492→                if (!PerfTimer::enabled) {
+   493→   493→                        PerfTimer::reset();
+   494→   494→                        PerfTimer::enabled = true;
+   495→   495→                }
+   496→   496→
+   497→   497→                //TIMER_PUSH("debugfps");
+   498→   498→                _perfRenderer->renderFpsMeter(1);
+   499→   499→                checkGlError("render debug");
+   500→   500→                //TIMER_POP();
+   501→   501→        } else {
+   502→   502→                PerfTimer::enabled = false;
+   503→   503→        }
+   504→   504→#endif
+   505→   505→        //LOGI("Exit Update\n");
+   506→   506→}
+   507→   507→
+   508→   508→void Minecraft::tick(int nTick, int maxTick) {
+   509→   509→        if (missTime > 0) missTime--;
+   510→   510→#ifndef STANDALONE_SERVER
+   511→   511→        if (!screen && player) {
+   512→   512→                if (player->health <= 0) {
+   513→   513→                        setScreen(new DeathScreen());
+   514→   514→                }
+   515→   515→        }
+   516→   516→#endif
+   517→   517→        TIMER_PUSH("gameMode");
+   518→   518→        if (level && !pause) {
+   519→   519→                gameMode->tick();
+   520→   520→        }
+   521→   521→
+   522→   522→        TIMER_POP_PUSH("commandServer");
+   523→   523→        if (level && _commandServer) {
+   524→   524→                _commandServer->tick();
+   525→   525→        }
+   526→   526→
+   527→   527→        TIMER_POP_PUSH("input");
+   528→   528→        tickInput();
+   529→   529→#ifndef STANDALONE_SERVER
+   530→   530→        TIMER_POP_PUSH("gui");
+   531→   531→        gui.tick();
+   532→   532→#endif
+   533→   533→        //
+   534→   534→        // Ongoing level generation in a (perhaps) different thread. When it's
+   535→   535→        // ready, _levelGenerated() is called once and any threads are deleted.
+   536→   536→        //
+   537→   537→        if (isGeneratingLevel) {
+   538→   538→                return;
+   539→   539→        } else if (!_hasSignaledGeneratingLevelFinished) {
+   540→   540→                if (generateLevelThread) {
+   541→   541→                        delete generateLevelThread;
+   542→   542→                        generateLevelThread = NULL;
+   543→   543→                }
+   544→   544→                _levelGenerated();
+   545→   545→        }
+   546→   546→
+   547→   547→        //
+   548→   548→        // Normal game loop, run before or efter level generation
+   549→   549→        //
+   550→   550→        if (level != NULL)
+   551→   551→        {
+   552→   552→                if (!pause) {
+   553→   553→#ifndef STANDALONE_SERVER
+   554→   554→                        TIMER_POP_PUSH("gameRenderer");
+   555→   555→                        gameRenderer->tick(nTick, maxTick);
+   556→   556→
+   557→   557→                        TIMER_POP_PUSH("levelRenderer");
+   558→   558→                        levelRenderer->tick();
+   559→   559→#endif
+   560→   560→                        level->difficulty = options.difficulty;
+   561→   561→                        if (level->isClientSide) level->difficulty = Difficulty::EASY;
+   562→   562→
+   563→   563→                        TIMER_POP_PUSH("level");
+   564→   564→                        level->tickEntities();
+   565→   565→                        level->tick();
+   566→   566→#ifndef STANDALONE_SERVER
+   567→   567→                        TIMER_POP_PUSH("animateTick");
+   568→   568→                        if (player) {
+   569→   569→                                level->animateTick(Mth::floor(player->x), Mth::floor(player->y), Mth::floor(player->z));
+   570→   570→                        }
+   571→   571→#endif
+   572→   572→                }
+   573→   573→        }
+   574→   574→#ifndef STANDALONE_SERVER
+   575→   575→        textures->loadAndBindTexture("terrain.png");
+   576→   576→        if (!pause && !(screen && !screen->renderGameBehind())) {
+   577→   577→                #if !defined(RPI)
+   578→   578→                        #ifdef __APPLE__
+   579→   579→                        if (isSuperFast())
+   580→   580→                        #endif
+   581→   581→                        {
+   582→   582→                        if (nTick == maxTick) {
+   583→   583→                                TIMER_POP_PUSH("textures");
+   584→   584→                                textures->tick(true);
+   585→   585→                        }
+   586→   586→                        }
+   587→   587→                #endif
+   588→   588→        }
+   589→   589→        TIMER_POP_PUSH("particles");
+   590→   590→        particleEngine->tick();
+   591→   591→        if (screen) {
+   592→   592→                screenMutex = true;
+   593→   593→                screen->tick();
+   594→   594→                screenMutex = false;
+   595→   595→        }
+   596→   596→
+   597→   597→        // @note: fix to keep "isPressed" and "isReleased" as long as necessary.
+   598→   598→        //      Most likely keyboard and mouse could/should be reset here as well.
+   599→   599→        Multitouch::reset();
+   600→   600→#endif
+   601→   601→        TIMER_POP();
+   602→   602→}
+   603→   603→
+   604→   604→class InputRAII {
+   605→   605→public:
+   606→   606→        ~InputRAII() {
+   607→   607→#ifndef STANDALONE_SERVER
+   608→   608→                Mouse::reset();
+   609→   609→                Keyboard::reset();
+   610→   610→#endif
+   611→   611→        }
+   612→   612→};
+   613→   613→
+   614→   614→void Minecraft::tickInput() {
+   615→   615→#ifndef STANDALONE_SERVER
+   616→   616→        InputRAII raiiInput;
+   617→   617→
+   618→   618→        if (screen && !screen->passEvents) {
+   619→   619→                screenMutex = true;
+   620→   620→                screen->updateEvents();
+   621→   621→                //screen->updateSetScreen();
+   622→   622→                screenMutex = false;
+   623→   623→                if (hasScheduledScreen) {
+   624→   624→                        setScreen(scheduledScreen);
+   625→   625→                        scheduledScreen = NULL;
+   626→   626→                        hasScheduledScreen = false;
+   627→   627→                }
+   628→   628→                return;
+   629→   629→        }
+   630→   630→
+   631→   631→        if (!player) {
+   632→   632→                return;
+   633→   633→        }
+   634→   634→
+   635→   635→#ifdef RPI
+   636→   636→        bool mouseDiggable = true;
+   637→   637→        bool allowGuiClicks = !mouseGrabbed;
+   638→   638→#else
+   639→   639→        bool mouseDiggable = !gui.isInside(Mouse::getX(), Mouse::getY());
+   640→   640→        bool allowGuiClicks = true;
+   641→   641→#endif
+   642→   642→
+   643→   643→        TIMER_PUSH("mouse");
+   644→   644→        while (Mouse::next()) {
+   645→   645→                //if (Mouse::getButtonState(MouseAction::ACTION_LEFT))
+   646→   646→                //      LOGI("mouse-down-at: %d, %d\n", Mouse::getX(), Mouse::getY());
+   647→   647→                int passedTime = getTimeMs() - lastTickTime;
+   648→   648→                if (passedTime > 200) continue; // @note: As long Mouse::clear CLEARS the whole buffer, it's safe to break here
+   649→   649→                // But since it might be rewritten anyway (and hopefully there aren't a lot of messages, we just continue.
+   650→   650→
+   651→   651→                const MouseAction& e = Mouse::getEvent();
+   652→   652→
+   653→   653→#ifdef RPI // If clicked when not having focus, get focus @keyboard
+   654→   654→                if (!mouseGrabbed) {
+   655→   655→                        if (!screen && e.data == MouseAction::DATA_DOWN) {
+   656→   656→                                grabMouse();
+   657→   657→                        }
+   658→   658→                }
+   659→   659→#endif
+   660→   660→
+   661→   661→                if (allowGuiClicks && e.action == MouseAction::ACTION_LEFT && e.data == MouseAction::DATA_DOWN) {
+   662→   662→                        gui.handleClick(MouseAction::ACTION_LEFT, Mouse::getX(), Mouse::getY());
+   663→   663→                }
+   664→   664→
+   665→   665→                if (e.action == MouseAction::ACTION_WHEEL) {
+   666→   666→                        Inventory* v = player->inventory;
+   667→   667→                        int numSlots = gui.getNumSlots() - 1;
+   668→   668→                        int slot = (v->selected - e.dy + numSlots) % numSlots;
+   669→   669→                        v->selectSlot(slot);
+   670→   670→                }
+   671→   671→                /*
+   672→   672→                if (mouseDiggable && options.useMouseForDigging) {
+   673→   673→                        if (Mouse::getEventButton() == MouseAction::ACTION_LEFT && Mouse::getEventButtonState()) {
+   674→   674→                                handleMouseClick(MouseAction::ACTION_LEFT);
+   675→   675→                                lastClickTick = ticks;
+   676→   676→                        }
+   677→   677→                        if (Mouse::getEventButton() == MouseAction::ACTION_RIGHT && Mouse::getEventButtonState()) {
+   678→   678→                                handleMouseClick(MouseAction::ACTION_RIGHT);
+   679→   679→                                lastClickTick = ticks;
+   680→   680→                        }
+   681→   681→                }
+   682→   682→                */
+   683→   683→        }
+   684→   684→
+   685→   685→        TIMER_POP_PUSH("keyboard");
+   686→   686→        while (Keyboard::next()) {
+   687→   687→                int key = Keyboard::getEventKey();
+   688→   688→                bool isPressed = (Keyboard::getEventKeyState() == KeyboardAction::KEYDOWN);
+   689→   689→                player->setKey(key, isPressed);
+   690→   690→
+   691→   691→                if (isPressed) {
+   692→   692→                        gui.handleKeyPressed(key);
+   693→   693→
+   694→   694→                        #if defined(WIN32) || defined(RPI)//|| defined(_DEBUG) || defined(DEBUG)
+   695→   695→                                if (key >= '0' && key <= '9') {
+   696→   696→                                        int digit = key - '0';
+   697→   697→                                        int slot = digit - 1;
+   698→   698→
+   699→   699→                                        if (slot >= 0 && slot < gui.getNumSlots()-1)
+   700→   700→                                                player->inventory->selectSlot(slot);
+   701→   701→
+   702→   702→                                        #if defined(WIN32)
+   703→   703→                                                if (digit >= 1 && GetAsyncKeyState(VK_CONTROL) < 0) {
+   704→   704→                                                        // Set adventure settings here!
+   705→   705→                                                        AdventureSettingsPacket p(level->adventureSettings);
+   706→   706→                                                        p.toggle((AdventureSettingsPacket::Flags)(1 << slot));
+   707→   707→                                                        p.fillIn(level->adventureSettings);
+   708→   708→                                                        raknetInstance->send(p);
+   709→   709→                                                }
+   710→   710→                                                if (digit == 0) {
+   711→   711→                                                        Pos pos((int)player->x, (int)player->y-1, (int)player->z);
+   712→   712→                                                        SetSpawnPositionPacket p(pos);
+   713→   713→                                                        raknetInstance->send(p);
+   714→   714→                                                }
+   715→   715→                                        #endif
+   716→   716→                                }
+   717→   717→                        #endif
+   718→   718→                        #if defined(RPI)
+   719→   719→                                if (key == Keyboard::KEY_E) {
+   720→   720→                                        screenChooser.setScreen(SCREEN_BLOCKSELECTION);
+   721→   721→                                }
+   722→   722→                                if (!screen && key == Keyboard::KEY_O || key == 250) {
+   723→   723→                                        releaseMouse();
+   724→   724→                                }
+   725→   725→                        #endif
+   726→   726→                        #if defined(WIN32)
+   727→   727→                                if (key == Keyboard::KEY_F) {
+   728→   728→                                        options.isFlying = !options.isFlying;
+   729→   729→                                        player->noPhysics = options.isFlying;
+   730→   730→                                }
+   731→   731→
+   732→   732→                                if (key == Keyboard::KEY_T) {
+   733→   733→                                        options.thirdPersonView = !options.thirdPersonView;
+   734→   734→                                        /*
+   735→   735→                                        ImprovedNoise noise;
+   736→   736→                                        for (int i = 0; i < 16; ++i)
+   737→   737→                                                printf("%d\t%f\n", i, noise.grad2(i, 3, 8));
+   738→   738→                                        */
+   739→   739→                                }
+   740→   740→
+   741→   741→                                if (key == Keyboard::KEY_O) {
+   742→   742→                                        useAmbientOcclusion = !useAmbientOcclusion;
+   743→   743→                                        options.ambientOcclusion = useAmbientOcclusion;
+   744→   744→                                        levelRenderer->allChanged();
+   745→   745→                                }
+   746→   746→
+   747→   747→                                if (key == Keyboard::KEY_L)
+   748→   748→                                        options.viewDistance = (options.viewDistance + 1) % 4;
+   749→   749→
+   750→   750→                                if (key == Keyboard::KEY_U) {
+   751→   751→                                        onGraphicsReset();
+   752→   752→                                        player->heal(100);
+   753→   753→                                }
+   754→   754→
+   755→   755→                                if (key == Keyboard::KEY_B || key == 108) // Toggle the game mode
+   756→   756→                                        setIsCreativeMode(!isCreativeMode());
+   757→   757→
+   758→   758→                                if (key == Keyboard::KEY_P) // Step forward in time
+   759→   759→                                        level->setTime( level->getTime() + 1000);
+   760→   760→
+   761→   761→                                if (key == Keyboard::KEY_G) {
+   762→   762→                                        setScreen(new ArmorScreen());
+   763→   763→                                        /*
+   764→   764→                                        std::vector<AABB>& boxs = level->getCubes(NULL, AABB(128.1f, 73, 128.1f, 128.9f, 74.9f, 128.9f));
+   765→   765→                                        LOGI("boxes: %d\n", (int)boxs.size());
+   766→   766→                                        */
+   767→   767→                                }
+   768→   768→
+   769→   769→                                if (key == Keyboard::KEY_Y) {
+   770→   770→                                        textures->reloadAll();
+   771→   771→                                        player->hurtTo(2);
+   772→   772→                                }
+   773→   773→                                if (key == Keyboard::KEY_Z || key == 108) {
+   774→   774→                                        for (int i = 0; i < 1; ++i) {
+   775→   775→                                                Mob* mob = NULL;
+   776→   776→                                                int forceId = 0;//MobTypes::Sheep;
+   777→   777→
+   778→   778→                                                int types[] = {
+   779→   779→                                                        MobTypes::Sheep,
+   780→   780→                                                        MobTypes::Pig,
+   781→   781→                                                        MobTypes::Chicken,
+   782→   782→                                                        MobTypes::Cow,
+   783→   783→                                                };
+   784→   784→
+   785→   785→                                                int mobType = (forceId > 0)? forceId : types[Mth::random(sizeof(types) / sizeof(int))];
+   786→   786→                                                mob = MobFactory::CreateMob(mobType, level);
+   787→   787→
+   788→   788→                                                //((Animal*)mob)->setAge(-1000);
+   789→   789→                                                float dx = 4 - 8 * Mth::random() + 4 * Mth::sin(Mth::DEGRAD * player->yRot);
+   790→   790→                                                float dz = 4 - 8 * Mth::random() + 4 * Mth::cos(Mth::DEGRAD * player->yRot);
+   791→   791→                                                if (mob && !MobSpawner::addMob(level, mob, player->x + dx, player->y, player->z + dz, Mth::random()*360, 0, true))
+   792→   792→                                                        delete mob;
+   793→   793→                                        }
+   794→   794→                                }
+   795→   795→
+   796→   796→                                if (key == Keyboard::KEY_X) {
+   797→   797→                                        const EntityList& entities = level->getAllEntities();
+   798→   798→                                        for (int i = entities.size()-1; i >= 0; --i) {
+   799→   799→                                                Entity* e = entities[i];
+   800→   800→                                                if (!e->isPlayer())
+   801→   801→                                                        level->removeEntity(e);
+   802→   802→                                        }
+   803→   803→                                }
+   804→   804→
+   805→   805→                                if (key == Keyboard::KEY_C /*|| key == 4*/) {
+   806→   806→                                        player->inventory->clearInventoryWithDefault();
+   807→   807→                                        // @todo: Add saving here for benchmarking
+   808→   808→                                }
+   809→   809→                                if (key == Keyboard::KEY_H) {
+   810→   810→                                        setScreen( new PrerenderTilesScreen() );
+   811→   811→                                }
+   812→   812→
+   813→   813→                                if (key == Keyboard::KEY_O) {
+   814→   814→                                        for (int i = Inventory::MAX_SELECTION_SIZE; i < player->inventory->getContainerSize(); ++i)
+   815→   815→                                                if (player->inventory->getItem(i))
+   816→   816→                                                        player->inventory->dropSlot(i, false);
+   817→   817→                                }
+   818→   818→                                if (key == Keyboard::KEY_F3) {
+   819→   819→                                        options.renderDebug = !options.renderDebug;
+   820→   820→                                }
+   821→   821→                                if (key == Keyboard::KEY_M) {
+   822→   822→                                        options.difficulty = (options.difficulty == Difficulty::PEACEFUL)?
+   823→   823→                                                Difficulty::NORMAL : Difficulty::PEACEFUL;
+   824→   824→                                        //setIsCreativeMode( !isCreativeMode() );
+   825→   825→                                }
+   826→   826→
+   827→   827→                                if (options.renderDebug) {
+   828→   828→                                        if (key >= '0' && key <= '9') {
+   829→   829→                                                _perfRenderer->debugFpsMeterKeyPress(key - '0');
+   830→   830→                                        }
+   831→   831→                                }
+   832→   832→                        #endif
+   833→   833→
+   834→   834→                        #ifndef RPI
+   835→   835→                                if (key == 82)
+   836→   836→                                        pauseGame(false);
+   837→   837→                        #else
+   838→   838→                                if (key == Keyboard::KEY_ESCAPE)
+   839→   839→                                        pauseGame(false);
+   840→   840→                        #endif
+   841→   841→
+   842→   842→                        #ifndef OPENGL_ES
+   843→   843→                                if (key == Keyboard::KEY_P) {
+   844→   844→                                        static bool isWireFrame = false;
+   845→   845→                                        isWireFrame = !isWireFrame;
+   846→   846→                                        glPolygonMode(GL_FRONT, isWireFrame? GL_LINE : GL_FILL);
+   847→   847→                                        //glPolygonMode(GL_BACK, isWireFrame? GL_LINE : GL_FILL);
+   848→   848→                                }
+   849→   849→                        #endif
+   850→   850→                }
+   851→   851→                #ifdef WIN32
+   852→   852→                        if (key == Keyboard::KEY_M) {
+   853→   853→                                for (int i = 0; i < 5 * SharedConstants::TicksPerSecond; ++i)
+   854→   854→                                        level->tick();
+   855→   855→                        }
+   856→   856→                #endif
+   857→   857→
+   858→   858→
+   859→   859→                //if (!isPressed) LOGI("Key released: %d\n", key);
+   860→   860→
+   861→   861→                if (!options.useMouseForDigging) {
+   862→   862→                        int passedTime = getTimeMs() - lastTickTime;
+   863→   863→                        if (passedTime > 200) continue;
+   864→   864→
+   865→   865→                        // Destroy and attack is on same button
+   866→   866→                        if (key == options.keyDestroy.key && isPressed) {
+   867→   867→                                BuildActionIntention bai(BuildActionIntention::BAI_REMOVE | BuildActionIntention::BAI_ATTACK);
+   868→   868→                                handleBuildAction(&bai);
+   869→   869→                        }
+   870→   870→                        else // Build and use/interact is on same button
+   871→   871→                        if (key == options.keyUse.key && isPressed) {
+   872→   872→                                BuildActionIntention bai(BuildActionIntention::BAI_BUILD | BuildActionIntention::BAI_INTERACT);
+   873→   873→                                handleBuildAction(&bai);
+   874→   874→                        }
+   875→   875→                }
+   876→   876→        }
+   877→   877→
+   878→   878→        TIMER_POP_PUSH("tickbuild");
+   879→   879→        BuildActionIntention bai;
+   880→   880→        // @note: This might be a problem. This method is polling based here, but
+   881→   881→        //        event based when using mouse (or keys..), and in java. Not quite
+   882→   882→        //        sure just yet what way to go.
+   883→   883→        bool buildHandled = inputHolder->getBuildInput()->tickBuild(player, &bai);
+   884→   884→        if (buildHandled) {
+   885→   885→                if (!bai.isRemoveContinue())
+   886→   886→                        handleBuildAction(&bai);
+   887→   887→        }
+   888→   888→
+   889→   889→        bool isTryingToDestroyBlock = (options.useMouseForDigging
+   890→   890→                        ?       (Mouse::isButtonDown(MouseAction::ACTION_LEFT) && mouseDiggable)
+   891→   891→                        :       Keyboard::isKeyDown(options.keyDestroy.key))
+   892→   892→                ||      (buildHandled && bai.isRemove());
+   893→   893→
+   894→   894→        TIMER_POP_PUSH("handlemouse");
+   895→   895→#ifdef RPI
+   896→   896→        handleMouseDown(MouseAction::ACTION_LEFT, isTryingToDestroyBlock);
+   897→   897→        handleMouseClick(buildHandled && bai.isInteract()
+   898→   898→                || options.useMouseForDigging && Mouse::isButtonDown(MouseAction::ACTION_RIGHT));
+   899→   899→#else
+   900→   900→        handleMouseDown(MouseAction::ACTION_LEFT, isTryingToDestroyBlock || (buildHandled && bai.isInteract()));
+   901→   901→#endif
+   902→   902→
+   903→   903→        lastTickTime = getTimeMs();
+   904→   904→
+   905→   905→        // we have (hopefully) handled the keyboard & mouse queue and it
+   906→   906→        // can now be emptied. If wanted, the reset could be changed to:
+   907→   907→        // index -= numRead; // then this code doesn't have to be placed here
+   908→   908→        // + it prepares for tick not handling all or any events.
+   909→   909→        // update: RAII'ing instead, see above
+   910→   910→        //Keyboard::reset();
+   911→   911→        //Mouse::reset();
+   912→   912→
+   913→   913→        TIMER_POP();
+   914→   914→#endif
+   915→   915→}
+   916→   916→
+   917→   917→void Minecraft::handleMouseDown(int button, bool down) {
+   918→   918→#ifndef STANDALONE_SERVER
+   919→   919→#ifndef RPI
+   920→   920→        if(player->isUsingItem()) {
+   921→   921→                if(!down && !Keyboard::isKeyDown(options.keyUse.key)) {
+   922→   922→                        gameMode->releaseUsingItem(player);
+   923→   923→                }
+   924→   924→                return;
+   925→   925→        }
+   926→   926→#endif
+   927→   927→        if(player->isSleeping()) {
+   928→   928→                return;
+   929→   929→        }
+   930→   930→    if (button == MouseAction::ACTION_LEFT && missTime > 0) return;
+   931→   931→        if (down && hitResult.type == TILE && button == MouseAction::ACTION_LEFT && !hitResult.indirectHit) {
+   932→   932→        int x = hitResult.x;
+   933→   933→        int y = hitResult.y;
+   934→   934→        int z = hitResult.z;
+   935→   935→        gameMode->continueDestroyBlock(x, y, z, hitResult.f);
+   936→   936→        particleEngine->crack(x, y, z, hitResult.f);
+   937→   937→                player->swing();
+   938→   938→    } else {
+   939→   939→        gameMode->stopDestroyBlock();
+   940→   940→    }
+   941→   941→#endif
+   942→   942→}
+   943→   943→
+   944→   944→void Minecraft::handleMouseClick(int button) {
+   945→   945→//      BuildActionIntention bai(
+   946→   946→//              (button == MouseAction::ACTION_LEFT)?
+   947→   947→//                      BuildActionIntention::BAI_REMOVE
+   948→   948→//              :       BuildActionIntention::BAI_BUILD);
+   949→   949→//
+   950→   950→//      handleBuildAction(&bai);
+   951→   951→}
+   952→   952→
+   953→   953→void Minecraft::handleBuildAction(BuildActionIntention* action) {
+   954→   954→#ifndef STANDALONE_SERVER
+   955→   955→        if (action->isRemove()) {
+   956→   956→                if (missTime > 0) return;
+   957→   957→                player->swing();
+   958→   958→        }
+   959→   959→        if(player->isUsingItem())
+   960→   960→                return;
+   961→   961→    bool mayUse = true;
+   962→   962→
+   963→   963→        if (!hitResult.isHit()) {
+   964→   964→                if (action->isRemove() && !gameMode->isCreativeType()) {
+   965→   965→                        missTime = 10;
+   966→   966→                }
+   967→   967→    } else if (hitResult.type == ENTITY) {
+   968→   968→        if (action->isAttack()) {
+   969→   969→                        player->swing();
+   970→   970→                        //LOGI("attacking!\n");
+   971→   971→                        InteractPacket packet(InteractPacket::Attack, player->entityId, hitResult.entity->entityId);
+   972→   972→                        raknetInstance->send(packet);
+   973→   973→            gameMode->attack(player, hitResult.entity);
+   974→   974→                } else if (action->isInteract()) {
+   975→   975→                        if (hitResult.entity->interactPreventDefault())
+   976→   976→                                mayUse = false;
+   977→   977→                        //LOGI("interacting!\n");
+   978→   978→                        InteractPacket packet(InteractPacket::Interact, player->entityId, hitResult.entity->entityId);
+   979→   979→                        raknetInstance->send(packet);
+   980→   980→            gameMode->interact(player, hitResult.entity);
+   981→   981→        }
+   982→   982→    } else if (hitResult.type == TILE) {
+   983→   983→                int x = hitResult.x;
+   984→   984→        int y = hitResult.y;
+   985→   985→        int z = hitResult.z;
+   986→   986→        int face = hitResult.f;
+   987→   987→
+   988→   988→                int oldTileId = level->getTile(x, y, z);
+   989→   989→        Tile* oldTile = Tile::tiles[oldTileId];
+   990→   990→
+   991→   991→                //bool tryDestroyBlock = false;
+   992→   992→
+   993→   993→                if (action->isRemove()) {
+   994→   994→                        if (!oldTile)
+   995→   995→                                return;
+   996→   996→
+   997→   997→                        //LOGI("tile: %s - %d, %d, %d. b: %f - %f\n", oldTile->getDescriptionId().c_str(), x, y, z, oldTile->getBrightness(level, x, y, z), oldTile->getBrightness(level, x, y+1, z));
+   998→   998→            level->extinguishFire(x, y, z, hitResult.f);
+   999→   999→                        gameMode->startDestroyBlock(x, y, z, hitResult.f);
+  1000→  1000→        }
+  1001→  1001→                else {
+  1002→  1002→                        ItemInstance* item = player->inventory->getSelected();
+  1003→  1003→                        if (gameMode->useItemOn(player, level, item, x, y, z, face, hitResult.pos)) {
+  1004→  1004→                            mayUse = false;
+  1005→  1005→                            player->swing();
+  1006→  1006→                        #ifdef RPI
+  1007→  1007→                                } else if (item && item->id == ((Item*)Item::sword_iron)->id) {
+  1008→  1008→                                        player->swing();
+  1009→  1009→                        #endif
+  1010→  1010→                        }
+  1011→  1011→                        if (item && item->count <= 0) {
+  1012→  1012→                                player->inventory->clearSlot(player->inventory->selected);
+  1013→  1013→                        }
+  1014→  1014→                        //} else if (item && item->count != oldCount) {
+  1015→  1015→                        //        gameRenderer->itemInHandRenderer->itemPlaced();
+  1016→  1016→                        //}
+  1017→  1017→                }
+  1018→  1018→        }
+  1019→  1019→        if (mayUse && action->isInteract()) {
+  1020→  1020→                ItemInstance* item = player->inventory->getSelected();
+  1021→  1021→                if (item && !player->isUsingItem()) {
+  1022→  1022→                        if (gameMode->useItem(player, level, item)) {
+  1023→  1023→                                gameRenderer->itemInHandRenderer->itemUsed();
+  1024→  1024→                        }
+  1025→  1025→                        if (item && item->count <= 0) {
+  1026→  1026→                                player->inventory->clearSlot(player->inventory->selected);
+  1027→  1027→                        }
+  1028→  1028→                }
+  1029→  1029→        }
+  1030→  1030→#endif
+  1031→  1031→}
+  1032→  1032→
+  1033→  1033→bool Minecraft::isOnlineClient()
+  1034→  1034→{
+  1035→  1035→    return (level != NULL && level->isClientSide);
+  1036→  1036→}
+  1037→  1037→
+  1038→  1038→bool Minecraft::isOnline()
+  1039→  1039→{
+  1040→  1040→        return netCallback != NULL;
+  1041→  1041→}
+  1042→  1042→
+  1043→  1043→void Minecraft::pauseGame(bool isBackPaused) {
+  1044→  1044→#ifndef STANDALONE_SERVER
+  1045→  1045→        if (screen != NULL) return;
+  1046→  1046→        screenChooser.setScreen(isBackPaused? SCREEN_PAUSEPREV : SCREEN_PAUSE);
+  1047→  1047→#endif
+  1048→  1048→}
+  1049→  1049→void Minecraft::gameLostFocus() {
+  1050→  1050→#ifndef STANDALONE_SERVER
+  1051→  1051→        if(screen != NULL) {
+  1052→  1052→                screen->lostFocus();
+  1053→  1053→        }
+  1054→  1054→#endif
+  1055→  1055→}
+  1056→  1056→
+  1057→  1057→
+  1058→  1058→void Minecraft::setScreen( Screen* screen )
+  1059→  1059→{
+  1060→  1060→#ifndef STANDALONE_SERVER
+  1061→  1061→        Mouse::reset();
+  1062→  1062→        Multitouch::reset();
+  1063→  1063→        Multitouch::resetThisUpdate();
+  1064→  1064→
+  1065→  1065→        if (screenMutex) {
+  1066→  1066→                hasScheduledScreen = true;
+  1067→  1067→                scheduledScreen = screen;
+  1068→  1068→                return;
+  1069→  1069→        }
+  1070→  1070→
+  1071→  1071→        if (screen != NULL && screen->isErrorScreen())
+  1072→  1072→                return;
+  1073→  1073→        if (screen == NULL && level == NULL)
+  1074→  1074→                screen = screenChooser.createScreen(SCREEN_STARTMENU);
+  1075→  1075→
+  1076→  1076→        if (this->screen != NULL) {
+  1077→  1077→                this->screen->removed();
+  1078→  1078→                delete this->screen;
+  1079→  1079→        }
+  1080→  1080→
+  1081→  1081→        this->screen = screen;
+  1082→  1082→        if (screen != NULL) {
+  1083→  1083→                releaseMouse();
+  1084→  1084→                //ScreenSizeCalculator ssc = new ScreenSizeCalculator(options, width, height);
+  1085→  1085→                int screenWidth = (int)(width * Gui::InvGuiScale); //ssc.getWidth();
+  1086→  1086→                int screenHeight = (int)(height * Gui::InvGuiScale); //ssc.getHeight();
+  1087→  1087→                screen->init(this, screenWidth, screenHeight);
+  1088→  1088→
+  1089→  1089→                if (screen->isInGameScreen() && level) {
+  1090→  1090→                        level->saveLevelData();
+  1091→  1091→            level->saveGame();
+  1092→  1092→        }
+  1093→  1093→
+  1094→  1094→                //noRender = false;
+  1095→  1095→        } else {
+  1096→  1096→                grabMouse();
+  1097→  1097→        }
+  1098→  1098→#endif
+  1099→  1099→}
+  1100→  1100→
+  1101→  1101→void Minecraft::grabMouse()
+  1102→  1102→{
+  1103→  1103→#ifndef STANDALONE_SERVER
+  1104→  1104→        if (mouseGrabbed) return;
+  1105→  1105→        mouseGrabbed = true;
+  1106→  1106→        mouseHandler.grab();
+  1107→  1107→        //setScreen(NULL);
+  1108→  1108→#endif
+  1109→  1109→}
+  1110→  1110→
+  1111→  1111→void Minecraft::releaseMouse()
+  1112→  1112→{
+  1113→  1113→#ifndef STANDALONE_SERVER
+  1114→  1114→        if (!mouseGrabbed) {
+  1115→  1115→                return;
+  1116→  1116→        }
+  1117→  1117→        if (player) {
+  1118→  1118→                player->releaseAllKeys();
+  1119→  1119→        }
+  1120→  1120→        mouseGrabbed = false;
+  1121→  1121→        mouseHandler.release();
+  1122→  1122→#endif
+  1123→  1123→}
+  1124→  1124→
+  1125→  1125→bool Minecraft::useTouchscreen() {
+  1126→  1126→#ifdef RPI
+  1127→  1127→        return false;
+  1128→  1128→#endif
+  1129→  1129→        return options.useTouchScreen || !_supportsNonTouchscreen;
+  1130→  1130→}
+  1131→  1131→bool Minecraft::supportNonTouchScreen() {
+  1132→  1132→        return _supportsNonTouchscreen;
+  1133→  1133→}
+  1134→  1134→void Minecraft::init()
+  1135→  1135→{
+  1136→  1136→        options.minecraft = this;
+  1137→  1137→        options.initDefaultValues();
+  1138→  1138→#ifndef STANDALONE_SERVER
+  1139→  1139→        checkGlError("Init enter");
+  1140→  1140→
+  1141→  1141→        _supportsNonTouchscreen = !platform()->supportsTouchscreen();
+  1142→  1142→
+  1143→  1143→        LOGI("IS TOUCHSCREEN? %d\n", options.useTouchScreen);
+  1144→  1144→
+  1145→  1145→        textures = new Textures(&options, platform());
+  1146→  1146→        textures->addDynamicTexture(new WaterTexture());
+  1147→  1147→        textures->addDynamicTexture(new WaterSideTexture());
+  1148→  1148→        gui.texturesLoaded(textures);
+  1149→  1149→
+  1150→  1150→        levelRenderer = new LevelRenderer(this);
+  1151→  1151→        gameRenderer = new GameRenderer(this);
+  1152→  1152→        particleEngine = new ParticleEngine(level, textures);
+  1153→  1153→
+  1154→  1154→        // Platform specific initialization here
+  1155→  1155→        font = new Font(&options, "font/default8.png", textures);
+  1156→  1156→
+  1157→  1157→        _perfRenderer = new PerfRenderer(this, font);
+  1158→  1158→
+  1159→  1159→        checkGlError("Init complete");
+  1160→  1160→#endif
+  1161→  1161→
+  1162→  1162→        user = new User("TestUser", "");
+  1163→  1163→        setIsCreativeMode(false); // false means it's Survival Mode
+  1164→  1164→        reloadOptions();
+  1165→  1165→
+  1166→  1166→}
+  1167→  1167→
+  1168→  1168→void Minecraft::setSize(int w, int h) {
+  1169→  1169→#ifndef STANDALONE_SERVER
+  1170→  1170→    transformResolution(&w, &h);
+  1171→  1171→
+  1172→  1172→        width  = w;
+  1173→  1173→        height = h;
+  1174→  1174→
+  1175→  1175→        if (width >= 1000) {
+  1176→  1176→        #ifdef __APPLE__
+  1177→  1177→            Gui::GuiScale = (width > 2000)? 8.0f : 4.0f;
+  1178→  1178→        #else
+  1179→  1179→            Gui::GuiScale = 4.0f;
+  1180→  1180→        #endif
+  1181→  1181→    }
+  1182→  1182→        else if (width >= 800) {
+  1183→  1183→#ifdef __APPLE__
+  1184→  1184→        Gui::GuiScale = 4.0f;
+  1185→  1185→#else
+  1186→  1186→                Gui::GuiScale = 3.0f;
+  1187→  1187→#endif
+  1188→  1188→    }
+  1189→  1189→        else if (width >= 400)
+  1190→  1190→                Gui::GuiScale = 2.0f;
+  1191→  1191→        else
+  1192→  1192→                Gui::GuiScale = 1.0f;
+  1193→  1193→
+  1194→  1194→        Gui::InvGuiScale = 1.0f / Gui::GuiScale;
+  1195→  1195→        int screenWidth  = (int)(width  * Gui::InvGuiScale);
+  1196→  1196→        int screenHeight = (int)(height * Gui::InvGuiScale);
+  1197→  1197→
+  1198→  1198→        if (platform()) {
+  1199→  1199→                float pixelsPerMillimeter = options.getProgressValue(&Options::Option::PIXELS_PER_MILLIMETER);
+  1200→  1200→                pixelCalc.setPixelsPerMillimeter(pixelsPerMillimeter);
+  1201→  1201→                pixelCalcUi.setPixelsPerMillimeter(pixelsPerMillimeter * Gui::InvGuiScale);
+  1202→  1202→        }
+  1203→  1203→
+  1204→  1204→        Config config = createConfig(this);
+  1205→  1205→        gui.onConfigChanged(config);
+  1206→  1206→    
+  1207→  1207→        if (screen)
+  1208→  1208→                screen->setSize(screenWidth, screenHeight);
+  1209→  1209→
+  1210→  1210→        if (inputHolder)
+  1211→  1211→                inputHolder->onConfigChanged(config);
+  1212→  1212→        //LOGI("Setting size: %d, %d: %f\n", width, height, Gui::InvGuiScale);
+  1213→  1213→
+  1214→  1214→#ifdef WIN32
+  1215→  1215→        char resbuf[128];
+  1216→  1216→        sprintf(resbuf, "            %d x %d @ scale %.2f", width, height, Gui::GuiScale);
+  1217→  1217→        //gui.addMessage(resbuf);
+  1218→  1218→#endif
+  1219→  1219→#endif /* STANDALONE_SERVER */
+  1220→  1220→}
+  1221→  1221→
+  1222→  1222→void Minecraft::reloadOptions() {
+  1223→  1223→        options.update();
+  1224→  1224→        options.save();
+  1225→  1225→        bool wasTouchscreen = options.useTouchScreen;
+  1226→  1226→        options.useTouchScreen = useTouchscreen();
+  1227→  1227→        options.save();
+  1228→  1228→
+  1229→  1229→        if ((wasTouchscreen != options.useTouchScreen) || (inputHolder == 0))
+  1230→  1230→                _reloadInput();
+  1231→  1231→
+  1232→  1232→        user->name = options.username;
+  1233→  1233→
+  1234→  1234→        LOGI("Reloading-options\n");
+  1235→  1235→
+  1236→  1236→    // @todo @fix Android and iOS behaves a bit differently when leaving
+  1237→  1237→    //            an options screen (Android recreates OpenGL surface)
+  1238→  1238→    setSize(width, height);
+  1239→  1239→}
+  1240→  1240→
+  1241→  1241→void Minecraft::_reloadInput() {
+  1242→  1242→#ifndef STANDALONE_SERVER
+  1243→  1243→        delete inputHolder;
+  1244→  1244→
+  1245→  1245→        if (useTouchscreen()) {
+  1246→  1246→                inputHolder = new TouchInputHolder(this, &options);
+  1247→  1247→        } else {
+  1248→  1248→                #if defined(ANDROID) || defined(__APPLE__) 
+  1249→  1249→                        inputHolder = new CustomInputHolder(
+  1250→  1250→                                new XperiaPlayInput(&options),
+  1251→  1251→                                new ControllerTurnInput(2, ControllerTurnInput::MODE_DELTA),
+  1252→  1252→                                new IBuildInput());
+  1253→  1253→                #else
+  1254→  1254→                        inputHolder = new CustomInputHolder(
+  1255→  1255→                                new KeyboardInput(&options),
+  1256→  1256→                                new MouseTurnInput(MouseTurnInput::MODE_DELTA, width/2, height/2),
+  1257→  1257→                                new MouseBuildInput());
+  1258→  1258→                #endif
+  1259→  1259→        }
+  1260→  1260→
+  1261→  1261→        mouseHandler.setTurnInput(inputHolder->getTurnInput());
+  1262→  1262→        if (level && player) {
+  1263→  1263→                player->input = inputHolder->getMoveInput();
+  1264→  1264→        }
+  1265→  1265→#endif
+  1266→  1266→}
+  1267→  1267→
+  1268→  1268→
+  1269→  1269→//
+  1270→  1270→// Multiplayer
+  1271→  1271→//
+  1272→  1272→void Minecraft::locateMultiplayer() {
+  1273→  1273→        isLookingForMultiplayer = true;
+  1274→  1274→
+  1275→  1275→        raknetInstance->pingForHosts(19132);
+  1276→  1276→        netCallback = new ClientSideNetworkHandler(this, raknetInstance);
+  1277→  1277→}
+  1278→  1278→
+  1279→  1279→void Minecraft::cancelLocateMultiplayer() {
+  1280→  1280→        isLookingForMultiplayer = false;
+  1281→  1281→
+  1282→  1282→        raknetInstance->stopPingForHosts();
+  1283→  1283→
+  1284→  1284→        delete netCallback;
+  1285→  1285→        netCallback = NULL;
+  1286→  1286→}
+  1287→  1287→
+  1288→  1288→bool Minecraft::joinMultiplayer( const PingedCompatibleServer& server )
+  1289→  1289→{
+  1290→  1290→        if (isLookingForMultiplayer && netCallback) {
+  1291→  1291→                isLookingForMultiplayer = false;
+  1292→  1292→                return raknetInstance->connect(server.address.ToString(false), server.address.GetPort());
+  1293→  1293→        }
+  1294→  1294→        return false;
+  1295→  1295→}
+  1296→  1296→
+  1297→  1297→void Minecraft::hostMultiplayer(int port) {
+  1298→  1298→    // Tear down last instance
+  1299→  1299→    raknetInstance->disconnect();
+  1300→  1300→    delete netCallback;
+  1301→  1301→    netCallback = NULL;
+  1302→  1302→
+  1303→  1303→#if !defined(NO_NETWORK)
+  1304→  1304→        netCallback = new ServerSideNetworkHandler(this, raknetInstance);
+  1305→  1305→    #ifdef STANDALONE_SERVER
+  1306→  1306→        raknetInstance->host(user->name, port, 16);
+  1307→  1307→    #else
+  1308→  1308→        raknetInstance->host(user->name, port);
+  1309→  1309→    #endif
+  1310→  1310→#endif
+  1311→  1311→}
+  1312→  1312→
+  1313→  1313→//
+  1314→  1314→// Level generation
+  1315→  1315→//
+  1316→  1316→/*static*/
+  1317→  1317→
+  1318→  1318→        void* Minecraft::prepareLevel_tspawn(void *p_param)
+  1319→  1319→{
+  1320→  1320→        Minecraft* mc = (Minecraft*) p_param;
+  1321→  1321→        mc->generateLevel("Currently not used", mc->level);
+  1322→  1322→        return 0;
+  1323→  1323→}
+  1324→  1324→
+  1325→  1325→void Minecraft::generateLevel( const std::string& message, Level* level )
+  1326→  1326→{
+  1327→  1327→        Stopwatch s;
+  1328→  1328→        s.start();
+  1329→  1329→        prepareLevel(message);
+  1330→  1330→        s.stop();
+  1331→  1331→        s.print("Level generated: ");
+  1332→  1332→
+  1333→  1333→        // "Unlock"
+  1334→  1334→        isGeneratingLevel = false;
+  1335→  1335→}
+  1336→  1336→
+  1337→  1337→void Minecraft::_levelGenerated()
+  1338→  1338→{
+  1339→  1339→#ifndef STANDALONE_SERVER
+  1340→  1340→        if (player == NULL) {
+  1341→  1341→                player = (LocalPlayer*) gameMode->createPlayer(level);
+  1342→  1342→                gameMode->initPlayer(player);
+  1343→  1343→        }
+  1344→  1344→
+  1345→  1345→        if (player) {
+  1346→  1346→                player->input = inputHolder->getMoveInput();
+  1347→  1347→        }
+  1348→  1348→
+  1349→  1349→        if (levelRenderer != NULL) levelRenderer->setLevel(level);
+  1350→  1350→        if (particleEngine != NULL) particleEngine->setLevel(level);
+  1351→  1351→
+  1352→  1352→        gameMode->adjustPlayer(player);
+  1353→  1353→        gui.onLevelGenerated();
+  1354→  1354→#endif
+  1355→  1355→
+  1356→  1356→        level->validateSpawn();
+  1357→  1357→        level->loadPlayer(player, true);
+  1358→  1358→        // if we are client side, we trust the server to have given us a correct position
+  1359→  1359→        if (player && !level->isClientSide) {
+  1360→  1360→                player->resetPos(false);
+  1361→  1361→        }
+  1362→  1362→
+  1363→  1363→        this->cameraTargetPlayer = player;
+  1364→  1364→
+  1365→  1365→        if (raknetInstance->isServer())
+  1366→  1366→                raknetInstance->announceServer(user->name);
+  1367→  1367→
+  1368→  1368→        if (netCallback) {
+  1369→  1369→                netCallback->levelGenerated(level);
+  1370→  1370→        }
+  1371→  1371→
+  1372→  1372→#if defined(WIN32) || defined(RPI)
+  1373→  1373→        if (_commandServer) {
+  1374→  1374→                delete _commandServer;
+  1375→  1375→        }
+  1376→  1376→        _commandServer = new CommandServer(this);
+  1377→  1377→        _commandServer->init(commandPort);
+  1378→  1378→#endif
+  1379→  1379→
+  1380→  1380→        // Hack to (hopefully) get the players to show (note: in LevelListener
+  1381→  1381→        // instead, since adding yourself always generates a entityAdded)
+  1382→  1382→        //EntityRenderDispatcher::getInstance()->onGraphicsReset();
+  1383→  1383→        _hasSignaledGeneratingLevelFinished = true;
+  1384→  1384→}
+  1385→  1385→
+  1386→  1386→Player* Minecraft::respawnPlayer(int playerId) {
+  1387→  1387→        for (unsigned int i = 0; i < level->players.size(); ++i) {
+  1388→  1388→                if (level->players[i]->entityId == playerId) {
+  1389→  1389→                        resetPlayer(level->players[i]);
+  1390→  1390→                        return level->players[i];
+  1391→  1391→                }
+  1392→  1392→        }
+  1393→  1393→        return NULL;
+  1394→  1394→}
+  1395→  1395→
+  1396→  1396→void Minecraft::resetPlayer(Player* player) {
+  1397→  1397→        level->validateSpawn();
+  1398→  1398→        player->reset();
+  1399→  1399→
+  1400→  1400→        Pos p;
+  1401→  1401→        if(player->hasRespawnPosition()) {
+  1402→  1402→                p = player->getRespawnPosition();
+  1403→  1403→        }
+  1404→  1404→        else {
+  1405→  1405→                p = level->getSharedSpawnPos();
+  1406→  1406→        }
+  1407→  1407→        player->setPos((float)p.x + 0.5f, (float)p.y + 1.0f, (float)p.z + 0.5f);
+  1408→  1408→        player->resetPos(true);
+  1409→  1409→
+  1410→  1410→        if (isCreativeMode())
+  1411→  1411→                player->inventory->clearInventoryWithDefault();
+  1412→  1412→}
+  1413→  1413→
+  1414→  1414→void Minecraft::respawnPlayer() {
+  1415→  1415→        // RESET THE FRACKING PLAYER HERE
+  1416→  1416→        //bool slowCheck = false;
+  1417→  1417→        //for (int i = 0; i < level->entities.size(); ++i)
+  1418→  1418→        //      if (level->entities[i] == player) slowCheck = true;
+  1419→  1419→        //
+  1420→  1420→        //LOGI("Has entity? %d, %d\n", level->getEntity(player->entityId), slowCheck);
+  1421→  1421→
+  1422→  1422→        resetPlayer(player);
+  1423→  1423→
+  1424→  1424→        // tell server (or other client) that we re-spawned
+  1425→  1425→        RespawnPacket packet(player);
+  1426→  1426→        raknetInstance->send(packet);
+  1427→  1427→}
+  1428→  1428→
+  1429→  1429→void Minecraft::onGraphicsReset()
+  1430→  1430→{
+  1431→  1431→#ifndef STANDALONE_SERVER
+  1432→  1432→        textures->clear();
+  1433→  1433→        
+  1434→  1434→        font->onGraphicsReset();
+  1435→  1435→        gui.onGraphicsReset();
+  1436→  1436→
+  1437→  1437→        if (levelRenderer) levelRenderer->onGraphicsReset();
+  1438→  1438→        if (gameRenderer) gameRenderer->onGraphicsReset();
+  1439→  1439→
+  1440→  1440→        EntityRenderDispatcher::getInstance()->onGraphicsReset();
+  1441→  1441→        TileEntityRenderDispatcher::getInstance()->onGraphicsReset();
+  1442→  1442→#endif
+  1443→  1443→}
+  1444→  1444→
+  1445→  1445→int Minecraft::getProgressStatusId() {
+  1446→  1446→        return progressStageStatusId;
+  1447→  1447→}
+  1448→  1448→
+  1449→  1449→const char* Minecraft::getProgressMessage()
+  1450→  1450→{
+  1451→  1451→        return progressMessages[progressStageStatusId];
+  1452→  1452→}
+  1453→  1453→
+  1454→  1454→bool Minecraft::isLevelGenerated()
+  1455→  1455→{
+  1456→  1456→        return level != NULL && !isGeneratingLevel;
+  1457→  1457→}
+  1458→  1458→
+  1459→  1459→LevelStorageSource* Minecraft::getLevelSource()
+  1460→  1460→{
+  1461→  1461→        return storageSource;
+  1462→  1462→}
+  1463→  1463→
+  1464→  1464→int Minecraft::getLicenseId() {
+  1465→  1465→        if (!LicenseCodes::isReady(_licenseId))
+  1466→  1466→                _licenseId = platform()->checkLicense();
+  1467→  1467→        return _licenseId;
+  1468→  1468→}
+  1469→  1469→
+  1470→  1470→void Minecraft::audioEngineOn() {
+  1471→  1471→#ifndef STANDALONE_SERVER
+  1472→  1472→    soundEngine->enable(true);
+  1473→  1473→#endif
+  1474→  1474→}
+  1475→  1475→void Minecraft::audioEngineOff() {
+  1476→  1476→#ifndef STANDALONE_SERVER
+  1477→  1477→    soundEngine->enable(false);
+  1478→  1478→#endif
+  1479→  1479→}
+  1480→  1480→
+  1481→  1481→void Minecraft::setIsCreativeMode(bool isCreative)
+  1482→  1482→{
+  1483→  1483→#ifdef CREATORMODE
+  1484→  1484→        delete gameMode;
+  1485→  1485→        gameMode = new CreatorMode(this);
+  1486→  1486→        _isCreativeMode = true;
+  1487→  1487→#else
+  1488→  1488→        if (!gameMode || isCreative != _isCreativeMode)
+  1489→  1489→        {
+  1490→  1490→                delete gameMode;
+  1491→  1491→                if (isCreative) gameMode = new CreativeMode(this);
+  1492→  1492→                else                    gameMode = new SurvivalMode(this);
+  1493→  1493→                _isCreativeMode = isCreative;
+  1494→  1494→        }
+  1495→  1495→#endif
+  1496→  1496→        if (player)
+  1497→  1497→                gameMode->initAbilities(player->abilities);
+  1498→  1498→}
+  1499→  1499→
+  1500→  1500→bool Minecraft::isCreativeMode() {
+  1501→  1501→        return _isCreativeMode;
+  1502→  1502→}
+  1503→  1503→
+  1504→  1504→bool Minecraft::isKindleFire(int kindleVersion) {
+  1505→  1505→        if (kindleVersion != 1)
+  1506→  1506→                return false;
+  1507→  1507→
+  1508→  1508→        std::string model = platform()->getPlatformStringVar(PlatformStringVars::DEVICE_BUILD_MODEL);
+  1509→  1509→        std::string modelLower(model);
+  1510→  1510→        std::transform(modelLower.begin(), modelLower.end(), modelLower.begin(), tolower);
+  1511→  1511→
+  1512→  1512→        return (modelLower.find("kindle") != std::string::npos) && (modelLower.find("fire") != std::string::npos);
+  1513→  1513→}
+  1514→  1514→
+  1515→  1515→bool Minecraft::transformResolution(int* w, int* h)
+  1516→  1516→{
+  1517→  1517→        bool changed = false;
+  1518→  1518→
+  1519→  1519→        // Kindle Fire 1: reporting wrong height in
+  1520→  1520→        // certain cases (e.g. after screen lock)
+  1521→  1521→        if (isKindleFire(1) && *h >= 560 && *h <= 620) {
+  1522→  1522→                *h = 580;
+  1523→  1523→                changed = true;
+  1524→  1524→        }
+  1525→  1525→
+  1526→  1526→        return changed;
+  1527→  1527→}
+  1528→  1528→
+  1529→  1529→ICreator* Minecraft::getCreator()
+  1530→  1530→{
+  1531→  1531→#ifdef CREATORMODE
+  1532→  1532→        return ((CreatorMode*)gameMode)->getCreator();
+  1533→  1533→#else
+  1534→  1534→        return NULL;
+  1535→  1535→#endif
+  1536→  1536→}
+  1537→  1537→
+  1538→  1538→void Minecraft::optionUpdated( const Options::Option* option, bool value ) {
+  1539→  1539→        if(netCallback != NULL && option == &Options::Option::SERVER_VISIBLE) {
+  1540→  1540→                ServerSideNetworkHandler* ss = (ServerSideNetworkHandler*) netCallback;
+  1541→  1541→                ss->allowIncomingConnections(value);
+  1542→  1542→        }
+  1543→  1543→}
+  1544→  1544→
+  1545→  1545→void Minecraft::optionUpdated( const Options::Option* option, float value ) {
+  1546→  1546→#ifndef STANDALONE_SERVER
+  1547→  1547→        if(option == &Options::Option::PIXELS_PER_MILLIMETER) {
+  1548→  1548→                pixelCalcUi.setPixelsPerMillimeter(value * Gui::InvGuiScale);
+  1549→  1549→                pixelCalc.setPixelsPerMillimeter(value);
+  1550→  1550→        }
+  1551→  1551→#endif
+  1552→  1552→}
+  1553→  1553→
+  1554→  1554→void Minecraft::optionUpdated( const Options::Option* option, int value ) {
+  1555→  1555→
+  1556→  1556→}
+  1557→  1557→

@@ -1,0 +1,1666 @@
+     1→     1→# MCPE 2013 → Browser Port — Field Notes
+     2→     2→
+     3→     3→This file is the shared worklog across all exploration agents. New entries are
+     4→     4→appended at the bottom; the most recent Task ID lives at the end of the file.
+     5→     5→
+     6→     6→---
+     7→     7→Task ID: 3-a
+     8→     8→Agent: Explore (rujukan client/gui & core)
+     9→     9→Task: Eksplorasi rujukan/ subfolder client/ untuk faithful port planning
+    10→    10→
+    11→    11→Work Log:
+    12→    12→- Verified worklog did not yet exist; this is the first entry.
+    13→    13→- Listed the full `client/` subtree (depth 3) via `LS` and `Glob`.
+    14→    14→- Read in full: `client/Minecraft.{h,cpp}` (1556 lines), `client/gui/Gui.{h,cpp}`
+    15→    15→  (810 lines), `client/gui/Screen.{h,cpp}`, `client/gui/components/Button.{h,cpp}`,
+    16→    16→  `client/gui/components/NinePatch.{h,cpp}`, `client/gui/components/GuiElement.{h,cpp}`,
+    17→    17→  `client/gui/components/InventoryPane.{h,cpp}`, `client/gui/components/ScrollingPane.h`,
+    18→    18→  `client/gui/screens/StartMenuScreen.{h,cpp}`, `client/gui/screens/ScreenChooser.{h,cpp}`,
+    19→    19→  `client/gui/GuiComponent.h`.
+    20→    20→- Read player hierarchy: `world/entity/player/Player.{h,cpp}` (925 lines),
+    21→    21→  `client/player/LocalPlayer.{h,cpp}`, `client/player/RemotePlayer.{h,cpp}`,
+    22→    22→  `world/entity/Mob.h`, `world/entity/Entity.h`, `client/player/input/{IMoveInput,IInputHolder,KeyboardInput}.h`,
+    23→    23→  `world/entity/player/Inventory.h`.
+    24→    24→- Read gamemode: `client/gamemode/{GameMode,SurvivalMode,CreativeMode,CreatorMode}.{h,cpp}`.
+    25→    25→- Surveyed (header + selective source) high-level renderer / sound / particle / model:
+    26→    26→  `GameRenderer.{h,cpp}`, `LevelRenderer.h`, `SoundEngine.{h,cpp}`, `ParticleEngine.{h,cpp}`,
+    27→    27→  `Particle.h`, `model/Model.h`, `model/HumanoidModel.h`.
+    28→    28→- Listed every header under `client/gui/screens/` (incl. `crafting/` and `touch/`)
+    29→    29→  and every header under `client/gui/components/`, plus `client/particle/` and
+    30→    30→  `client/model/`.
+    31→    31→- Cross-checked `Timer.h`, `MouseHandler.h`, `Options.h`, `Minecraft.cpp` update
+    32→    32→  loop to map the tick → render dispatch.
+    33→    33→
+    34→    34→Stage Summary:
+    35→    35→- `client/` is a single-App, single-window fixed-timestep loop (20 tps via `Timer`,
+    36→    36→  max 10 ticks/update). `Minecraft` is the orchestrator, owns: `Options`, `Timer`,
+    37→    37→  `LevelRenderer`, `GameRenderer`, `ParticleEngine`, `SoundEngine`, `GameMode`,
+    38→    38→  `Textures`, `Font`, `Gui`, `ScreenChooser`, `IRakNetInstance`, `MouseHandler`,
+    39→    39→  `IInputHolder`, `User`, `Level*`, `LocalPlayer*`, `Mob* cameraTargetPlayer`,
+    40→    40→  `Screen*`, `HitResult`.
+    41→    41→- Two parallel UI trees share `client/gui`: (a) the in-game HUD `Gui` (hearts,
+    42→    42→  bubbles, hotbar, chat, crosshair/destroy-progress ring, item-name overlay,
+    43→    43→  sleep fade, vignette) and (b) the screen stack (`Screen` → concrete screens →
+    44→    44→  `Button`/`ImageButton`/`NinePatch`/`InventoryPane`/`ItemPane`/`ScrolledSelectionList`/
+    45→    45→  `RolledSelectionList{H,V}`/`OptionsPane`/`Slider`/`TextBox` widgets).
+    46→    46→- `Screen` lifecycle: `init(Minecraft*, w, h)` → `init()` → `setupPositions()`;
+    47→    47→  `updateEvents()` polls Mouse/Keyboard/TextChar queues and dispatches to
+    48→    48→  `mouseClicked/mouseReleased/keyPressed/keyboardNewChar`. `Screen::mouseClicked`
+    49→    49→  hit-tests every `buttons` entry via `Button::clicked()` (axis-aligned rect inside
+    50→    50→  check), pressed-state cached in `clickedButton`; release fires
+    51→    51→  `buttonClicked(button)` + `soundEngine->playUI("random.click")` only if release
+    52→    52→  is still inside the same button (touch-style press-and-release contract).
+    53→    53→  Tab-buttons (`tabButtons`) implement keyboard navigation with
+    54→    54→  `keyMenuNext/Previous/Ok`.
+    55→    55→- `Button` states: `active` (greyed out), `hovered`/`selected` (drives `yImage`
+    56→    56→  ∈ {0 inactive, 1 normal, 2 hover}); 3 subtypes: default (gui.png 200×24
+    57→    57→  slice), `Touch::TButton` (touchgui.png 66×26), `Touch::THeader` (panel header).
+    58→    58→  `BlankButton` = invisible click target used by FurnaceScreen/ArmorScreen slots.
+    59→    59→- `NinePatch` (`NinePatchDescription` + `NinePatchLayer` + `NinePatchFactory`)
+    60→    60→  is the stretchable panel primitive: 3×3 quads cached in `quads[9]`,
+    61→    61→  `exclude(int)` lets screens omit corners/edges, used as the visual backing
+    62→    62→  for slot frames, pane backgrounds, and the crafting button.
+    63→    63→- `Gui` (HUD) main entry: `render(a, mouseFree, xMouse, yMouse)` ordered:
+    64→    64→  progress indicator (touch feedback ring or crosshair), hearts/bubbles,
+    65→    65→  sleep fade, toolbar (`renderToolBar`), chat messages, selected-item name
+    66→    66→  overlay, optional debug info. Slot count is `_numSlots` (touch: 6–9,
+    67→    67→  Xperia/non-touch: `Inventory::MAX_SELECTION_SIZE` = 9 incl. the “…” slot).
+    68→    68→- `Minecraft::update()` order each frame: `timer.advanceTime()` →
+    69→    69→  `raknetInstance->runEvents(netCallback)` → for each tick `tick(i, max)`:
+    70→    70→  `gameMode->tick()`, `commandServer->tick()`, `tickInput()`, `gui.tick()`,
+    71→    71→  `gameRenderer->tick`, `levelRenderer->tick`, `level->tickEntities`,
+    72→    72→  `level->tick`, `level->animateTick`, `textures->tick`, `particleEngine->tick`,
+    73→    73→  `screen->tick`. Then `gameMode->render(a)`, `soundEngine->update(player, a)`,
+    74→    74→  `gameRenderer->render(a)`.
+    75→    75→- `Minecraft::tickInput()`: if a `screen` exists and `!screen->passEvents`,
+    76→    76→  dispatch all input to it and bail; otherwise poll mouse wheel for hotbar
+    77→    77→  scroll, mouse-down for `gui.handleClick`, keyboard for `player->setKey` and
+    78→    78→  `gui.handleKeyPressed`, then `inputHolder->getBuildInput()->tickBuild`
+    79→    79→  drives `handleBuildAction` (remove/build/attack/interact → `gameMode->*`
+    80→    80→  + raknet packet mirror).
+    81→    81→- Player hierarchy: `Entity` (x,y,z, xOld/yOld/zOld, xd/yd/zd, yRot/xRot,
+    82→    82→  AABB `bb`, walkDist, onGround, fallDistance, etc.) → `Mob` (health,
+    83→    83→  hurtTime, walk anim, `entityData:SynchedEntityData`, `aimDirection`,
+    84→    84→  MoveControl/JumpControl/PathNavigation/GoalSelector, `aiStep`,
+    85→    85→  `travel`, `baseTick`, `superTick`) → `Player` (MAX_HEALTH=20,
+    86→    86→  `Inventory* inventory`, `Abilities`, `SimpleFoodData`, armor[4],
+    87→    87→  `useItem`+`useItemDuration`, bedPosition + sleepCounter, `containerMenu`,
+    88→    88→  `owner:RakNetGUID`, `name`, `dimension`, `score`, `oBob/bob`; defines
+    89→    89→  sleep/use-item flow) → `LocalPlayer` (binds `IMoveInput* input`,
+    90→    90→  per-frame `MovePlayerPacket` + `PlayerEquipmentPacket` + `PlayerArmorEquipmentPacket`,
+    91→    91→  autoJump, `calculateFlight` for `options.isFlying`, opens Chest/Furnace/
+    92→    92→  Workbench/Stonecutter/InBed/TextEdit screens, owns `_init`/`reset`) and
+    93→    93→  `RemotePlayer` (syncs item-use via `SharedFlagsInformation::FLAG_USINGITEM`).
+    94→    94→- `GameMode` is the abstract policy: `startDestroyBlock/continueDestroyBlock/
+    95→    95→  stopDestroyBlock/destroyBlock`, `useItem/useItemOn`, `attack/interact`,
+    96→    96→  `createPlayer/initPlayer/adjustPlayer/initAbilities`, `canHurtPlayer`,
+    97→    97→  `isCreativeType/isSurvivalType`, `tick/render(a)` (publishes
+    98→    98→  `destroyProgress` to `gui` and `levelRenderer`). Subclasses:
+    99→    99→  `SurvivalMode` (progress-based break, `destroyDelay`, `initAbilities`
+   100→   100→  = no fly/no build/no invuln, `canHurtPlayer=true`), `CreativeMode`
+   101→   101→  (instant break with `DestructionTickDelay=10` repeat, `instabuild`,
+   102→   102→  `mayfly`, `invulnerable`, restores aux on `releaseUsingItem`), and
+   103→   103→  `CreatorMode` (Raspberry Pi only — wraps a `Creator`/`ICreator` event log).
+   104→   104→- `ScreenChooser` enum `ScreenId` {NONE, STARTMENU, JOINGAME, PAUSE,
+   105→   105→  PAUSEPREV, SELECTWORLD, BLOCKSELECTION} with parallel Touch/non-Touch
+   106→   106→  instantiations. `Minecraft::pauseGame` / `leaveGame` / level-generated
+   107→   107→  callbacks route through it.
+   108→   108→- Renderer layer: `GameRenderer` (`render(a)` does mouse→player turn,
+   109→   109→  `renderLevel(a)` (clear, `setupCamera`, frustum cull, dirty chunk resort,
+   110→   110→  sky/clouds, terrain, entities, particles, item-in-hand, then `gui.render`
+   111→   111→  via `setupGuiScreen`), `pick(a)` fills `mc->hitResult`); `LevelRenderer`
+   112→   112→  (`Chunk`-based, owns dirty-chunk queue, `MAX_VISIBLE_REBUILDS_PER_FRAME=3`,
+   113→   113→  `MAX_INVISIBLE_REBUILDS_PER_FRAME=1`, `CHUNK_SIZE` const,
+   114→   114→  `RenderList renderList`, implements `LevelListener`); `Tesselator` &
+   115→   115→  `Textures` are singleton-ish resources; `EntityRenderDispatcher` +
+   116→   116→  `TileEntityRenderDispatcher` route mob/tile-entity rendering; culling
+   117→   117→  via `FrustumCuller`/`AllowAllCuller`.
+   118→   118→- Sound: `SoundEngine` wraps a `SoundSystem` (SL on Android ≥ API23, AL on
+   119→   119→  iOS, stub elsewhere), holds a `SoundRepository` keyed by name (e.g.
+   120→   120→  `"step.stone"`, `"mob.sheep"`, `"random.click"`), `play(name,x,y,z,v,p)`
+   121→   121→  applies distance attenuation (`SOUND_DISTANCE=16`, `_invMaxDistance`),
+   122→   122→  `playUI` ignores 3D position. `update(player, a)` updates listener pos/angle.
+   123→   123→- Particles: `ParticleEngine` stores `ParticleList particles[4]` indexed by
+   124→   124→  texture (`MISC_TEXTURE/TERRAIN_TEXTURE/ITEM_TEXTURE/ENTITY_PARTICLE_TEXTURE`),
+   125→   125→  `add(Particle*)`, `tick()`, `render(player,a)`/`renderLit(player,a)`,
+   126→   126→  `destroy(x,y,z)` (spawns 27 `TerrainParticle`s), `crack(x,y,z,face)`.
+   127→   127→  `Particle` extends `Entity` with `age/lifetime/size/gravity/rCol/gCol/bCol`
+   128→   128→  and a `render(Tesselator&, float a, …)`. Subclasses in `client/particle/`:
+   129→   129→  `SplashParticle`, `TerrainParticle`, `BubbleParticle`, `ExplodeParticle`,
+   130→   130→  `HugeExplosionParticle`, `HugeExplosionSeedParticle`, `SmokeParticle`,
+   131→   131→  `FlameParticle`, `LavaParticle`, `RedDustParticle`, `CritParticle2`,
+   132→   132→  `BreakingItemParticle`, `TakeAnimationParticle`.
+   133→   133→- Models: `Model` (vector of `ModelPart*`, `texWidth=64`, `texHeight=32`,
+   134→   134→  `riding`, `attackTime`, `young`, `render/prepareMobModel/setupAnim`)
+   135→   135→  → `HumanoidModel` (head, body, arm0/1, leg0/1, sneaking, bowAndArrow),
+   136→   136→  `QuadrupedModel`, `SheepModel`, `SheepFurModel`, `CowModel`, `PigModel`,
+   137→   137→  `ChickenModel`, `SpiderModel`, `CreeperModel`, `SkeletonModel`,
+   138→   138→  `ZombieModel`, `SignModel`, `ChestModel`. `geom/` provides `ModelPart`,
+   139→   139→  `Cube`, `Polygon`, `Vertex`.
+   140→   140→
+   141→   141→See the appended *Detailed Report* for per-file class/method inventories,
+   142→   142→full directory tree, and Player structure breakdown.
+   143→   143→
+   144→   144→---
+   145→   145→Task ID: 3-b
+   146→   146→Agent: Explore (rujukan world/)
+   147→   147→Task: Eksplorasi rujukan/ subfolder world/ untuk faithful port planning
+   148→   148→
+   149→   149→Work Log:
+   150→   150→- Membaca worklog.md entry sebelumnya (Task 3-a, client/gui & core) untuk konteks.
+   151→   151→- Melakukan listing penuh subtree `world/` via `LS` + `Bash ls` (level/, level/tile/,
+   152→   152→  level/chunk/, level/storage/, level/dimension/, level/biome/, level/levelgen/,
+   153→   153→  level/pathfinder/, level/material/, entity/, entity/player/, entity/animal/,
+   154→   154→  entity/monster/, entity/item/, entity/projectile/, entity/ai/, item/,
+   155→   155→  item/crafting/, inventory/, food/, phys/).
+   156→   156→- Membaca penuh: `world/level/Level.{h,cpp}` (343 + 2242 lines),
+   157→   157→  `world/level/LevelConstants.h`, `world/level/LevelSource.h`, `world/level/LevelSettings.h`,
+   158→   158→  `world/level/LevelListener.h`, `world/level/dimension/Dimension.{h,cpp}`,
+   159→   159→  `world/level/chunk/LevelChunk.h`, `world/level/chunk/ChunkSource.h`,
+   160→   160→  `world/level/chunk/DataLayer.h`, `world/level/chunk/storage/ChunkStorage.h`,
+   161→   161→  `world/level/storage/LevelStorage.h`, `world/level/material/Material.h`.
+   162→   162→- Membaca penuh entity core: `world/entity/Entity.{h,cpp}` (full Entity + key tick/move/baseTick),
+   163→   163→  `world/entity/Mob.h`, `world/entity/PathfinderMob.h`, `world/entity/AgableMob.h`,
+   164→   164→  `world/entity/Creature.h`, `world/entity/SynchedEntityData.h`, `world/entity/EntityTypes.h`,
+   165→   165→  `world/entity/EntityFactory.h`, `world/entity/player/Player.h`, `world/entity/player/Abilities.h`,
+   166→   166→  `world/entity/player/Inventory.h`, `world/entity/player/OldInventory.h`,
+   167→   167→  `world/entity/player/InventorySlotManager.h`.
+   168→   168→- Membaca penuh animal & monster: `Animal.h`, `WaterAnimal.h`, `Pig.h`, `Cow.h`,
+   169→   169→  `Sheep.h`, `Chicken.h`, `Monster.h`, `Creeper.h`, `Zombie.h`, `Skeleton.h`,
+   170→   170→  `Spider.h`, `PigZombie.h`.
+   171→   171→- Membaca penuh item entities & projectiles: `ItemEntity.h`, `FallingTile.h`,
+   172→   172→  `PrimedTnt.h`, `TripodCamera.h`, `HangingEntity.h`, `Painting.h`,
+   173→   173→  `projectile/Arrow.h`, `projectile/Throwable.h`.
+   174→   174→- Membaca penuh tile core: `world/level/tile/Tile.{h,cpp}` (full Tile.h + 460 lines of Tile.cpp
+   175→   175→  incl. initTiles() enumeration), `world/level/tile/TileInclude.h` (full list of tile subclasses).
+   176→   176→- Membaca sampel tile subclass untuk pola: `StoneTile.h`, `GrassTile.h`, `StairTile.h`,
+   177→   177→  `ChestTile.h`, `LiquidTile.h`, `LiquidTileDynamic.h`, `FireTile.h`,
+   178→   178→  `world/level/tile/entity/TileEntity.h`.
+   179→   179→- Membaca penuh item core: `world/item/Item.{h,cpp}` (full Item.h + 309 lines of Item.cpp incl.
+   180→   180→  initItems() enumeration), `world/item/ItemInclude.h`, `world/item/ItemInstance.{h,cpp}`,
+   181→   181→  `world/item/ItemCategory.h`, `world/item/UseAnim.h`, `world/item/TileItem.h`,
+   182→   182→  `world/item/AuxDataTileItem.h`, `world/item/ClothTileItem.h`, `world/item/DyePowderItem.h`,
+   183→   183→  `world/item/StoneSlabTileItem.h`, `world/item/LeafTileItem.h`, `world/item/SaplingTileItem.h`,
+   184→   184→  `world/item/DiggerItem.h`, `world/item/ShovelItem.h`, `world/item/PickaxeItem.h`,
+   185→   185→  `world/item/HatchetItem.h`, `world/item/HoeItem.h`, `world/item/WeaponItem.h`,
+   186→   186→  `world/item/ArmorItem.h`, `world/item/FoodItem.h`, `world/item/BowlFoodItem.h`,
+   187→   187→  `world/item/BowItem.h`, `world/item/FlintAndSteelItem.h`, `world/item/ShearsItem.h`,
+   188→   188→  `world/item/SignItem.h`, `world/item/BedItem.h`, `world/item/DoorItem.h`,
+   189→   189→  `world/item/SeedItem.h`, `world/item/SnowballItem.h`, `world/item/EggItem.h`,
+   190→   190→  `world/item/HangingEntityItem.h`, `world/item/CoalItem.h`, `world/item/CameraItem.h`,
+   191→   191→  `world/item/TilePlanterItem.h`.
+   192→   192→- Membaca penuh inventory: `world/Container.h`, `world/inventory/FillingContainer.h`,
+   193→   193→  `world/inventory/CraftingContainer.h`, `world/inventory/BaseContainerMenu.h`,
+   194→   194→  `world/inventory/ContainerMenu.h`, `world/inventory/FurnaceMenu.h`.
+   195→   195→- Membaca penuh phys: `world/phys/Vec3.h`, `world/phys/AABB.h`, `world/phys/HitResult.h`.
+   196→   196→- Membaca penuh food: `world/food/SimpleFoodData.h`, `world/food/FoodConstants.h`.
+   197→   197→
+   198→   198→Stage Summary:
+   199→   199→- `world/` adalah domain logika permainan: world/level container, chunk storage, tick flow,
+   200→   200→  entity hierarchy, item & tile registries, item stacks, player inventory, food, physics
+   201→   201→  primitives. Tidak ada satu pun file bernama `TileList.h`; `Tile::tiles[256]` statis array
+   202→   202→  adalah registri tunggal (sama seperti `Item::items[512]`). Demikian juga tidak ada
+   203→   203→  `Dimension.h` terpisah untuk Nether/End — hanya `Dimension` base + `NormalDayCycleDimension`.
+   204→   204→- Konstanta dunia: `LEVEL_HEIGHT=128`, `CHUNK_WIDTH=16`, `CHUNK_DEPTH=16`,
+   205→   205→  `CHUNK_CACHE_WIDTH=16` (= 16×16 chunk grid = 256×256 block world bounded),
+   206→   206→  `LEVEL_WIDTH=LEVEL_DEPTH=256`, `CHUNK_COLUMNS=256`, `CHUNK_BLOCK_COUNT=32768`.
+   207→   207→  Level height 128 (bukan 256 seperti vanilla PC); sea level = 63.
+   208→   208→- `Level` (subclass `LevelSource`) adalah container tunggal: pemegang `Dimension*`,
+   209→   209→  `ChunkSource*`, `LevelStorage*`, `LevelData`, `Random`, `IRakNetInstance*`,
+   210→   210→  daftar `entities`, `entityIdLookup` map, `tileEntities`, `pendingTileEntities`,
+   211→   211→  `players`, `_listeners` (LevelListener), `_tickNextTickSet`, `_chunksToPoll`,
+   212→   212→  `_lightUpdates`, `_pathFinder`. Public flags: `instaTick`, `isClientSide`,
+   213→   213→  `isGeneratingTerrain`, `difficulty`, `adventureSettings`, `noNeighborUpdate`,
+   214→   214→  `skyDarken`, `allPlayersAreSleeping`, `_spawnFriendlies/_spawnEnemies`, `_nightMode`.
+   215→   215→- Level chunk storage & tick flow lihat ringkasan terpisah di bawah.
+   216→   216→- Entity hierarchy: Entity → Mob → PathfinderMob → (AgableMob → Animal → {Pig,Cow,Sheep,
+   217→   217→  Chicken} | WaterAnimal) | (Monster → {Zombie, Creeper, Skeleton, Spider, PigZombie}) |
+   218→   218→  Player → (LocalPlayer, RemotePlayer). Tambahan: FlyingMob (extends Mob), HangingEntity →
+   219→   219→  Painting, dan Entity langsung: ItemEntity, FallingTile, PrimedTnt, Arrow, Throwable →
+   220→   220→  (Snowball, ThrownEgg), TripodCamera (extends Mob, khusus Raspberry Pi).
+   221→   221→- Tile registry: `Tile::tiles[256]` diisi oleh `Tile::initTiles()` di Tile.cpp:160-300.
+   222→   222→  Sekitar 95 tile ID yang dialokasikan, sebagian besar adalah subclass (StoneTile, DirtTile,
+   223→   223→  GrassTile, TreeTile, LeafTile, LiquidTile{Dynamic,Static}, FireTile, Bush, Mushroom,
+   224→   224→  Sapling, SandTile, GravelTile, OreTile, ClothTile, GlassTile, ThinFenceTile, MetalTile,
+   225→   225→  SandStoneTile, BedTile, StairTile, ChestTile, WorkbenchTile, StonecutterTile, CropTile,
+   226→   226→  FarmTile, FurnaceTile, SignTile, DoorTile, LadderTile, ReedTile, CactusTile, ClayTile,
+   227→   227→  TopSnowTile, IceTile, SnowTile, FenceTile, FenceGateTile, TrapDoorTile, TorchTile,
+   228→   228→  TntTile, BookshelfTile, ObsidianTile, LightGemTile, InvisibleTile, MultiTextureTile,
+   229→   229→  CarriedTile, MelonTile, StemTile, NetherReactor, QuartzBlockTile, RedStoneOreTile,
+   230→   230→  HeavyTile, HalfTransparentTile, TransparentTile, EntityTile, DirectionalTile,
+   231→   231→  WebTile, TallGrass, TreeTile). `Tile` punya 21 SHAPE_* constants (render shapes),
+   232→   232→  10 SoundType statis, dan props per-tile: tex, soundType, destroySpeed, explosionResistance,
+   233→   233→  gravity, friction, material, lightBlock, lightEmission, translucent, shouldTick,
+   234→   234→  sendTileData, AABB shape (xx0..zz1).
+   235→   235→- Item registry: `Item::items[512]` diisi oleh `Item::initItems()` di Item.cpp:160-294.
+   236→   236→  Item ID dimulai dari 256 (TileItem auto-registered di Tile::initTiles), kemudian item
+   237→   237→  non-block 256..290ish + camera 200. Subclass Item: TileItem → (AuxDataTileItem,
+   238→   238→  ClothTileItem, StoneSlabTileItem, SaplingTileItem, LeafTileItem), DiggerItem →
+   239→   239→  (ShovelItem, PickaxeItem, HatchetItem), HoeItem, WeaponItem, ArmorItem, FoodItem →
+   240→   240→  BowlFoodItem, BowItem, FlintAndSteelItem, ShearsItem, SignItem, BedItem, DoorItem,
+   241→   241→  SeedItem, SnowballItem, EggItem, HangingEntityItem, CoalItem, DyePowderItem,
+   242→   242→  TilePlanterItem, CameraItem. `Item::Tier` enum {WOOD, STONE, IRON, EMERALD, GOLD}
+   243→   243→  dengan (level, uses, speed, damage). Constants: `MAX_STACK_SIZE=64`,
+   244→   244→  `MAX_ITEMS=512`, `ICON_COLUMNS=16`.
+   245→   245→- ItemInstance: struct `count`, `id`, `auxValue` (private). Adalah "stack" — bukan Item
+   246→   246→  itu sendiri. Memiliki `getItem()`, `useOn(player,level,x,y,z,face,clickX,clickY,clickZ)`,
+   247→   247→  `use(level,player)`, `useTimeDepleted`, `hurt(i)`, `hurtEnemy`, `mineBlock`,
+   248→   248→  `isStackable`, `matches`, `copy`, save/load CompoundTag. TileItem.useOn menempatkan
+   249→   249→  tile via `level->setTileAndData`, mainkan stepSound, decrement count, kirim packet.
+   250→   250→- Container hierarchy: `Container` (abstract: getItem/setItem/removeItem/getContainerSize/
+   251→   251→  getMaxStackSize/stillValid/startOpen/stopOpen) ← `FillingContainer` (item list + linked
+   252→   252→  hotbar slots) ← `Inventory` (Player-owned, MAX_SELECTION_SIZE=9, INVENTORY_SIZE_DEMO=27,
+   253→   253→  POP_TIME_DURATION=5). Lalu `CraftingContainer` (w×h grid), `BaseContainerMenu` +
+   254→   254→  `IContainerListener` (broadcastChanges/slotChanged), `ContainerMenu` (binding ke
+   255→   255→  Container + tileEntityId), `FurnaceMenu` (binds FurnaceTileEntity, broadcast cook
+   256→   256→  progress). `ContainerType` enum: NONE, INVENTORY, CONTAINER, WORKBENCH, FURNACE,
+   257→   257→  TRAP, ENCHANTMENT, BREWING_STAND. `Container::LARGE_MAX_STACK_SIZE=64`,
+   258→   258→  `FillingContainer::MAX_INVENTORY_STACK_SIZE=254`.
+   259→   259→- Vec3 (struct 3-float): operator +,-,*, +=,-=,*=; `normalized`, `dot`, `cross`,
+   260→   260→  `add/sub`, `addSelf/subSelf`, `negate(d)`, `distanceTo(Sqr)`, `length`, `lerp`,
+   261→   261→  `clipX/Y/Z(b, t, out)`, `xRot/yRot/zRot(degs)`, `fromPolarXY`. AABB (6-float): `set`,
+   262→   262→  `expand`, `grow`, `cloneMove`, `clipXCollide`, `clipYCollide`, `clipZCollide`,
+   263→   263→  `intersects`, `intersectsInner`, `move`, `contains(Vec3)`, `getSize`, `shrink`,
+   264→   264→  `copy`, `clip(a,b)→HitResult` (ray-AABB). HitResult: enum `HitResultType{TILE,ENTITY,
+   265→   265→  NO_HIT}`, fields `x,y,z,f, pos, entity, indirectHit`.
+   266→   266→- Food: `SimpleFoodData(int foodLevel)`, `eat(int)`/`eat(FoodItem*)`, `tick(Player*)`.
+   267→   267→  `FoodConstants`: `MAX_FOOD=20`, `HEALTH_TICK_COUNT=80`,
+   268→   268→  `HEALTH_TICK_COUNT_SIMPLE=5`, `HEAL_LEVEL=18`. Tidak ada saturation terpisah (sudah
+   269→   269→  di-hardcode di FoodItem: `saturationModifier=0.6f` default, `_isMeat`).
+   270→   270→
+   271→   271→# 1. Directory Tree of `world/` (depth 3)
+   272→   272→
+   273→   273→```
+   274→   274→world/
+   275→   275→├── Container.h
+   276→   276→├── Difficulty.h
+   277→   277→├── Facing.h
+   278→   278→├── Pos.h
+   279→   279→├── PosTranslator.h
+   280→   280→├── Direction.{h,cpp}
+   281→   281→├── food/
+   282→   282→│   ├── FoodConstants.h
+   283→   283→│   └── SimpleFoodData.{h,cpp}
+   284→   284→├── inventory/
+   285→   285→│   ├── BaseContainerMenu.{h,cpp}
+   286→   286→│   ├── ContainerMenu.{h,cpp}
+   287→   287→│   ├── CraftingContainer.h
+   288→   288→│   ├── FillingContainer.{h,cpp}
+   289→   289→│   └── FurnaceMenu.{h,cpp}
+   290→   290→├── item/
+   291→   291→│   ├── Item.{h,cpp}
+   292→   292→│   ├── ItemCategory.h
+   293→   293→│   ├── ItemInstance.{h,cpp}
+   294→   294→│   ├── ItemInclude.h
+   295→   295→│   ├── UseAnim.h
+   296→   296→│   ├── ArmorItem.{h,cpp}
+   297→   297→│   ├── AuxDataTileItem.h
+   298→   298→│   ├── BedItem.{h,cpp}
+   299→   299→│   ├── BowlFoodItem.h
+   300→   300→│   ├── BowItem.h
+   301→   301→│   ├── CameraItem.h
+   302→   302→│   ├── ClothTileItem.h
+   303→   303→│   ├── CoalItem.h
+   304→   304→│   ├── DiggerItem.h
+   305→   305→│   ├── DoorItem.h
+   306→   306→│   ├── DyePowderItem.{h,cpp}
+   307→   307→│   ├── EggItem.h
+   308→   308→│   ├── FlintAndSteelItem.h
+   309→   309→│   ├── FoodItem.h
+   310→   310→│   ├── HangingEntityItem.{h,cpp}
+   311→   311→│   ├── HatchetItem.{h,cpp}
+   312→   312→│   ├── HoeItem.{h,cpp}
+   313→   313→│   ├── LeafTileItem.h
+   314→   314→│   ├── PickaxeItem.{h,cpp}
+   315→   315→│   ├── SaplingTileItem.h
+   316→   316→│   ├── SeedItem.h
+   317→   317→│   ├── ShearsItem.h
+   318→   318→│   ├── ShovelItem.{h,cpp}
+   319→   319→│   ├── SignItem.h
+   320→   320→│   ├── SnowballItem.h
+   321→   321→│   ├── StoneSlabTileItem.h
+   322→   322→│   ├── TileItem.h
+   323→   323→│   ├── TilePlanterItem.h
+   324→   324→│   ├── TreeTileItem.h
+   325→   325→│   └── WeaponItem.h
+   326→   326→│   └── crafting/  (Recipe, Recipes, ShapedRecipe, ShapelessRecipe,
+   327→   327→│                   FurnaceRecipes, OreRecipes, FoodRecipes, ClothDyeRecipes,
+   328→   328→│                   ToolRecipes, WeaponRecipes, ArmorRecipes, StructureRecipes,
+   329→   329→│                   RecipeCategory.h — explored by separate agent)
+   330→   330→├── level/
+   331→   331→│   ├── Level.{h,cpp}
+   332→   332→│   ├── LevelConstants.h
+   333→   333→│   ├── LevelListener.h
+   334→   334→│   ├── LevelSettings.h
+   335→   335→│   ├── LevelSource.h
+   336→   336→│   ├── LightLayer.{h,cpp}
+   337→   337→│   ├── LightUpdate.{h,cpp}
+   338→   338→│   ├── MobSpawner.{h,cpp}
+   339→   339→│   ├── Explosion.{h,cpp}
+   340→   340→│   ├── Region.{h,cpp}
+   341→   341→│   ├── TickNextTickData.{h,cpp}
+   342→   342→│   ├── TilePos.h / ChunkPos.h / FoliageColor.h
+   343→   343→│   ├── biome/      (Biome, BiomeSource, FlatBiome, ForestBiome, RainforestBiome,
+   344→   344→│                    SwampBiome, TaigaBiome, BiomeInclude.h)
+   345→   345→│   ├── chunk/
+   346→   346→│   │   ├── ChunkCache.h
+   347→   347→│   │   ├── ChunkSource.h
+   348→   348→│   │   ├── DataLayer.h
+   349→   349→│   │   ├── EmptyLevelChunk.h
+   350→   350→│   │   ├── LevelChunk.{h,cpp}
+   351→   351→│   │   └── storage/  (ChunkStorage.h, MemoryChunkStorage.h)
+   352→   352→│   ├── dimension/
+   353→   353→│   │   ├── Dimension.{h,cpp}
+   354→   354→│   │   └── NormalDayCycleDimension.h
+   355→   355→│   ├── levelgen/   (RandomLevelSource, LargeCaveFeature, CanyonFeature,
+   356→   356→│                    LargeFeature, DungeonFeature, TownFeature + feature/ subdir
+   357→   357→│                    + synth/ImprovedNoise,PerlinNoise,Synth)
+   358→   358→│   ├── material/   (Material, LiquidMaterial, GasMaterial, DecorationMaterial,
+   359→   359→│                    WebMaterial)
+   360→   360→│   ├── pathfinder/ (Path, PathFinder, Node, BinaryHeap)
+   361→   361→│   ├── storage/    (LevelStorage, LevelStorageSource, MemoryLevelStorage,
+   362→   362→│                    ExternalFileLevelStorage{,Source}, LevelData, PlayerData,
+   363→   363→│                    RegionFile, FolderMethods, MoveFolder)
+   364→   364→│   └── tile/
+   365→   365→│       ├── Tile.{h,cpp}  + TileInclude.h
+   366→   366→│       ├── ~55 Tile subclasses (.h, some .cpp)  ← see list below
+   367→   367→│       └── entity/  (TileEntity, ChestTileEntity, FurnaceTileEntity,
+   368→   368→│                     SignTileEntity, NetherReactorTileEntity,
+   369→   369→│                     TileEntityRendererId.h)
+   370→   370→├── entity/
+   371→   371→│   ├── Entity.{h,cpp}
+   372→   372→│   ├── Mob.{h,cpp}
+   373→   373→│   ├── PathfinderMob.{h,cpp}
+   374→   374→│   ├── AgableMob.{h,cpp}
+   375→   375→│   ├── Creature.h
+   376→   376→│   ├── FlyingMob.{h,cpp}
+   377→   377→│   ├── HangingEntity.{h,cpp}
+   378→   378→│   ├── Painting.{h,cpp}
+   379→   379→│   ├── Motive.{h,cpp}
+   380→   380→│   ├── SynchedEntityData.{h,cpp}
+   381→   381→│   ├── EntityTypes.h / EntityRendererId.h / EntityEvent.h
+   382→   382→│   ├── EntityFactory.{h,cpp}
+   383→   383→│   ├── EntityPos.h / MobCategory.{h,cpp} / SharedFlags.h
+   384→   384→│   ├── ai/  (Sensing, PathNavigation, control/{Control,MoveControl,JumpControl},
+   385→   385→│             goal/{Goal,GoalSelector,BreakDoorGoal,RandomStrollGoal,
+   386→   386→│                   DoorInteractGoal,MeleeAttackGoal},
+   387→   387→│             goal/target/{TargetGoal,HurtByTargetGoal,NearestAttackableTargetGoal},
+   388→   388→│             util/RandomPos)
+   389→   389→│   ├── animal/  (Animal, WaterAnimal, Cow, Pig, Sheep, Chicken + AnimalInclude.h)
+   390→   390→│   ├── item/    (ItemEntity, FallingTile, PrimedTnt, TripodCamera)
+   391→   391→│   ├── monster/ (Monster, Zombie, Creeper, Skeleton, Spider, PigZombie + MonsterInclude.h)
+   392→   392→│   ├── player/  (Player, Inventory, OldInventory, Abilities, InventorySlotManager)
+   393→   393→│   └── projectile/ (Throwable, Arrow, Snowball, ThrownEgg)
+   394→   394→└── phys/
+   395→   395→    ├── AABB.h
+   396→   396→    ├── Vec3.h
+   397→   397→    └── HitResult.{h,cpp}
+   398→   398→```
+   399→   399→
+   400→   400→# 2. Per-key-file analysis
+   401→   401→
+   402→   402→## 2.1 world/level/LevelConstants.h
+   403→   403→- Path: `world/level/LevelConstants.h`
+   404→   404→- Constants only (no class):
+   405→   405→  - `LEVEL_HEIGHT = 128`
+   406→   406→  - `CHUNK_CACHE_WIDTH = 16`  (chunk-grid width; world is 16×16 chunks)
+   407→   407→  - `CHUNK_WIDTH = 16`, `CHUNK_DEPTH = 16`  (blocks per chunk side)
+   408→   408→  - `LEVEL_WIDTH = LEVEL_DEPTH = 256`  (CHUNK_CACHE_WIDTH * CHUNK_WIDTH)
+   409→   409→  - `CHUNK_COLUMNS = 256`  (16*16)
+   410→   410→  - `CHUNK_BLOCK_COUNT = 32768`  (256 columns * 128 height)
+   411→   411→
+   412→   412→## 2.2 world/level/Level.h / .cpp
+   413→   413→- Class `Level : public LevelSource` (abstract base for any tile/entity accessor).
+   414→   414→- Nested types: `AdventureSettings{doTickTime,noPvP,noPvM,noMvP,immutableWorld,
+   415→   415→  showNameTags}`, `PRInfo{Entity* e; int ticks;}`.
+   416→   416→- Static constants:
+   417→   417→  - `MAX_LEVEL_SIZE = 32000000`
+   418→   418→  - `DEPTH = LEVEL_HEIGHT = 128`
+   419→   419→  - `SEA_LEVEL = DEPTH/2 - 1 = 63`
+   420→   420→  - `MAX_BRIGHTNESS = 15`
+   421→   421→  - `TICKS_PER_DAY = SharedConstants::TicksPerSecond(20) * 60 * 16 = 19200`
+   422→   422→  - `MIDDLE_OF_NIGHT_TIME = 12000`
+   423→   423→  - `MAX_TICK_TILES_PER_TICK = 100`
+   424→   424→  - `genDepthBits=7`, `genDepth=128`, `genDepthMinusOne=127`
+   425→   425→- Constructor: `Level(LevelStorage* levelStorage, const std::string& levelName,
+   426→   426→  const LevelSettings& settings, int generatorVersion, Dimension* fixedDimension=NULL)`.
+   427→   427→- Public state: `bool instaTick, isClientSide, isGeneratingTerrain; int difficulty;
+   428→   428→  AdventureSettings adventureSettings; EntityList entities; EntityMap entityIdLookup;
+   429→   429→  TileEntityList tileEntities, pendingTileEntities; bool updatingTileEntities;
+   430→   430→  PlayerList players; int skyDarken; bool noNeighborUpdate; Dimension* dimension;
+   431→   431→  IRakNetInstance* raknetInstance; Random random; std::vector<AABB> boxes;`.
+   432→   432→- Public API surface (excerpt):
+   433→   433→  - **Tile accessors**: `getTile(x,y,z)→int`, `setTile(...)→bool`,
+   434→   434→    `setTileAndData(...)→bool`, `getData(...)→int`, `setData(...)`,
+   435→   435→    `setTileNoUpdate(...)`, `setTileAndDataNoUpdate(...)`, `setDataNoUpdate(...)`,
+   436→   436→    `getMaterial(...)→const Material*`, `isEmptyTile`, `isSolidRenderTile`,
+   437→   437→    `isSolidBlockingTile`, `getTopTile(x,z)`, `getTopTileY`, `getTopSolidBlock`,
+   438→   438→    `getHeightmap(x,z)`, `getRawBrightness(x,y,z[,propagate])`,
+   439→   439→    `getBrightness(x,y,z)→float`, `getBrightness(LightLayer&,x,y,z)→int`,
+   440→   440→    `setBrightness(LightLayer&,x,y,z,int)`, `updateLightIfOtherThan`,
+   441→   441→    `getLightsToUpdate`, `updateLights`, `setUpdateLights`, `updateLight(...)`,
+   442→   442→    `canSeeSky`, `isSkyLit`, `getLightDepth`, `getSkyDarken`, `isDay`,
+   443→   443→    `getTimeOfDay(a)`, `getSunAngle(a)`, `getStarBrightness(a)`,
+   444→   444→    `getFogColor(a)`, `getCloudColor(a)`, `getSkyColor(source,a)`.
+   445→   445→  - **Chunk management**: `hasChunk(x,z)`, `hasChunkAt(x,y,z)`, `hasChunksAt(...)`,
+   446→   446→    `getChunk(x,z)→LevelChunk*`, `getChunkAt(x,z)`, `getChunkSource()→ChunkSource*`.
+   447→   447→  - **Entity management**: `addEntity(e)→bool`, `removeEntity`, `removePlayer`,
+   448→   448→    `getEntity(id)→Entity*`, `getMob(id)→Mob*`, `getEntities(except,AABB)→EntityList&`,
+   449→   449→    `getAllEntities()`, `getNearestPlayer(...)`, `getEntitiesOfType`,
+   450→   450→    `getEntitiesOfClass`, `countInstanceOfType`, `countInstanceOfBaseType`,
+   451→   451→    `dispatchEntityData`, `awakenAllPlayers`, `takePicture(cam,e)`.
+   452→   452→  - **Tile-entity management**: `getTileEntity(x,y,z)→TileEntity*`, `setTileEntity`,
+   453→   453→    `removeTileEntity`, `tileEntityChanged`.
+   454→   454→  - **Tick flow**: `virtual void tick()`, `tickEntities()`, `tick(Entity*)`,
+   455→   455→    `tick(Entity*,bool actual)`, `tickPendingTicks(force)→bool`, `tickTiles()`,
+   456→   456→    `animateTick(xt,yt,zt)`, `addToTickNextTick(x,y,z,tileId,delay)`.
+   457→   457→  - **Collision**: `getCubes(source,AABB)→vector<AABB>&`, `isUnobstructed(AABB)`,
+   458→   458→    `containsAnyLiquid`, `containsFireTile`, `containsMaterial`,
+   459→   459→    `containsLiquid(box,material)`, `checkAndHandleWater(box,material,e)`,
+   460→   460→    `extinguishFire(x,y,z,face)`, `getSeenPercent(center,bb)`.
+   461→   461→  - **Build/redstone**: `mayPlace(tileId,x,y,z,ignoreEntities,face)`,
+   462→   462→    `mayInteract(player,x,y,z)`, `updateNeighborsAt(x,y,z,tile)`,
+   463→   463→    `swap(x1,y1,z1,x2,y2,z2)`, `getDirectSignal`, `hasDirectSignal`, `getSignal`,
+   464→   464→    `hasNeighborSignal`, `lightColumnChanged`, `setTileDirty`, `setTilesDirty`,
+   465→   465→    `sendTileUpdated`, `tileUpdated`, `setTileDirty`.
+   466→   466→  - **Pathfinding**: `findPath(path,from,to,maxDist,canOpenDoors,avoidWater)`,
+   467→   467→    `findPath(path,from,x,y,z,...)`.
+   468→   468→  - **Effects**: `explode(source,x,y,z,r[,fire])`, `playSound(...)`,
+   469→   469→    `levelEvent(source,type,x,y,z,data)`, `tileEvent(x,y,z,b0,b1)`,
+   470→   470→    `broadcastEntityEvent(e,eventId)`, `addParticle(id,x,y,z,xd,yd,zd,data)`.
+   471→   471→  - **Listener**: `addListener(LevelListener*)`, `removeListener(...)`.
+   472→   472→  - **Biome**: `getBiomeSource()→BiomeSource*`, `getBiome(x,z)→Biome*`,
+   473→   473→    `getRandomMobSpawnAt(cat,x,y,z)`.
+   474→   474→  - **Save/load**: `saveLevelData()`, `saveGame()`, `loadEntities()`, `loadPlayer(p,add)`.
+   475→   475→  - **Time**: `getTime()→long`, `setTime(long)`, `getSeed()→long`,
+   476→   476→    `getSharedSpawnPos()→Pos`, `setSpawnPos(Pos)`, `setSpawnSettings(bool,bool)`,
+   477→   477→    `setInitialSpawn()`, `validateSpawn()`, `prepare()`, `isNew()`.
+   478→   478→  - **Game mode helpers**: `isNightMode()`, `setNightMode(bool)`,
+   479→   479→    `inRange(x,y,z)→bool`, `getSeaLevel()→int`.
+   480→   480→
+   481→   481→## 2.3 world/level/LevelSource.h
+   482→   482→- Pure abstract: `getTile`, `isEmptyTile`, `getBrightness`, `getData`,
+   483→   483→  `getMaterial`, `isSolidRenderTile`, `isSolidBlockingTile`, `getBiome`.
+   484→   484→  Used as the read-only interface implemented by `Level` and `Region`.
+   485→   485→
+   486→   486→## 2.4 world/level/dimension/Dimension.h / .cpp
+   487→   487→- Class `Dimension`. Constants: `NORMAL=0`, `NORMAL_DAYCYCLE=10`.
+   488→   488→- Public fields: `Level* level; BiomeSource* biomeSource; bool foggy, ultraWarm,
+   489→   489→  hasCeiling; float brightnessRamp[16]; int id;` (protected `float sunriseCol[4]`,
+   490→   490→  `static const long fogColor = 0x80daff`).
+   491→   491→- API: `init(Level*)`, `createRandomLevelSource()→ChunkSource*` (returns
+   492→   492→  `new RandomLevelSource(level,seed,generatorVersion,spawnMobs)`),
+   493→   493→  `isValidSpawn(x,z)`, `isNaturalDimension()`, `getTimeOfDay(time,a)`,
+   494→   494→  `getSunriseColor(td,a)→float*`, `getFogColor(td,a)→Vec3`, `mayRespawn()`,
+   495→   495→  `static getNew(id)→Dimension*`.
+   496→   496→- `updateLightRamp()` builds the 16-entry brightness ramp using ambient=0.05.
+   497→   497→- `DimensionFactory::createDefaultDimension(LevelData*)` picks
+   498→   498→  `NORMAL_DAYCYCLE` for Survival, `NORMAL` (always-day) for Creative.
+   499→   499→- `NormalDayCycleDimension.h` exists (subclass that overrides day cycle).
+   500→   500→
+   501→   501→## 2.5 world/level/chunk/LevelChunk.h / .cpp
+   502→   502→- Class `LevelChunk`. Constants: `ChunkBlockCount = CHUNK_BLOCK_COUNT (32768)`,
+   503→   503→  `ChunkSize`, `UpdateMapBitShift = 4` (16 sub-columns per chunk column for update map).
+   504→   504→- Ctor: `LevelChunk(Level*, int x, int z)` or `(Level*, unsigned char* blocks, x, z)`.
+   505→   505→- Storage:
+   506→   506→  - `unsigned char* blocks` (32768 bytes, indexed `x<<11 | z<<7 | y`).
+   507→   507→  - `DataLayer data, skyLight, blockLight` (4-bit nibble arrays, packed 16384 bytes).
+   508→   508→  - `char heightmap[256]`.
+   509→   509→  - `unsigned char updateMap[256]`.
+   510→   510→  - `int minHeight`, `bool terrainPopulated, unsaved, dontSave, createdFromSave,
+   511→   511→    lastSaveHadEntities; long lastSaveTime`.
+   512→   512→  - `const int x, z, xt, zt` (xt=x*16, zt=z*16).
+   513→   513→  - `std::vector<Entity*> entityBlocks[128/16=8]` (8 vertical 16-block slices).
+   514→   514→  - `TEMap tileEntities` (`std::map<TilePos,TileEntity*>`).
+   515→   515→- API: `getTile/setTile/setTileRaw/setTileAndData(x,y,z,val)`, `getData/setData`,
+   516→   516→  `getBlocksAndData/setBlocksAndData`, `getBrightness(LightLayer&,x,y,z)`,
+   517→   517→  `setBrightness`, `getRawBrightness(x,y,z,skyDampen)`, `isSkyLit`,
+   518→   518→  `recalcHeightmap`, `addEntity/removeEntity(e[,yc])`,
+   519→   519→  `getEntities/OfType/OfClass(type,AABB,list)`, `countEntities`,
+   520→   520→  `getTileEntity(x,y,z)`, `addTileEntity`, `setTileEntity`, `removeTileEntity`,
+   521→   521→  `load/unload`, `shouldSave(force)`, `markUnsaved`, `getRandom(l)`.
+   522→   522→- Static: `bool touchedSky`, `ChunkBlockCount`, `ChunkSize`.
+   523→   523→
+   524→   524→## 2.6 world/level/chunk/ChunkSource.h
+   525→   525→- Abstract interface: `hasChunk(x,y)`, `getChunk(x,z)→LevelChunk*`, `create(x,z)`,
+   526→   526→  `postProcess(parent,x,z)`, `tick()→bool`, `shouldSave()→bool`, `saveAll(onlyUnsaved)`,
+   527→   527→  `getMobsAt(cat,x,y,z)→Biome::MobList`, `gatherStats()→std::string`.
+   528→   528→  Field `bool isChunkCache` (set true by `ChunkCache`).
+   529→   529→
+   530→   530→## 2.7 world/level/chunk/DataLayer.h
+   531→   531→- Storage for 4-bit nibbles (block data, skyLight, blockLight). 16384 bytes per chunk.
+   532→   532→- `get(x,y,z)` / `get(pos)` returns 0-15, `set(...)` writes.
+   533→   533→- Indexing: `pos = x<<11 | z<<7 | y`. `slot = pos>>1`, `part = pos&1`.
+   534→   534→
+   535→   535→## 2.8 world/level/chunk/storage/ChunkStorage.h
+   536→   536→- Abstract: `load(level,x,z)→LevelChunk*`, `save(level,chunk)`,
+   537→   537→  `saveEntities(level,chunk)`, `saveAll(level,vec)`, `tick()`, `flush()`.
+   538→   538→
+   539→   539→## 2.9 world/level/storage/LevelStorage.h
+   540→   540→- Abstract: `prepareLevel(level)→LevelData*`, `createChunkStorage(Dimension*)→ChunkStorage*`,
+   541→   541→  `saveLevelData(LevelData&,vector<Player*>*)`, `closeAll()`, `saveGame(level)`,
+   542→   542→  `loadEntities(level,chunk)`.
+   543→   543→- Implementations: `MemoryLevelStorage`, `ExternalFileLevelStorage`,
+   544→   544→  `ExternalFileLevelStorageSource` (region files via `RegionFile`).
+   545→   545→
+   546→   546→## 2.10 world/level/LevelSettings.h
+   547→   547→- `class LevelSettings` (ctor `(long seed, int gameType)`). Static `None()`.
+   548→   548→- `namespace GameType { Undefined=-1, Survival=0, Creative=1, Default=Creative }`.
+   549→   549→- `validateGameType(int)→int`, `gameTypeToString(int)→string`.
+   550→   550→
+   551→   551→## 2.11 world/entity/Entity.h / .cpp
+   552→   552→- Class `Entity`. Static: `int entityCounter`, `const int TOTAL_AIR_SUPPLY =
+   553→   553→  15 * TicksPerSecond (300)`, `static Random sharedRandom`, `DATA_AIR_SUPPLY_ID=1`.
+   554→   554→- Fields: `float x,y,z, xo,yo,zo, xd,yd,zd, yRot,xRot, yRotO,xRotO, xOld,yOld,zOld,
+   555→   555→  ySlideOffset, footSize, pushthrough, heightOffset, bbWidth, bbHeight, walkDist,
+   556→   556→  walkDistO, fallDistance, viewScale; int xChunk,yChunk,zChunk, entityId, tickCount,
+   557→   557→  invulnerableTime, airSupply, onFire, flameTime; AABB bb; Level* level;
+   558→   558→  EntityRendererId entityRendererId; bool blocksBuilding, inChunk, onGround,
+   559→   559→  horizontalCollision, verticalCollision, collision, hurtMarked, slide, removed,
+   560→   560→  noPhysics, canRemove, invisible, reallyRemoveIfPlayer, fireImmune, isStuckInWeb,
+   561→   561→  firstTick, makeStepSound, wasInWater; int nextStep, airCapacity`.
+   562→   562→- API:
+   563→   563→  - Lifecycle: `Entity(Level*)`, virtual `~Entity`, `reset()`, `setLevel(Level*)`,
+   564→   564→    `remove()`.
+   565→   565→  - Position/motion: `setPos(x,y,z)`, `move(xa,ya,za)` (full clip-and-slide with
+   566→   566→    web/sneak/collision), `moveTo(...)`, `moveRelative(xa,za,speed)`,
+   567→   567→    `lerpTo(...)`, `lerpMotion(...)`, `turn(xo,yo)`, `interpolateTurn(...)`.
+   568→   568→  - Tick: `tick()` (calls `baseTick()`), `baseTick()` (water splash, fire/lava
+   569→   569→    damage, fall tracking, out-of-world).
+   570→   570→  - Collision: `intersects(...)`, `isFree(xa,ya,za[,grow])`, `isInWall`,
+   571→   571→    `isInWater`, `isInLava`, `isUnderLiquid(material)`, `makeStuckInWeb`.
+   572→   572→  - Interaction: `interactPreventDefault`, `interact(Player*)`,
+   573→   573→    `playerTouch(Player*)`, `push(Entity*)`, `push(xa,ya,za)`,
+   574→   574→    `isPickable/Pushable/Shootable`, `isSneaking`, `isAlive`, `isOnFire`,
+   575→   575→    `isPlayer`, `isCreativeModeAllowed`, `shouldRender(c)`,
+   576→   576→    `shouldRenderAtSqrDistance(d)`, `hurt(source,dmg)`, `animateHurt`,
+   577→   577→    `handleEntityEvent(id)`, `getPickRadius()`, `spawnAtLocation(resource,count[,yOffs])`,
+   578→   578→    `awardKillScore`, `setEquippedSlot(slot,item,aux)`.
+   579→   579→  - Save/load: `save(CompoundTag*)`, `saveWithoutId(...)`, `load(...)`,
+   580→   580→    `getEntityData()→SynchedEntityData*`, `readAdditionalSaveData`=0,
+   581→   581→    `addAdditonalSaveData`=0.
+   582→   582→  - Type id: pure virtual `getEntityTypeId() const = 0`,
+   583→   583→    `getCreatureBaseType() const { return 0; }`,
+   584→   584→    `queryEntityRenderer()→EntityRendererId`, `isMob() {return false;}`,
+   585→   585→    `isItemEntity`, `isHangingEntity`, `getAuxData`.
+   586→   586→- Protected: `setRot`, `setSize(w,h)`, `setPos(EntityPos*)`, `resetPos(clearMore)`,
+   587→   587→  `outOfWorld`, `checkFallDamage(ya,onGround)`, `causeFallDamage(d)`, `markHurt`,
+   588→   588→  `burn(dmg)`, `lavaHurt`, `playStepSound(xt,yt,zt,t)`.
+   589→   589→- `Entity::baseTick()` flow: tickCount++, snapshot xo/yo/zo + rotO, detect water
+   590→   590→  entry→splash sound + bubble particles, reset fallDistance, onFire handling,
+   591→   591→  lavaHurt if in lava, outOfWorld if y<-64.
+   592→   592→
+   593→   593→## 2.12 world/entity/Mob.h / .cpp
+   594→   594→- Class `Mob : public Entity`. Constants: `ATTACK_DURATION=5`, `SWING_DURATION=8`.
+   595→   595→- Default `getMaxHealth() { return 10; }`.
+   596→   596→- Fields (added over Entity): `int invulnerableDuration, health, lastHealth,
+   597→   597→  hurtTime, hurtDuration, deathTime, attackTime, lookTime, arrowCount,
+   598→   598→  removeArrowTime; float timeOffs, rotA, yBodyRot, yBodyRotO, oAttackAnim,
+   599→   599→  attackAnim, hurtDir, oTilt, tilt, fallTime, walkAnimSpeedO, walkAnimSpeed,
+   600→   600→  walkAnimPos; Vec3 aimDirection; Random random; Sensing* sensing;
+   601→   601→  bool bypassArmor;` protected `SynchedEntityData entityData; bool swinging;
+   602→   602→  int swingTime, noActionTime; float xxa, yya, yRotA, defaultLookAngle, runSpeed,
+   603→   603→  walkingSpeed, flyingSpeed; std::string textureName, modelName; int deathScore;
+   604→   604→  float oRun, run, animStep, animStepO, rotOffs, bobStrength, renderOffset;
+   605→   605→  int lSteps; float lx,ly,lz,lyr,lxr, sentX/Y/Z/RotX/RotY, sentXd/Yd/Zd;
+   606→   606→  int lastHurt, dmgSpill; bool allowAlpha, jumping, autoSendPosRot;
+   607→   607→  MoveControl* moveControl; JumpControl* jumpControl; PathNavigation* navigation;
+   608→   608→  GoalSelector* goalSelector, * targetSelector; int lookingAtId, ambientSoundTime;
+   609→   609→  float speed;`.
+   610→   610→- API:
+   611→   611→  - Combat: `knockback(source,dmg,xd,zd)`, `die(source)`, `hurt(source,dmg)`,
+   612→   612→    `actuallyHurt(dmg)`, `animateHurt`, `getArmorValue`, `getDamageAfterArmorAbsorb(d)`,
+   613→   613→    `hurtArmor(d)`, `heal(h)`, `getMaxHealth`, `causeFallDamage(d)`.
+   614→   614→  - Tick chain: `tick()` (Mob adds AI step), `baseTick()`, `superTick()`,
+   615→   615→    `aiStep()` (movement + jump + travel + AI), `updateAi()` (per-mob AI),
+   616→   616→    `newServerAiStep`, `travel(xa,ya)` (physics-aware walking), `updateWalkAnim`.
+   617→   617→  - Look/pick: `lookAt(e,yMax,xMax)`, `isLookingAtAnEntity`, `pick(range,a)→HitResult`,
+   618→   618→    `getPos(a)→Vec3`, `getLookAngle()`, `getViewVector(a)`.
+   619→   619→  - Misc: `canSee(target)`, `onLadder()`, `spawnAnim()`, `getTexture()→string`,
+   620→   620→    `isAlive`, `isPickable`, `isPushable`, `isShootable`, `isSleeping`,
+   621→   621→    `isWaterMob`, `isSneaking/setSneaking`, `getHeadHeight()`, `getVoicePitch`,
+   622→   622→    `playAmbientSound`, `getAmbientSoundInterval`, `getItemInHandIcon(item,layer)`,
+   623→   623→    `lerpTo`, `setYya`, `getSpeed/setSpeed`, `setJumping`,
+   624→   624→    `getAttackAnim(a)`, `getMaxSpawnClusterSize`, `isMob(){return true;}`,
+   625→   625→    `isBaby(){return false;}`, `swing()`.
+   626→   626→  - Protected hooks: `removeWhenFarAway`, `getDeathLoot`, `dropDeathLoot`,
+   627→   627→    `isImmobile`, `jumpFromGround`, `getMaxHeadXRot`, `getSoundVolume`,
+   628→   628→    `getAmbientSound/HurtSound/DeathSound`, `getWalkingSpeedModifier`,
+   629→   629→    `useNewAi`, `getSharedFlag/setSharedFlag`, `checkDespawn`, `updateAttackAnim`.
+   630→   630→
+   631→   631→## 2.13 world/entity/PathfinderMob.h / .cpp
+   632→   632→- Class `PathfinderMob : public Mob`. Constants `MAX_TURN=30`,
+   633→   633→  `CAN_OPEN_DOORS=1`, `AVOID_WATER=2`.
+   634→   634→- Fields: `int attackTargetId; bool holdGround; int fleeTime; Path path;`.
+   635→   635→- API: `canSpawn`, `isPathFinding`, `setPath(Path&)`, `getAttackTarget/setAttackTarget`,
+   636→   636→  `getWalkTargetValue(x,y,z)`, `getNoActionTime`, `getNavigation()→PathNavigation*`.
+   637→   637→- Protected: `findAttackTarget`, `checkHurtTarget`, `checkCantSeeTarget`,
+   638→   638→  `getWalkingSpeedModifier`, `shouldHoldGround`, `updateAi`,
+   639→   639→  `findRandomStrollLocation`.
+   640→   640→
+   641→   641→## 2.14 world/entity/AgableMob.h / .cpp
+   642→   642→- Class `AgableMob : public PathfinderMob`. Constants `DATA_FLAGS_ID=14`,
+   643→   643→  `DATAFLAG_ISBABY=0`. Field `int age`.
+   644→   644→- API: `getAge/setAge`, `isBaby`, save/load, `aiStep`.
+   645→   645→
+   646→   646→## 2.15 world/entity/Creature.h
+   647→   647→- Empty marker class `class Creature {};` — used as second base for `Animal` and
+   648→   648→  `WaterAnimal` (multi-inheritance) for MobCategory routing.
+   649→   649→
+   650→   650→## 2.16 world/entity/animal/Animal.h / .cpp
+   651→   651→- Class `Animal : public AgableMob, public Creature`. Field `int inLove`.
+   652→   652→- API: `hurt(source,dmg)`, `canSpawn`, `getAmbientSoundInterval`,
+   653→   653→  `getCreatureBaseType() const` (returns `MobTypes::BaseCreature=2`),
+   654→   654→  `removeWhenFarAway`.
+   655→   655→- Protected: `getWalkTargetValue(x,y,z)`, `findAttackTarget`.
+   656→   656→
+   657→   657→## 2.17 world/entity/animal/WaterAnimal.h
+   658→   658→- Class `WaterAnimal : public PathfinderMob, public Creature`. Lives in water;
+   659→   659→  `isWaterMob`, `canSpawn`, `getAmbientSoundInterval`, `getCreatureBaseType`
+   660→   660→  (= `BaseWaterCreature=3`), `removeWhenFarAway`, `getExperienceReward(player)`.
+   661→   661→
+   662→   662→## 2.18 world/entity/animal/Pig.h
+   663→   663→- `class Pig : public Animal`. Constants `DATA_SADDLE_ID=16`. Has `bool saddle`.
+   664→   664→- API: `getEntityTypeId()` (MobTypes::Pig=12), `interact(player)`, `getMaxHealth`,
+   665→   665→  `hasSaddle/setSaddle`, `getDeathLoot`, `getBreedOffspring(Animal*)`.
+   666→   666→- Sounds: ambient `mob.pig`, hurt `mob.pig`, death `mob.pigdeath`.
+   667→   667→
+   668→   668→## 2.19 world/entity/animal/Cow.h
+   669→   669→- `class Cow : public Animal`. API: `getEntityTypeId()` (MobTypes::Cow=11),
+   670→   670→  `getMaxHealth`, `interact(player)` (milk bucket), save/load, `getDeathLoot`,
+   671→   671→  `dropDeathLoot`, `getBreedOffspring`. Sounds `mob.cow`/`mob.cowhurt`/`mob.cowdeath`.
+   672→   672→  `getSoundVolume()` louder.
+   673→   673→
+   674→   674→## 2.20 world/entity/animal/Sheep.h
+   675→   675→- `class Sheep : public Animal`. Constants `EAT_ANIMATION_TICKS=2*TPS=40`,
+   676→   676→  `DATA_WOOL_ID=16`, `NumColors`. `static const float COLOR[][3]`.
+   677→   677→- API: `getMaxHealth`, `aiStep`, `handleEntityEvent(id)`,
+   678→   678→  `getHeadEatPositionScale(a)`, `getHeadEatAngleScale(a)`, `interact(player)` (shears),
+   679→   679→  save/load, `getColor() const`, `setColor(int)`, `static getSheepColor(Random*)`,
+   680→   680→  `isSheared() const`, `setSheared(bool)`, `getEntityTypeId()` (MobTypes::Sheep=13).
+   681→   681→- Protected: `dropDeathLoot`, `getDeathLoot`, `jumpFromGround`, `updateAi`,
+   682→   682→  `shouldHoldGround`, ambient/hurt/death sounds `mob.sheep`/`mob.sheep`/`mob.sheepdeath`.
+   683→   683→- Field `int eatAnimationTick`.
+   684→   684→
+   685→   685→## 2.21 world/entity/animal/Chicken.h
+   686→   686→- `class Chicken : public Animal`. Public fields `bool sheared; float flap,
+   687→   687→  flapSpeed, oFlapSpeed, oFlap, flapping; int eggTime`.
+   688→   688→- API: `getEntityTypeId()` (MobTypes::Chicken=10), `getMaxHealth`, `aiStep`,
+   689→   689→  save/load. `causeFallDamage` (no fall damage — flapping). Drops feathers + raw
+   690→   690→  chicken. `getBreedOffspring`. Sounds `mob.chicken`/`mob.chickenhurt`/`mob.chickenhurt`.
+   691→   691→
+   692→   692→## 2.22 world/entity/monster/Monster.h / .cpp
+   693→   693→- Class `Monster : public PathfinderMob`. Fields `int attackDamage, targetId,
+   694→   694→  lastHurtByMobId`. API: `aiStep`, `tick`, `hurt(source,dmg)`, `canSpawn`,
+   695→   695→  `getCreatureBaseType() const` (= `BaseEnemy=1`), `doHurtTarget(target)`,
+   696→   696→  `setTarget/getTarget`, `getLastHurtByMob/setLastHurtByMob`,
+   697→   697→  `getAttackDamage(target)`.
+   698→   698→- Protected: `findAttackTarget`, `isDarkEnoughToSpawn`, `checkHurtTarget`,
+   699→   699→  `getWalkTargetValue`, `getAttackTime`.
+   700→   700→
+   701→   701→## 2.23 world/entity/monster/Creeper.h
+   702→   702→- `class Creeper : public Monster`. Constants `DATA_SWELL_DIR=16`,
+   703→   703→  `MAX_SWELL=30`. Fields `int swell, oldSwell, swellDir`.
+   704→   704→- API: `getMaxHealth`, `tick`, `getSwelling(a)`, `getEntityTypeId()` (Creeper=33).
+   705→   705→- Protected: `getDeathLoot`, `checkCantSeeTarget`, `checkHurtTarget`, sounds.
+   706→   706→
+   707→   707→## 2.24 world/entity/monster/Zombie.h
+   708→   708→- `class Zombie : public Monster`. Fields `int fireCheckTick; bool _useNewAi`.
+   709→   709→- API: `getMaxHealth`, `aiStep`, `getEntityTypeId()` (Zombie=32),
+   710→   710→  `setUseNewAi(bool)`, `die(source)`, `getAttackDamage(target)`.
+   711→   711→- Protected: `getArmorValue`, sounds `mob.zombie`/`mob.zombiehurt`/`mob.zombiedeath`,
+   712→   712→  `getDeathLoot`, `useNewAi`.
+   713→   713→
+   714→   714→## 2.25 world/entity/monster/PigZombie.h
+   715→   715→- `class PigZombie : public Zombie`. Fields `int angerTime,
+   716→   716→  playAngrySoundIn, stunedTime; ItemInstance weapon`.
+   717→   717→- API: `useNewAi`, `tick`, `getTexture`, `canSpawn`, save/load, `hurt(source,dmg)`,
+   718→   718→  `interact(player)`, `getEntityTypeId()` (PigZombie=36), `getAttackTime`,
+   719→   719→  `getCarriedItem()→ItemInstance*` (golden sword).
+   720→   720→- Protected: `findAttackTarget`, sounds `mob.zombiepig`/`mob.zombiepigangry`,
+   721→   721→  `dropDeathLoot`, `getDeathLoot`, `alert(target)`.
+   722→   722→
+   723→   723→## 2.26 world/entity/monster/Skeleton.h
+   724→   724→- `class Skeleton : public Monster`. Fields `ItemInstance bow; int fireCheckTick`.
+   725→   725→- API: `getMaxHealth`, `aiStep`, `getDeathLoot`, `getCarriedItem()` (bow),
+   726→   726→  `getEntityTypeId()` (Skeleton=34), `getUseDuration`.
+   727→   727→- Protected: sounds `mob.skeleton`/`mob.skeletonhurt`/`mob.skeletondeath`,
+   728→   728→  `checkHurtTarget`, `dropDeathLoot` (arrows + bones).
+   729→   729→
+   730→   730→## 2.27 world/entity/monster/Spider.h
+   731→   731→- `class Spider : public Monster`. Constants `DATA_FLAGS_ID=16`.
+   732→   732→- API: `aiStep`, `tick`, `getMaxHealth`, `onLadder()` (always true → climbs),
+   733→   733→  `makeStuckInWeb`, `getModelScale`, `isClimbing/setClimbing`,
+   734→   734→  `getEntityTypeId()` (Spider=35).
+   735→   735→- Protected: `makeStepSound=false`, `findAttackTarget`, sounds `mob.spider`/...
+   736→   736→
+   737→   737→## 2.28 world/entity/player/Player.h / .cpp
+   738→   738→- `class Player : public Mob`. Constants:
+   739→   739→  - `MAX_NAME_LENGTH = 16`
+   740→   740→  - `MAX_HEALTH = 20`
+   741→   741→  - `DEFAULT_WALK_SPEED`, `DEFAULT_FLY_SPEED` (defined in .cpp)
+   742→   742→  - `SLEEP_DURATION = 100`, `WAKE_UP_DURATION = 10`
+   743→   743→  - `DATA_PLAYER_FLAGS_ID = 16`, `DATA_BED_POSITION_ID = 17`,
+   744→   744→    `PLAYER_SLEEP_FLAG = 1`
+   745→   745→  - `NUM_ARMOR = 4`
+   746→   746→- Nested `BedSleepingResult` enum {OK, NOT_POSSIBLE_HERE, NOT_POSSIBLE_NOW,
+   747→   747→  TOO_FAR_AWAY, OTHER_PROBLEM, NOT_SAFE}.
+   748→   748→- Public state: `char userType; int score; float oBob, bob; std::string name;
+   749→   749→  int dimension; Abilities abilities; SimpleFoodData foodData;
+   750→   750→  BaseContainerMenu* containerMenu; RakNet::RakNetGUID owner; bool hasFakeInventory;
+   751→   751→  Pos bedPosition; float bedOffsetX/Y/Z; Inventory* inventory`.
+   752→   752→- Protected: `ItemInstance useItem; int useItemDuration; short sleepCounter;
+   753→   753→  ItemInstance armor[4]`.
+   754→   754→- API:
+   755→   755→  - Lifecycle: `Player(Level*, bool isCreative)`, `~Player`, `reset()`,
+   756→   756→    `tick()`, `aiStep()`, `travel(xa,ya)`, `die(source)`, `remove()`, `respawn()`,
+   757→   757→    `resetPos(bool)`, `getRespawnPosition/setRespawnPosition`.
+   758→   758→  - Combat: `isShootable`, `isCreativeModeAllowed`, `isPlayer`, `isInWall`,
+   759→   759→    `hasResource(id)`, `hurt(source,dmg)`, `hurtArmor(dmg)`,
+   760→   760→    `setArmor(slot,item*)`, `getArmor(slot)`, `getArmorTypeHash`, `getArmorValue`,
+   761→   761→    `isHurt`, `attack(entity)`, `interact(entity)`, `getCarriedItem()`,
+   762→   762→    `canUseCarriedItemWhileMoving`, `canDestroy(Tile*)`, `getDestroySpeed(Tile*)`,
+   763→   763→    `getMaxHealth`.
+   764→   764→  - Item use: `isUsingItem()`, `getUseItem()`, `startUsingItem(instance,duration)`,
+   765→   765→    `stopUsingItem()`, `releaseUsingItem()`, `completeUsingItem()`,
+   766→   766→    `getUseItemDuration`, `getTicksUsingItem`.
+   767→   767→  - Score: `getScore()`, `awardKillScore(victim,score)`, `handleEntityEvent(id)`.
+   768→   768→  - Drop: `take(e,orgCount)`, `drop(ItemInstance*)`, `drop(ItemInstance*,randomly)`,
+   769→   769→    `reallyDrop(ItemEntity*)`.
+   770→   770→  - Crafting/container: `startCrafting(x,y,z,tableSize)`,
+   771→   771→    `startStonecutting(x,y,z)`, `openContainer(ChestTileEntity*)`,
+   772→   772→    `openFurnace(FurnaceTileEntity*)`, `tileEntityDestroyed(id)`,
+   773→   773→    `closeContainer()`, `openTextEdit(TileEntity*)`.
+   774→   774→  - Sleep: `isSleeping`, `startSleepInBed(x,y,z)→int`,
+   775→   775→    `stopSleepInBed(force,updateList,saveRespawn)`, `getSleepTimer()`,
+   776→   776→    `setAllPlayersSleeping`, `getSleepRotation`, `isSleepingLongEnough`.
+   777→   777→  - Misc: `displayClientMessage(id)`, `animateRespawn`,
+   778→   778→    `static animateRespawn(player,level)`, `getHeadHeight()`,
+   779→   779→    `getItemInHandIcon(item,layer)`, `getSelectedItem()→ItemInstance*`,
+   780→   780→    `getEntityTypeId() const {return 0;}`.
+   781→   781→
+   782→   782→## 2.29 world/entity/player/Inventory.h / .cpp
+   783→   783→- `class Inventory : public FillingContainer`. Constants:
+   784→   784→  - `INVENTORY_SIZE_DEMO = 27`
+   785→   785→  - `MAX_SELECTION_SIZE = 9`  (incl. "More..." slot in non-touch UI)
+   786→   786→  - `POP_TIME_DURATION = 5`
+   787→   787→- Ctor `Inventory(Player*, bool creativeMode)`.
+   788→   788→- API: `clearInventoryWithDefault`, `selectSlot(int)`, `getSelected()→ItemInstance*`,
+   789→   789→  `static getSelectionSize()`, `moveToSelectionSlot(sel,inv,propagate)`,
+   790→   790→  `moveToSelectedSlot(inv,propagate)`, `moveToEmptySelectionSlot(inv)`,
+   791→   791→  `removeItem(ItemInstance*)`, `doDrop(item,randomly)`, `stillValid(player)`,
+   792→   792→  `add(ItemInstance*)`, `getAttackDamage(entity)`, `getDestroySpeed(Tile*)`,
+   793→   793→  `canDestroy(Tile*)`.
+   794→   794→- Fields: `int selected; Player* player`.
+   795→   795→- `OldInventory.h` is a legacy stub (5×9 = 45 slots, no ItemInstance — only `int itemIds[9]`,
+   796→   796→  `int inventoryIds[45]`).
+   797→   797→
+   798→   798→## 2.30 world/entity/player/Abilities.h
+   799→   799→- Plain struct: `bool invulnerable, flying, mayfly, instabuild`.
+   800→   800→- `addSaveData(CompoundTag*)`, `loadSaveData(CompoundTag*)`.
+   801→   801→
+   802→   802→## 2.31 world/level/tile/Tile.h / .cpp
+   803→   803→- Class `Tile` (NOT a subclass of any base — pure class with virtual methods).
+   804→   804→- Nested `class SoundType { float volume, pitch; std::string breakSound, stepSound; }`
+   805→   805→  (10 static singletons: SOUND_NORMAL, WOOD, GRAVEL, GRASS, STONE, METAL, GLASS,
+   806→   806→  CLOTH, SAND, SILENT).
+   807→   807→- Render-shape constants: `SHAPE_INVISIBLE=-1`, `SHAPE_BLOCK=0`,
+   808→   808→  `SHAPE_CROSS_TEXTURE=1`, `SHAPE_TORCH=2`, `SHAPE_FIRE=3`, `SHAPE_WATER=4`,
+   809→   809→  `SHAPE_RED_DUST=5`, `SHAPE_ROWS=6`, `SHAPE_DOOR=7`, `SHAPE_LADDER=8`,
+   810→   810→  `SHAPE_RAIL=9`, `SHAPE_STAIRS=10`, `SHAPE_FENCE=11`, `SHAPE_LEVER=12`,
+   811→   811→  `SHAPE_CACTUS=13`, `SHAPE_BED=14`, `SHAPE_DIODE=15`, `SHAPE_IRON_FENCE=18`,
+   812→   812→  `SHAPE_STEM=19`, `SHAPE_FENCE_GATE=21`, `SHAPE_ENTITYTILE_ANIMATED=22`.
+   813→   813→- `NUM_BLOCK_TYPES = 256`.
+   814→   814→- Static registries:
+   815→   815→  - `Tile* tiles[256]` — the master tile list (no separate TileList.h).
+   816→   816→  - `bool sendTileData[256], shouldTick[256], solid[256], isEntityTile[256],
+   817→   817→    translucent[256]; int lightBlock[256], lightEmission[256]`.
+   818→   818→  - ~75 named `Tile*`/`LeafTile*`/`FireTile*` static pointers (rock, grass, dirt,
+   819→   819→    stoneBrick, wood, sapling, unbreakable, water, calmWater, lava, calmLava, sand,
+   820→   820→    gravel, goldOre, ironOre, coalOre, treeTrunk, leaves, sponge, web, glass,
+   821→   821→    thinGlass, lapisOre, lapisBlock, dispenser, sandStone, musicBlock, bed,
+   822→   822→    tallgrass, cloth, flower, rose, mushroom1, mushroom2, goldBlock, ironBlock,
+   823→   823→    stoneSlab, stoneSlabHalf, redBrick, tnt, bookshelf, mossStone, obsidian, torch,
+   824→   824→    fire, mobSpawner, stairs_wood, chest, redStoneDust, emeraldOre, emeraldBlock,
+   825→   825→    workBench, stonecutterBench, crops, farmland, furnace, furnace_lit, sign,
+   826→   826→    door_wood, ladder, rail, stairs_stone, wallSign, lever, pressurePlate_stone,
+   827→   827→    door_iron, pressurePlate_wood, redStoneOre, redStoneOre_lit, notGate_off/on,
+   828→   828→    button, topSnow, ice, snow, cactus, clay, reeds, recordPlayer, fence,
+   829→   829→    stairs_brick, fenceGate, pumpkin, hellRock, hellSand, lightGem, portalTile,
+   830→   830→    litPumpkin, cake, diode_off/on, trapdoor, stoneBrickSmooth, grass_carried,
+   831→   831→    leaves_carried, melon, melonStem, netherReactor, glowingObsidian,
+   832→   832→    stairs_stoneBrickSmooth, netherBrick, netherrack, stairs_netherBricks,
+   833→   833→    stairs_sandStone, quartzBlock, stairs_quartz, invisible_bedrock,
+   834→   834→    info_updateGame1/2, info_reserved6).
+   835→   835→- Static lifecycle: `initTiles()` (Tile.cpp:160-300) constructs every tile and
+   836→   836→  registers it; `teardownTiles()` deletes; `transformToValidBlockId(id[,x,y,z])`
+   837→   837→  swaps invalid IDs for `info_updateGame1/2`.
+   838→   838→- Ctor: `Tile(int id, const Material* material)` or
+   839→   839→  `Tile(int id, int tex, const Material* material)`. The constructor only stores
+   840→   840→  `id` (const) and `material` (const ptr); the actual registration happens in
+   841→   841→  private `init()` (called by every chained builder).
+   842→   842→- Builder pattern (each returns `Tile*`):
+   843→   843→  - `init()`, `setSoundType(SoundType&)`, `setLightBlock(int)`,
+   844→   844→    `setLightEmission(float)`, `setExplodeable(float)`,
+   845→   845→    `setDestroyTime(float)`, `setTicking(bool)`, `setCategory(int)`,
+   846→   846→    `setDescriptionId(string)`.
+   847→   847→- Public fields: `int tex; const int id; float xx0,yy0,zz0,xx1,yy1,zz1;
+   848→   848→  const SoundType* soundType; float gravity; const Material* const material;
+   849→   849→  float friction; float destroySpeed; float explosionResistance; int category;`.
+   850→   850→  Protected: `AABB tmpBB; static const int RENDERLAYER_OPAQUE=0,
+   851→   851→  RENDERLAYER_ALPHATEST=1, RENDERLAYER_BLEND=2`.
+   852→   852→- Virtual API:
+   853→   853→  - Geometry: `isCubeShaped()`, `getRenderShape()`, `setShape(x0,y0,z0,x1,y1,z1)`,
+   854→   854→    `updateShape(level,x,y,z)`, `updateDefaultShape()`.
+   855→   855→  - Light: `addLights(level,x,y,z)`, `getBrightness(level,x,y,z)`,
+   856→   856→    `static isFaceVisible(level,x,y,z,f)`, `shouldRenderFace(level,x,y,z,face)`,
+   857→   857→    `getRenderLayer()`.
+   858→   858→  - Texture: `getTexture(face)`, `getTexture(face,data)`,
+   859→   859→    `getTexture(level,x,y,z,face)`, `getColor(level,x,y,z)`.
+   860→   860→  - Collision: `getAABB(level,x,y,z)→AABB*`, `addAABBs(level,x,y,z,box,boxes)`,
+   861→   861→    `getTileAABB(level,x,y,z)→AABB`.
+   862→   862→  - Solidity: `isSolidRender()`.
+   863→   863→  - Pick/place: `mayPick()`, `mayPick(data,liquid)`, `mayPlace(level,x,y,z,face)`,
+   864→   864→    `mayPlace(level,x,y,z)`.
+   865→   865→  - Tick: `getTickDelay()`, `tick(level,x,y,z,Random*)`,
+   866→   866→    `animateTick(level,x,y,z,Random*)`.
+   867→   867→  - Lifecycle: `destroy(level,x,y,z,data)`, `neighborChanged(level,x,y,z,type)`,
+   868→   868→    `onPlace(level,x,y,z)`, `onRemove(level,x,y,z)`, `wasExploded(level,x,y,z)`.
+   869→   869→  - Resource drop: `getResource(data,Random*)`, `getResourceCount(Random*)`,
+   870→   870→    `spawnResources(level,x,y,z,data)`, `spawnResources(level,x,y,z,data,odds)`,
+   871→   871→    `spawnBurnResources(level,x,y,z)`, `popResource(level,x,y,z,ItemInstance)`,
+   872→   872→    `getSpawnResourcesAuxValue(data)`.
+   873→   873→  - Mining: `getDestroyProgress(Player*)`, `getExplosionResistance(Entity*)`.
+   874→   874→  - Interaction: `use(level,x,y,z,Player*)`, `stepOn(level,x,y,z,Entity*)`,
+   875→   875→    `fallOn(level,x,y,z,Entity*,fallDistance)`,
+   876→   876→    `getPlacedOnFaceDataValue(level,x,y,z,face,clickX,clickY,clickZ,itemValue)`,
+   877→   877→    `setPlacedBy(level,x,y,z,Mob*)`, `prepareRender(level,x,y,z)`,
+   878→   878→    `attack(level,x,y,z,Player*)`, `handleEntityInside(level,x,y,z,Entity*,Vec3&)`,
+   879→   879→    `entityInside(level,x,y,z,Entity*)`, `playerDestroy(level,player,x,y,z,data)`,
+   880→   880→    `canSurvive(level,x,y,z)`.
+   881→   881→  - Redstone: `isSignalSource()`, `getSignal(level,x,y,z)`,
+   882→   882→    `getSignal(level,x,y,z,dir)`, `getDirectSignal(level,x,y,z,dir)`.
+   883→   883→  - Naming: `getName()`, `getDescriptionId()`, `setDescriptionId(string)`.
+   884→   884→  - Event: `triggerEvent(level,x,y,z,b0,b1)`.
+   885→   885→  - Ray-pick: `clip(level,xt,yt,zt,a,b)→HitResult`.
+   886→   886→
+   887→   887→## 2.32 world/item/Item.h / .cpp
+   888→   888→- Class `Item`. Constants: `MAX_STACK_SIZE=64`, `MAX_ITEMS=512`, `ICON_COLUMNS=16`,
+   889→   889→  `ICON_DESCRIPTION_PREFIX="item."`.
+   890→   890→- Nested `class Tier { int level, uses; float speed; int damage; }` with static
+   891→   891→  singletons `WOOD(0,59,2,0)`, `STONE(1,131,4,1)`, `IRON(2,250,6,2)`,
+   892→   892→  `EMERALD(3,1561,8,3)`, `GOLD(0,32,12,0)`. API: `getUses/getSpeed/
+   893→   893→  getAttackDamageBonus/getLevel`.
+   894→   894→- Static registry: `Item* items[MAX_ITEMS=512]`. ~150 named `Item*` statics
+   895→   895→  (shovel/pickAxe/hatchet × iron/wood/stone/emerald/gold, sword × 5 tiers,
+   896→   896→  flintAndSteel, apple, bow, arrow, coal, emerald, ironIngot, goldIngot,
+   897→   897→  stick, bowl, mushroomStew, string, feather, sulphur, hoe × 5, seeds_wheat,
+   898→   898→  wheat, bread, helmet/chestplate/leggings/boots × cloth/chain/iron/diamond/gold
+   899→   899→  = 20 armor pieces, flint, porkChop_raw/cooked, painting, sign, door_wood/iron,
+   900→   900→  snowBall, leather, brick, clay, reeds, paper, book, slimeBall, egg, compass,
+   901→   901→  clock, yellowDust, melon, seeds_melon, dye_powder, bone, sugar, bed, shears,
+   902→   902→  beef_raw/cooked, chicken_raw/cooked, netherbrick, netherQuartz, camera).
+   903→   903→- Static lifecycle: `initItems()` (Item.cpp:160-294) constructs every item;
+   904→   904→  `teardownItems()` deletes. Items with ID 256..512 auto-reserved for tiles
+   905→   905→  (TileItem + variants). Items with `MAX_ITEMS` slice 256..511 are tiles.
+   906→   906→- Ctor: `Item(int id)` (stores `id = 256 + id` — i.e. constructor receives the
+   907→   907→  "tile-offset" id, but tiles share the same registry: Item::items[tileId] is the
+   908→   908→  TileItem for that tile).
+   909→   909→- Builder: `setIcon(int)`, `setIcon(col,row)`, `setMaxStackSize(int)`,
+   910→   910→  `setCategory(int)`, `setMaxDamage(int)`, `setStackedByData(bool)`,
+   911→   911→  `setDescriptionId(string)`, `setCraftingRemainingItem(Item*)`, `handEquipped()`.
+   912→   912→- Public fields: `const int id; int maxDamage; int icon; int category`.
+   913→   913→- Protected: `int maxStackSize; bool _handEquipped; bool _isStackedByData;
+   914→   914→  Item* craftingRemainingItem; std::string descriptionId`.
+   915→   915→- Virtual API:
+   916→   916→  - `getIcon(auxValue)`, `getMaxStackSize()`, `getMaxDamage()`, `canBeDepleted()`,
+   917→   917→    `isStackedByData()`.
+   918→   918→  - `useOn(itemInstance, level, x,y,z, face)` and `useOn(itemInstance, player,
+   919→   919→    level, x,y,z, face, clickX,clickY,clickZ)` — placement/interaction.
+   920→   920→  - `use(itemInstance, level, player)→ItemInstance*` — right-click in air.
+   921→   921→  - `useTimeDepleted(itemInstance, level, player)→ItemInstance` — called when
+   922→   922→    eating/drawing completes.
+   923→   923→  - `releaseUsing(itemInstance, level, player, durationLeft)` — bow release.
+   924→   924→  - `getUseDuration(itemInstance)`, `getUseAnimation()→UseAnim::UseAnimation`.
+   925→   925→  - `getDestroySpeed(itemInstance, Tile*)`, `canDestroySpecial(Tile*)`,
+   926→   926→    `mineBlock(itemInstance, tile, x,y,z)`, `hurtEnemy(itemInstance, Mob*)`,
+   927→   927→    `interactEnemy(itemInstance, Mob*)`, `getAttackDamage(Entity*)`.
+   928→   928→  - `isHandEquipped()`, `isMirroredArt()`, `isFood()`, `isArmor()`,
+   929→   929→    `hasCraftingRemainingItem()`, `getCraftingRemainingItem()`,
+   930→   930→    `getLevelDataForAuxValue(int)`.
+   931→   931→  - `getName()→string`, `getDescription()/getDescriptionId()/getDescriptionId(instance)`.
+   932→   932→
+   933→   933→## 2.33 world/item/TileItem.h
+   934→   934→- `class TileItem : public Item`. Field `int tileId` (= `id + 256`).
+   935→   935→- Ctor `TileItem(int id_) : super(id_) { tileId = id_ + 256;
+   936→   936→  setIcon(Tile::tiles[id_+256]->getTexture(2)); }`.
+   937→   937→- `useOn(itemInstance, player, level, x, y, z, face, clickX, clickY, clickZ)` —
+   938→   938→  full placement logic: skip immutableWorld (except leaves + plant), adjust
+   939→   939→  neighbor coords per Facing, call `level->mayPlace(tileId, x,y,z, false, face)`,
+   940→   940→  `level->setTileAndData(tileId, data)`, `tile->setPlacedBy(level,x,y,z,player)`,
+   941→   941→  play stepSound, decrement count.
+   942→   942→- `getDescriptionId(instance)` and `getDescriptionId()` delegate to
+   943→   943→  `Tile::tiles[tileId]->getDescriptionId()`.
+   944→   944→
+   945→   945→## 2.34 world/item/ItemInstance.h / .cpp
+   946→   946→- `class ItemInstance` (plain struct — "stack"). Public fields: `int count; int id;`
+   947→   947→  Private: `int auxValue` (was "damage", now multi-purpose per item/tile).
+   948→   948→- Ctors: `ItemInstance()`, `ItemInstance(const Tile*)`, `(Tile*, count)`,
+   949→   949→  `(Tile*, count, aux)`, `ItemInstance(const Item*)`, `(Item*, count)`,
+   950→   950→  `(Item*, count, aux)`, `(int id, count, damage)`, copy ctor.
+   951→   951→- API:
+   952→   952→  - `init(id, count, damage)`, `isNull()`, `setNull()`, `operator==`,
+   953→   953→    `matches(b)`, `remove(count)→ItemInstance`.
+   954→   954→  - `getItem()→Item*`, `getIcon()`, `getDestroySpeed(Tile*)`,
+   955→   955→    `useOn(player, level, x,y,z, face, clickX, clickY, clickZ)→bool`,
+   956→   956→    `use(level, player)→ItemInstance*`.
+   957→   957→  - `isStackedByData()`, `isStackable()`, `getMaxStackSize()`,
+   958→   958→    `static isStackable(a,b)`, `static matches(a,b)`, `static matchesNulls(a,b)`.
+   959→   959→  - `isDamaged()`, `isDamageableItem()`, `getDamageValue()`, `getMaxDamage()`,
+   960→   960→    `getAuxValue()`, `setAuxValue(int)`, `hurt(int)`, `hurtEnemy(Mob*)`,
+   961→   961→    `mineBlock(tile,x,y,z)`, `getAttackDamage(Entity*)`, `canDestroySpecial(Tile*)`,
+   962→   962→    `snap(Player*)` (eats item), `useTimeDepleted(level, player)`,
+   963→   963→    `interactEnemy(Mob*)`.
+   964→   964→  - `copy()→ItemInstance*` (NEW), `static clone(p)`, `static cloneSafe(p)`,
+   965→   965→    `sameItem(b)`.
+   966→   966→  - `getDescriptionId()`, `getName()`, `setDescriptionId(string)`, `toString()`.
+   967→   967→  - `save(CompoundTag*)`, `load(CompoundTag*)`, `static fromTag(tag)`.
+   968→   968→  - `releaseUsing(level, player, durationLeft)`, `getUseDuration()`,
+   969→   969→    `getUseAnimation()`.
+   970→   970→  - `static isArmorItem(instance)`.
+   971→   971→
+   972→   972→## 2.35 world/item/ItemCategory.h
+   973→   973→- 5 categories bit-flag: `Structures=1, Tools=2, FoodArmor=4, Decorations=8,
+   974→   974→  Mechanisms=16`. Used in creative inventory tab filtering.
+   975→   975→
+   976→   976→## 2.36 world/item/UseAnim.h
+   977→   977→- `enum UseAnimation { none, eat, drink, block, bow }`.
+   978→   978→
+   979→   979→## 2.37 world/Container.h
+   980→   980→- `class ContainerType { static const int NONE=-9, INVENTORY=-1, CONTAINER=0,
+   981→   981→  WORKBENCH=1, FURNACE=2, TRAP=3, ENCHANTMENT=4, BREWING_STAND=5; }`.
+   982→   982→- `class Container { static const int LARGE_MAX_STACK_SIZE=64; int containerId,
+   983→   983→  containerType; virtual ItemInstance* getItem(int)=0; setItem(int, ItemInstance*)=0;
+   984→   984→  removeItem(int,int)=0; getName()=0; getContainerSize()=0; getMaxStackSize()=0;
+   985→   985→  stillValid(Player*)=0; startOpen/stopOpen()=0; vector<ItemInstance> getSlotCopies(); }`.
+   986→   986→
+   987→   987→## 2.38 world/inventory/FillingContainer.h
+   988→   988→- `class FillingContainer : public Container`. Constants:
+   989→   989→  `MAX_INVENTORY_STACK_SIZE = 254`. Ctor `(numTotalSlots, numLinkedSlots,
+   990→   990→  containerType, isCreative)`.
+   991→   991→- Public: `hasResource(type)`, `removeResource(type/item[,exact])`,
+   992→   992→  `swapSlots(from,to)`, `add(ItemInstance*)→bool`, `getSlotList(slot)`,
+   993→   993→  `dropSlot(slot, onlyClearContainer, randomly)`, `dropAll(onlyClear)`,
+   994→   994→  `removeItem(slot, count)→ItemInstance`, `clearSlot(slot)`, `clearInventory()`,
+   995→   995→  `clearInventoryWithDefault()`, `save(ListTag*)`, `load(ListTag*)`,
+   996→   996→  `replace(items, count)`, `replaceSlot(slot, item*)`, `setItem/getItem`,
+   997→   997→  `getName`, `getContainerSize`, `getMaxStackSize`, `setContainerChanged()`,
+   998→   998→  `stillValid`, `contains(itemInstance)`, `startOpen/stopOpen(){}`,
+   999→   999→  `doDrop(item, randomly)`, `getSlot(tileId, data)`, `getNonEmptySlot`,
+  1000→  1000→  `getNumEmptySlots`, `getNumLinkedSlots`.
+  1001→  1001→- Linked-slot system (hotbar linkage):
+  1002→  1002→  - `linkSlot(selectionSlot, inventorySlot, propagate)`,
+  1003→  1003→    `linkEmptySlot(inventorySlot)`, `getLinked(slot)`,
+  1004→  1004→    `compressLinkedSlotList(slot)`.
+  1005→  1005→  - `LinkedSlot { int inventorySlot; }` struct; `LinkedSlot* linkedSlots;
+  1006→  1006→    int numTotalSlots; const int numLinkedSlots;`.
+  1007→  1007→- Protected: `ItemList items; bool _isCreative`.
+  1008→  1008→
+  1009→  1009→## 2.39 world/inventory/Inventory.h (player) — see 2.30
+  1010→  1010→
+  1011→  1011→## 2.40 world/inventory/CraftingContainer.h
+  1012→  1012→- `class CraftingContainer : public Container` (ContainerType::WORKBENCH).
+  1013→  1013→  Ctor `(w, h)`. Stores `ItemInstance* items = new ItemInstance[w*h]`.
+  1014→  1014→  API: `getItem(slot) / getItem(x,y)`, `setItem(slot, item)`,
+  1015→  1015→  `removeItem(slot, count)`, `getContainerSize=size=w*h`, `getMaxStackSize=64`,
+  1016→  1016→  `getName="Crafting"`, `stillValid=true`.
+  1017→  1017→
+  1018→  1018→## 2.41 world/inventory/BaseContainerMenu.h / ContainerMenu.h / FurnaceMenu.h
+  1019→  1019→- `class IContainerListener` (refreshContainer, slotChanged, setContainerData).
+  1020→  1020→- `class BaseContainerMenu { int containerId, containerType; IContainerListener*
+  1021→  1021→  listener; ItemList lastSlots; getItems()=0; setSlot(slot, item)=0; setData(id,
+  1022→  1022→  value){}; setListener; broadcastChanges; isResultSlot(slot){return false;}
+  1023→  1023→  tileEntityDestroyedIsInvalid(id)=0; }`.
+  1024→  1024→- `class ContainerMenu : public BaseContainerMenu` — binds to a `Container*`
+  1025→  1025→  + `int tileEntityId`. `setSlot(slot, item)`, `getItems`, `tileEntityDestroyedIsInvalid(id)`.
+  1026→  1026→- `class FurnaceMenu : public BaseContainerMenu` — binds to `FurnaceTileEntity*`.
+  1027→  1027→  `setSlot`, `setData(id, value)` (cook progress), `getItems`, `broadcastChanges`,
+  1028→  1028→  `setListener`, `tileEntityDestroyedIsInvalid(id)`. Tracks `lastTickCount,
+  1029→  1029→  lastLitTime, lastLitDuration`.
+  1030→  1030→
+  1031→  1031→## 2.42 world/phys/Vec3.h
+  1032→  1032→- `class Vec3 { float x, y, z; }`. Ctor `Vec3()` (zero) and `Vec3(x,y,z)`
+  1033→  1033→  (with -0.0 → 0.0 normalization).
+  1034→  1034→- API: `set(x,y,z)`, `operator+`, `operator+=`, `operator-`, `operator-=`,
+  1035→  1035→  `operator*(float)`, `operator*=`, `normalized()` (dist<0.0001 → zero),
+  1036→  1036→  `dot(p)`, `cross(p)`, `add(x,y,z)`, `addSelf(x,y,z)`, `sub(x,y,z)`,
+  1037→  1037→  `subSelf(x,y,z)`, `negate()`, `negated()`, `distanceTo(p)`,
+  1038→  1038→  `distanceToSqr(p)`, `distanceToSqr(x,y,z)`, `length()`,
+  1039→  1039→  `clipX(b, xt, out)→bool`, `clipY(b, yt, out)→bool`, `clipZ(b, zt, out)→bool`
+  1040→  1040→  (ray-plane intersection param), `lerp(v, a)`, `xRot(degs)`, `yRot(degs)`,
+  1041→  1041→  `zRot(degs)`, `static fromPolarXY(angle, radius)`, `toString`.
+  1042→  1042→
+  1043→  1043→## 2.43 world/phys/AABB.h
+  1044→  1044→- `class AABB { float x0,y0,z0,x1,y1,z1; }`. Ctor default (0,0,0,1,1,1) and
+  1045→  1045→  6-float. API: `set(...)`, `expand(xa,ya,za)` (directional), `grow(xa,ya,za)`
+  1046→  1046→  (symmetric), `cloneMove(xa,ya,za)`, `clipXCollide(c, xa)` /
+  1047→  1047→  `clipYCollide(c, ya)` / `clipZCollide(c, za)` (sliding collision response),
+  1048→  1048→  `intersects(c)`, `intersectsInner(c)`, `move(xa,ya,za)`,
+  1049→  1049→  `intersects(x02,y02,z02,x12,y12,z12)`, `contains(Vec3)`, `getSize()`,
+  1050→  1050→  `shrink(xa,ya,za)`, `copy()`, `clip(a,b)→HitResult` (ray-box), `set(b)`,
+  1051→  1051→  `toString`.
+  1052→  1052→
+  1053→  1053→## 2.44 world/phys/HitResult.h
+  1054→  1054→- `enum HitResultType { TILE, ENTITY, NO_HIT }`.
+  1055→  1055→- `class HitResult { HitResultType type; int x,y,z,f; Vec3 pos; Entity* entity;
+  1056→  1056→  bool indirectHit; }`. Ctors: default, `(x,y,z,f,pos)`, `(entity)`, copy.
+  1057→  1057→  `isHit() { return type != NO_HIT; }`, `distanceTo(Entity*)`.
+  1058→  1058→
+  1059→  1059→## 2.45 world/food/SimpleFoodData.h / .cpp
+  1060→  1060→- `class SimpleFoodData { int foodLevel; }`. Ctor `SimpleFoodData()`.
+  1061→  1061→- API: `eat(int food)` (adds nutrition), `eat(FoodItem* item)` (uses item's
+  1062→  1062→  nutrition), `tick(Player*)` (regen / starve per FoodConstants).
+  1063→  1063→
+  1064→  1064→## 2.46 world/food/FoodConstants.h
+  1065→  1065→- `MAX_FOOD = 20`, `HEALTH_TICK_COUNT = 80`, `HEALTH_TICK_COUNT_SIMPLE = 5`,
+  1066→  1066→  `HEAL_LEVEL = 18`.
+  1067→  1067→
+  1068→  1068→# 3. Tile subclasses found (file list + class)
+  1069→  1069→
+  1070→  1070→Tile subclasses in `world/level/tile/` (file basename = class name unless noted):
+  1071→  1071→
+  1072→  1072→| File                       | Class            | Parent          | Notes |
+  1073→  1073→|----------------------------|------------------|-----------------|-------|
+  1074→  1074→| Tile.{h,cpp}               | Tile             | (none)          | base; tiles[256] registry |
+  1075→  1075→| StoneTile.h                | StoneTile        | Tile            | drops `stoneBrick` |
+  1076→  1076→| DirtTile.h                 | DirtTile         | Tile            | drops `dirt` |
+  1077→  1077→| GrassTile.{h,cpp}          | GrassTile        | Tile            | topTexture is grass, side blends; spreads to dirt; tick growth |
+  1078→  1078→| TreeTile.h                 | TreeTile         | Tile            | trunk, bark texture by data (oak/pine/birch) |
+  1079→  1079→| LeafTile.h                 | LeafTile         | Tile            | data bits PERSISTENT_LEAF_BIT, EVERGREEN_LEAF, BIRCH_LEAF; decays |
+  1080→  1080→| Bush.h                     | Bush             | Tile            | flowers/rose; SHAPE_CROSS_TEXTURE |
+  1081→  1081→| Mushroom.{h,cpp}           | Mushroom         | Tile            | light-emitting variant for red mushroom |
+  1082→  1082→| Sapling.h                  | Sapling          | Tile            | grows into TreeFeature |
+  1083→  1083→| TallGrass.{h,cpp}          | TallGrass        | Tile            | data → fern/grass |
+  1084→  1084→| HeavyTile.{h,cpp}          | HeavyTile        | Tile            | sand, falls like gravity |
+  1085→  1085→| SandTile.{h,cpp}           | SandTile         | HeavyTile       | sand variant |
+  1086→  1086→| GravelTile.h               | GravelTile       | HeavyTile       | gravel; flint drop chance |
+  1087→  1087→| OreTile.h                  | OreTile          | Tile            | gold/iron/coal/lapis/diamond/redstone ore |
+  1088→  1088→| RedStoneOreTile.h          | RedStoneOreTile  | Tile            | redstone ore (lit variant) |
+  1089→  1089→| MetalTile.h                | MetalTile        | Tile            | gold/iron/diamond blocks |
+  1090→  1090→| ClothTile.h                | ClothTile        | Tile            | wool; data = color |
+  1091→  1091→| GlassTile.h                | GlassTile        | Tile            | glass; transparent |
+  1092→  1092→| ThinFenceTile.h            | ThinFenceTile    | Tile            | glass pane; SHAPE_IRON_FENCE |
+  1093→  1093→| HalfTransparentTile.h      | HalfTransparentTile | Tile         | leaves-like |
+  1094→  1094→| TransparentTile.h          | TransparentTile  | Tile            | ice-like |
+  1095→  1095→| IceTile.h                  | IceTile          | Tile            | ice; melts |
+  1096→  1096→| SnowTile.h                 | SnowTile         | Tile            | snow block |
+  1097→  1097→| TopSnowTile.h              | TopSnowTile      | Tile            | snow layer (data = thickness) |
+  1098→  1098→| CactusTile.h               | CactusTile       | Tile            | SHAPE_CACTUS; damages entities |
+  1099→  1099→| ClayTile.h                 | ClayTile         | Tile            | drops 4 clay balls |
+  1100→  1100→| ReedTile.h                 | ReedTile         | Tile            | sugar cane; can grow up to 3 high |
+  1101→  1101→| LadderTile.h               | LadderTile       | Tile            | SHAPE_LADDER; climbable |
+  1102→  1102→| FenceTile.h                | FenceTile        | Tile            | SHAPE_FENCE; 1×1.5 collision |
+  1103→  1103→| FenceGateTile.h            | FenceGateTile    | Tile            | SHAPE_FENCE_GATE; open/close |
+  1104→  1104→| TrapDoorTile.{h,cpp}       | TrapDoorTile     | Tile            | SHAPE_DOOR; wood trapdoor |
+  1105→  1105→| DoorTile.{h,cpp}           | DoorTile         | Tile            | wood/iron door; 2-tile tall |
+  1106→  1106→| TorchTile.h                | TorchTile        | Tile            | SHAPE_TORCH; emits light |
+  1107→  1107→| LightGemTile.{h,cpp}       | LightGemTile     | Tile            | glowstone; full-bright |
+  1108→  1108→| TntTile.h                  | TntTile          | Tile            | TNT; destroys → PrimedTnt |
+  1109→  1109→| WebTile.h                  | WebTile          | Tile            | cobweb; slows entities |
+  1110→  1110→| BookshelfTile.h            | BookshelfTile    | Tile            | 3-texture (top/side/bottom) |
+  1111→  1111→| ObsidianTile.h             | ObsidianTile     | Tile            | obsidian; glowingObsidian is a subclass instance |
+  1112→  1112→| InvisibleTile.h            | InvisibleTile    | Tile            | invisible bedrock; unbreakable |
+  1113→  1113→| SandStoneTile.h            | SandStoneTile    | Tile            | 3 textures (top/side/bottom) |
+  1114→  1114→| MultiTextureTile.h         | MultiTextureTile | Tile            | stoneBrickSmooth; arbitrary texture list |
+  1115→  1115→| CarriedTile.h              | CarriedTile      | Tile            | grass_carried (item-form-only) |
+  1116→  1116→| MelonTile.{h,cpp}          | MelonTile        | Tile            | melon block; drops melon slices |
+  1117→  1117→| StemTile.{h,cpp}           | StemTile         | Tile            | SHAPE_STEM; grows melon |
+  1118→  1118→| CropTile.{h,cpp}           | CropTile         | Tile            | wheat; data = growth stage |
+  1119→  1119→| FarmTile.h                 | FarmTile         | Tile            | farmland; moisture data |
+  1120→  1120→| BedTile.{h,cpp}            | BedTile          | Tile            | SHAPE_BED; 2-tile |
+  1121→  1121→| WorkbenchTile.h            | WorkbenchTile    | EntityTile      | crafting table |
+  1122→  1122→| StonecutterTile.h          | StonecutterTile  | EntityTile      | MCPE-exclusive crafting table |
+  1123→  1123→| FurnaceTile.{h,cpp}        | FurnaceTile      | EntityTile      | furnace + furnace_lit (bool lit) |
+  1124→  1124→| ChestTile.{h,cpp}          | ChestTile        | EntityTile      | chest; opens container; EVENT_SET_OPEN_COUNT=1 |
+  1125→  1125→| SignTile.h                 | SignTile         | EntityTile      | standing/wall sign (bool standing) |
+  1126→  1126→| EntityTile.{h,cpp}         | EntityTile       | Tile            | base for chest/furnace/sign/workbench/stonecutter; newTileEntity()=0 |
+  1127→  1127→| DirectionalTile.h          | DirectionalTile  | Tile            | base for torch/ladder/lever/etc |
+  1128→  1128→| FireTile.h                 | FireTile         | Tile            | SHAPE_FIRE; tick disabled (`//@fire`), flame/burn odds tables |
+  1129→  1129→| LiquidTile.h               | LiquidTile (abstract) | Tile       | SHAPE_WATER; getFlow, getHeight |
+  1130→  1130→| LiquidTileDynamic.h        | LiquidTileDynamic | LiquidTile      | spreads (water=5 tick, lava=30 tick) |
+  1131→  1131→| LiquidTileStatic.h         | LiquidTileStatic | LiquidTile      | non-flowing liquid |
+  1132→  1132→| NetherReactor.{h,cpp}      | NetherReactor    | Tile            | MCPE nether reactor core |
+  1133→  1133→| QuartzBlockTile.h          | QuartzBlockTile  | Tile            | quartz block (data = subtype) |
+  1134→  1134→| StairTile.{h,cpp}          | StairTile        | Tile            | SHAPE_STAIRS; wraps a `Tile* base`; UPSIDEDOWN_BIT=4 |
+  1135→  1135→| StoneSlabTile.{h,cpp}      | StoneSlabTile    | Tile            | half-slab vs full-slab (bool isDouble); TYPE_MASK, TOP_SLOT_BIT |
+  1136→  1136→
+  1137→  1137→Tile subclass hierarchy:
+  1138→  1138→```
+  1139→  1139→Tile
+  1140→  1140→├── StoneTile, DirtTile, GrassTile, TreeTile, LeafTile, Bush, Mushroom,
+  1141→  1141→│   Sapling, TallGrass, OreTile, RedStoneOreTile, MetalTile, ClothTile,
+  1142→  1142→│   GlassTile, IceTile, SnowTile, TopSnowTile, CactusTile, ClayTile,
+  1143→  1143→│   ReedTile, LadderTile, FenceTile, FenceGateTile, TrapDoorTile, DoorTile,
+  1144→  1144→│   TorchTile, LightGemTile, TntTile, WebTile, BookshelfTile, ObsidianTile,
+  1145→  1145→│   InvisibleTile, SandStoneTile, MultiTextureTile, CarriedTile, MelonTile,
+  1146→  1146→│   StemTile, CropTile, FarmTile, BedTile, FireTile, NetherReactor,
+  1147→  1147→│   QuartzBlockTile, StairTile, StoneSlabTile, HalfTransparentTile,
+  1148→  1148→│   TransparentTile, ThinFenceTile, DirectionalTile
+  1149→  1149→├── HeavyTile
+  1150→  1150→│   └── SandTile, GravelTile
+  1151→  1151→├── EntityTile        (spawns a TileEntity when placed)
+  1152→  1152→│   ├── ChestTile, FurnaceTile, SignTile, WorkbenchTile, StonecutterTile
+  1153→  1153→└── LiquidTile (abstract)
+  1154→  1154→    ├── LiquidTileDynamic (water/lava flowing)
+  1155→  1155→    └── LiquidTileStatic  (water/lava spring/calm)
+  1156→  1156→```
+  1157→  1157→
+  1158→  1158→Tile-entity subclasses in `world/level/tile/entity/`:
+  1159→  1159→- `TileEntity` (base): type, x/y/z, data, level, rendererId; tick(){}, save/load.
+  1160→  1160→  `TileEntityType` enum: `Undefined=0, Furnace=1, Chest=2, NetherReactor=3, Sign=4`.
+  1161→  1161→- `FurnaceTileEntity` (cook/burn timers, fuel), `ChestTileEntity` (item list +
+  1162→  1162→  openCount), `SignTileEntity` (4 text lines), `NetherReactorTileEntity`.
+  1163→  1163→- `TileEntityFactory::createTileEntity(int type)` factory.
+  1164→  1164→
+  1165→  1165→# 4. Entity subclasses found
+  1166→  1166→
+  1167→  1167→Entity hierarchy & subclass list (file basename = class name):
+  1168→  1168→
+  1169→  1169→```
+  1170→  1170→Entity
+  1171→  1171→├── ItemEntity            (world/entity/item/)   dropped item stack
+  1172→  1172→├── FallingTile           (world/entity/item/)   sand/gravel/anvil falling block
+  1173→  1173→├── PrimedTnt             (world/entity/item/)   lit TNT (life timer → explode)
+  1174→  1174→├── Arrow                 (world/entity/projectile/)  bow projectile
+  1175→  1175→├── Throwable (abstract) (world/entity/projectile/)
+  1176→  1176→│   ├── Snowball          (projectile/Snowball.h)
+  1177→  1177→│   └── ThrownEgg         (projectile/ThrownEgg.h)
+  1178→  1178→├── HangingEntity         (world/entity/HangingEntity.h)
+  1179→  1179→│   └── Painting          (Motive.h — list of named paintings)
+  1180→  1180→└── Mob                   (world/entity/Mob.h)
+  1181→  1181→    ├── FlyingMob         (world/entity/FlyingMob.h)  — abstract flying mob
+  1182→  1182→    └── PathfinderMob     (PathfinderMob.h) — has navigation + attackTarget
+  1183→  1183→        ├── AgableMob      (AgableMob.h) — has age/baby state
+  1184→  1184→        │   └── Animal    (animal/Animal.h)
+  1185→  1185→        │       ├── Pig       (MobTypes::Pig=12)      — saddleable
+  1186→  1186→        │       ├── Cow       (MobTypes::Cow=11)      — milkable
+  1187→  1187→        │       ├── Sheep     (MobTypes::Sheep=13)    — shearable, 16 colors
+  1188→  1188→        │       └── Chicken   (MobTypes::Chicken=10)  — lays eggs, flaps
+  1189→  1189→        ├── WaterAnimal    (animal/WaterAnimal.h, BaseWaterCreature=3)
+  1190→  1190→        ├── Monster        (monster/Monster.h, BaseEnemy=1)
+  1191→  1191→        │   ├── Zombie     (MobTypes::Zombie=32) — walks + burns in day
+  1192→  1192→        │   ├── PigZombie : Zombie (MobTypes::PigZombie=36) — Nether, angry state
+  1193→  1193→        │   ├── Creeper    (MobTypes::Creeper=33) — swell/explode
+  1194→  1194→        │   ├── Skeleton   (MobTypes::Skeleton=34) — bow, burns in day
+  1195→  1195→        │   └── Spider     (MobTypes::Spider=35) — climbs walls
+  1196→  1196→        └── Player         (entity/player/Player.h, MAX_HEALTH=20)
+  1197→  1197→            ├── LocalPlayer   (client/player/LocalPlayer.h)  — driven by IMoveInput
+  1198→  1198→            └── RemotePlayer  (client/player/RemotePlayer.h) — driven by network
+  1199→  1199→```
+  1200→  1200→
+  1201→  1201→TripodCamera (`world/entity/item/TripodCamera.h`) is the odd-one-out — it
+  1202→  1202→extends `Mob` (not PathfinderMob) and is used by `CameraItem` (Raspberry Pi
+  1203→  1203→feature). EntityFactory (`world/entity/EntityFactory.h`) has
+  1204→  1204→`CreateEntity(int typeId, Level*)` and `loadEntity(CompoundTag*, Level*)`.
+  1205→  1205→
+  1206→  1206→Type IDs (`world/entity/EntityTypes.h`):
+  1207→  1207→- `BaseTypes { Entity=1, Item=2 }`
+  1208→  1208→- `EntityTypes { IdItemEntity=64, IdPrimedTnt=65, IdFallingTile=66,
+  1209→  1209→  IdArrow=80, IdSnowball=81, IdThrownEgg=82, IdPainting=83 }`
+  1210→  1210→- `MobTypes { BaseEnemy=1, BaseCreature=2, BaseWaterCreature=3,
+  1211→  1211→  Chicken=10, Cow=11, Pig=12, Sheep=13,
+  1212→  1212→  Zombie=32, Creeper=33, Skeleton=34, Spider=35, PigZombie=36 }`
+  1213→  1213→- `ParticleType::Id { none, bubble, crit, smoke, explode, flame, lava,
+  1214→  1214→  largesmoke, reddust, iconcrack, snowballpoof, largeexplode, hugeexplosion }`
+  1215→  1215→
+  1216→  1216→# 5. Item subclasses found
+  1217→  1217→
+  1218→  1218→Item hierarchy & subclass list (file basename = class name):
+  1219→  1219→
+  1220→  1220→```
+  1221→  1221→Item                                  (Item.h) — items[512] registry, Tier enum
+  1222→  1222→├── TileItem                          (TileItem.h) — auto-registers tiles 256..511
+  1223→  1223→│   ├── AuxDataTileItem               (AuxDataTileItem.h) — treeTrunk, sandStone,
+  1224→  1224→│   │                                  stoneBrickSmooth, quartzBlock (passes aux
+  1225→  1225→│   │                                  through as block data; stackedByData=true)
+  1226→  1226→│   ├── ClothTileItem                 (ClothTileItem.h) — wool color icon/data
+  1227→  1227→│   ├── StoneSlabTileItem             (StoneSlabTileItem.h) — combines two slabs
+  1228→  1228→│   │                                  to a full block on use
+  1229→  1229→│   ├── LeafTileItem                  (LeafTileItem.h) — sets PERSISTENT_LEAF_BIT,
+  1230→  1230→│   │                                  color by data (default/evergreen/birch)
+  1231→  1231→│   └── SaplingTileItem               (SaplingTileItem.h) — sapling variant icon
+  1232→  1232→├── DiggerItem                        (DiggerItem.h) — base for tools; _bTiles[256]
+  1233→  1233→│   ├── ShovelItem                    (ShovelItem.h) — canDestroySpecial on
+  1234→  1234→│   │                                  dirt/grass/sand
+  1235→  1235→│   ├── PickaxeItem                   (PickaxeItem.h) — pickaxe-tier destroy speed
+  1236→  1236→│   └── HatchetItem                   (HatchetItem.h) — axe destroy speed
+  1237→  1237→├── HoeItem                           (HoeItem.h) — tills farmland on useOn
+  1238→  1238→├── WeaponItem                        (WeaponItem.h) — sword; damage=4+tierBonus;
+  1239→  1239→│                                       blocks 1h; can destroy web fast
+  1240→  1240→├── ArmorItem                         (ArmorItem.h) — 4 slots (HEAD/TORSO/LEGS/FEET),
+  1241→  1241→│                                       5 materials (CLOTH/CHAIN/IRON/GOLD/DIAMOND)
+  1242→  1242→├── FoodItem                          (FoodItem.h) — eat (EAT_DURATION=32 ticks)
+  1243→  1243→│   └── BowlFoodItem                  (BowlFoodItem.h) — mushroom_stew; leaves bowl
+  1244→  1244→├── BowItem                           (BowItem.h) — releaseUsing fires Arrow with
+  1245→  1245→│                                       power = (pow²+pow·2)/3 capped at 1
+  1246→  1246→├── FlintAndSteelItem                 (FlintAndSteelItem.h) — ignites fire (impl. stub)
+  1247→  1247→├── ShearsItem                        (ShearsItem.h) — shears sheep, breaks web fast,
+  1248→  1248→│                                       mineBlock on leaves/web
+  1249→  1249→├── SignItem                          (SignItem.h) — places standing/wall sign;
+  1250→  1250→│                                       opens SignTileEntity text editor
+  1251→  1251→├── BedItem                           (BedItem.h) — places BedTile (2-tile)
+  1252→  1252→├── DoorItem                          (DoorItem.h) — places Wood/Iron DoorTile
+  1253→  1253→│                                       (2-tile, calculates flip from neighbors)
+  1254→  1254→├── SeedItem                          (SeedItem.h) — plants crops/melon stem on
+  1255→  1255→│                                       farmland
+  1256→  1256→├── SnowballItem                      (SnowballItem.h) — spawns Snowball projectile
+  1257→  1257→├── EggItem                          (EggItem.h) — spawns ThrownEgg projectile
+  1258→  1258→├── HangingEntityItem                 (HangingEntityItem.h) — places Painting on wall
+  1259→  1259→├── CoalItem                          (CoalItem.h) — stackedByData; coal vs charcoal
+  1260→  1260→├── DyePowderItem                    (DyePowderItem.h) — 16 colors (BLACK..WHITE);
+  1261→  1261→│                                       dyes sheep, tames wolf, used in crafting
+  1262→  1262→├── TilePlanterItem                   (TilePlanterItem.h) — places reeds/cake on
+  1263→  1263→│                                       appropriate surface
+  1264→  1264→└── CameraItem                        (CameraItem.h) — spawns TripodCamera entity
+  1265→  1265→```
+  1266→  1266→
+  1267→  1267→Item ID map (assigned in `Item::initItems`, Item.cpp:160-294):
+  1268→  1268→- Iron tools: shovel_iron=256, pickAxe_iron=257, hatchet_iron=258, sword_iron=267.
+  1269→  1269→- Wood tools: sword_wood=268, shovel_wood=269, pickAxe_wood=270, hatchet_wood=271.
+  1270→  1270→- Stone tools: 272-275. Diamond tools: 276-279. Gold tools: 283-286.
+  1271→  1271→- Sticks/bowl/stew: stick=280, bowl=281, mushroomStew=282.
+  1272→  1272→- Food: apple=260, bread=277, porkChop_raw=319, porkChop_cooked=320,
+  1273→  1273→  melon=360, beef_raw=363, beef_cooked=364, chicken_raw=365, chicken_cooked=366.
+  1274→  1274→- Armor (4×5 = 20 pieces): cloth 274-277 (helmet/chest/legs/boots),
+  1275→  1275→  chain 278-281, iron 282-285, diamond 286-289, gold 290-293.
+  1276→  1276→- Misc: flintAndSteel=259, bow=261, arrow=262, coal=263, emerald=264,
+  1277→  1277→  ironIngot=265, goldIngot=266, flint=318, leather=334, brick=336, clay=337,
+  1278→  1278→  reeds=338, paper=339, book=340, slimeBall=341, egg=344, compass=345,
+  1279→  1279→  clock=347, yellowDust=348, dye_powder=351, bone=352, sugar=353, bed=355,
+  1280→  1280→  shears=359, netherbrick=405, netherQuartz=406, painting=321, sign=323,
+  1281→  1281→  door_wood=324, door_iron=330, snowBall=332, seeds_wheat=291, wheat=292,
+  1282→  1282→  seeds_melon=362, camera=456 (special — placed at id 200 in item space → 256+200=456).
+  1283→  1283→
+  1284→  1284→Tier constants: `WOOD(0,59,2,0)`, `STONE(1,131,4,1)`, `IRON(2,250,6,2)`,
+  1285→  1285→`EMERALD(3,1561,8,3)`, `GOLD(0,32,12,0)`. Tier numbers = harvest level,
+  1286→  1286→uses = durability, speed = dig multiplier, damage = attack bonus.
+  1287→  1287→
+  1288→  1288→# 6. Inventory / ItemInstance structure summary
+  1289→  1289→
+  1290→  1290→```
+  1291→  1291→ItemInstance (struct, "stack"):
+  1292→  1292→  int count;        // stack size
+  1293→  1293→  int id;           // tile.id (0..255) or item.id (256..511) — same Item::items[] registry
+  1294→  1294→  int auxValue;     // private — block data OR item damage/data depending on item
+  1295→  1295→  // methods: getItem(), getIcon(), useOn(...), use(level,player),
+  1296→  1296→  //           useTimeDepleted, hurt(i), hurtEnemy, mineBlock, snap, copy(),
+  1297→  1297→  //           matches, isStackable, save/load CompoundTag, getUseAnimation,
+  1298→  1298→  //           getAuxValue/setAuxValue, isStackedByData
+  1299→  1299→
+  1300→  1300→Container (abstract): 
+  1301→  1301→  int containerId, containerType;
+  1302→  1302→  virtual getItem(slot)=0; setItem(slot, item)=0; removeItem(slot, count)=0;
+  1303→  1303→  getName()=0; getContainerSize()=0; getMaxStackSize()=0; stillValid(player)=0;
+  1304→  1304→  startOpen()=0; stopOpen()=0;
+  1305→  1305→  static const int LARGE_MAX_STACK_SIZE = 64;
+  1306→  1306→
+  1307→  1307→ContainerType enum:
+  1308→  1308→  NONE=-9, INVENTORY=-1, CONTAINER=0, WORKBENCH=1, FURNACE=2, TRAP=3,
+  1309→  1309→  ENCHANTMENT=4, BREWING_STAND=5
+  1310→  1310→
+  1311→  1311→FillingContainer : Container  (backing storage for player inventory & chests):
+  1312→  1312→  static const int MAX_INVENTORY_STACK_SIZE = 254;
+  1313→  1313→  FillingContainer(numTotalSlots, numLinkedSlots, containerType, isCreative);
+  1314→  1314→  vector<ItemInstance*> items;       // actual item storage (size = numTotalSlots)
+  1315→  1315→  LinkedSlot* linkedSlots;           // hotbar linkage (size = numLinkedSlots)
+  1316→  1316→  int numTotalSlots;  const int numLinkedSlots;
+  1317→  1317→  bool _isCreative;
+  1318→  1318→  add(ItemInstance*) → bool;          // smart stack merge
+  1319→  1319→  removeResource(item[,exact]); swapSlots(from,to); dropSlot; dropAll;
+  1320→  1320→  getSlot(tileId,data); getNonEmptySlot; getNumEmptySlots;
+  1321→  1321→  linkSlot(selectionSlot, inventorySlot, propagate);
+  1322→  1322→  linkEmptySlot(inventorySlot); getLinked(slot); compressLinkedSlotList(slot);
+  1323→  1323→  save(ListTag*)/load(ListTag*); replace(vector<ItemInstance>, count);
+  1324→  1324→  replaceSlot(slot, item*); contains; clearSlot; clearInventory;
+  1325→  1325→
+  1326→  1326→Inventory : FillingContainer  (player inventory):
+  1327→  1327→  static const int INVENTORY_SIZE_DEMO = 27;
+  1328→  1328→  static const int MAX_SELECTION_SIZE = 9;   // hotbar slots (incl. "..." scroll)
+  1329→  1329→  static const int POP_TIME_DURATION = 5;     // animation ticks on item pick-up
+  1330→  1330→  Inventory(Player* player, bool creativeMode);
+  1331→  1331→  int selected; Player* player;
+  1332→  1332→  selectSlot(int); getSelected()→ItemInstance*;
+  1333→  1333→  static getSelectionSize();
+  1334→  1334→  moveToSelectionSlot(sel, inv, propagate);
+  1335→  1335→  moveToSelectedSlot(inv, propagate);
+  1336→  1336→  moveToEmptySelectionSlot(inv);
+  1337→  1337→  removeItem(ItemInstance*); doDrop(item, randomly);
+  1338→  1338→  add(ItemInstance*); getAttackDamage(entity); getDestroySpeed(Tile*);
+  1339→  1339→  canDestroy(Tile*); clearInventoryWithDefault();
+  1340→  1340→
+  1341→  1341→CraftingContainer : Container  (crafting grid, ContainerType::WORKBENCH):
+  1342→  1342→  CraftingContainer(w, h);  size = w*h; width = w;
+  1343→  1343→  ItemInstance* items;      // raw array
+  1344→  1344→  getItem(slot) / getItem(x,y); setItem(slot, item); removeItem(slot, count);
+  1345→  1345→
+  1346→  1346→BaseContainerMenu (UI binding):
+  1347→  1347→  int containerId, containerType; IContainerListener* listener;
+  1348→  1348→  vector<ItemInstance> lastSlots;      // last-sent snapshot
+  1349→  1349→  getItems()=0; setSlot(slot, item)=0; setData(id, value);
+  1350→  1350→  setListener; broadcastChanges; isResultSlot(slot); tileEntityDestroyedIsInvalid(id)=0;
+  1351→  1351→
+  1352→  1352→IContainerListener (UI observer):
+  1353→  1353→  refreshContainer(menu, items); slotChanged(menu, slot, item, isResultSlot);
+  1354→  1354→  setContainerData(menu, id, value);
+  1355→  1355→
+  1356→  1356→ContainerMenu : BaseContainerMenu  (binds to a Container + TileEntity id):
+  1357→  1357→  Container* container; int tileEntityId;
+  1358→  1358→  setSlot(slot, item); getItems; tileEntityDestroyedIsInvalid(id);
+  1359→  1359→
+  1360→  1360→FurnaceMenu : BaseContainerMenu  (binds to FurnaceTileEntity):
+  1361→  1361→  FurnaceTileEntity* furnace; int furnaceTileEntityId;
+  1362→  1362→  int lastTickCount, lastLitTime, lastLitDuration;
+  1363→  1363→  setSlot; setData(id, value); getItems; broadcastChanges; setListener;
+  1364→  1364→  tileEntityDestroyedIsInvalid(id);
+  1365→  1365→```
+  1366→  1366→
+  1367→  1367→The player's "container menu" (open chest / furnace / crafting) is
+  1368→  1368→`Player::containerMenu : BaseContainerMenu*`. Crafting opens no menu (handled
+  1369→  1369→inline in `Player::startCrafting`); Furnace/Chest open `FurnaceMenu` /
+  1370→  1370→`ContainerMenu`.
+  1371→  1371→
+  1372→  1372→# 7. AABB / Vec3 / HitResult structure summary
+  1373→  1373→
+  1374→  1374→```
+  1375→  1375→Vec3 { float x, y, z; }
+  1376→  1376→  Vec3()                                     // (0,0,0)
+  1377→  1377→  Vec3(x, y, z)                              // -0.0 normalized to 0.0
+  1378→  1378→  set(x,y,z)->Vec3*
+  1379→  1379→  operator+ / - / * (float)  + +=, -=, *=
+  1380→  1380→  normalized() -> Vec3                       // 0 vector if length<0.0001
+  1381→  1381→  dot(p)                                     // x*p.x + y*p.y + z*p.z
+  1382→  1382→  cross(p) -> Vec3                           // (y*p.z - z*p.y, z*p.x - x*p.z, x*p.y - y*p.x)
+  1383→  1383→  add(x,y,z) / addSelf(x,y,z) / sub(x,y,z) / subSelf(x,y,z)
+  1384→  1384→  negate() / negated()
+  1385→  1385→  distanceTo(p) / distanceToSqr(p) / distanceToSqr(x,y,z) / length()
+  1386→  1386→  clipX(b, xt, out) -> bool                  // ray-plane (x=xt) intersection, [0,1] param
+  1387→  1387→  clipY(b, yt, out) / clipZ(b, zt, out)
+  1388→  1388→  lerp(v, a) -> Vec3
+  1389→  1389→  xRot(degs) / yRot(degs) / zRot(degs)       // in-place axis rotation (radians? degs? — uses cos/sin directly)
+  1390→  1390→  static fromPolarXY(angle, radius)
+  1391→  1391→  toString()
+  1392→  1392→
+  1393→  1393→AABB { float x0, y0, z0, x1, y1, z1; }       // min/max corner
+  1394→  1394→  AABB()                                     // (0,0,0,1,1,1)
+  1395→  1395→  AABB(x0,y0,z0,x1,y1,z1)
+  1396→  1396→  set(x0,y0,z0,x1,y1,z1) -> AABB*
+  1397→  1397→  expand(xa,ya,za) -> AABB                   // directional (extends only on +side if axis>0)
+  1398→  1398→  grow(xa,ya,za) -> AABB                     // symmetric (all 6 sides)
+  1399→  1399→  cloneMove(xa,ya,za) -> AABB                // translate copy
+  1400→  1400→  clipXCollide(c, xa) -> float               // sliding collision response: returns
+  1401→  1401→  clipYCollide(c, ya) / clipZCollide(c, za)  // the largest allowed motion along that axis
+  1402→  1402→                                              // such that c doesn't intersect this AABB
+  1403→  1403→  intersects(c) / intersectsInner(c) / intersects(x02,y02,z02,x12,y12,z12)
+  1404→  1404→  move(xa,ya,za) -> AABB*                    // in-place translate
+  1405→  1405→  contains(Vec3)
+  1406→  1406→  getSize() -> float                         // (w+h+d)/3
+  1407→  1407→  shrink(xa,ya,za) -> AABB
+  1408→  1408→  copy() -> AABB
+  1409→  1409→  clip(a, b) -> HitResult                    // ray-box intersection (returns face 0..5)
+  1410→  1410→  set(b)                                     // copy assignment
+  1411→  1411→  toString()
+  1412→  1412→
+  1413→  1413→HitResult {
+  1414→  1414→  HitResultType type;   // TILE, ENTITY, NO_HIT
+  1415→  1415→  int x, y, z, f;        // TILE: tile coords + face (0=DOWN,1=UP,2=NORTH,3=SOUTH,4=WEST,5=EAST)
+  1416→  1416→  Vec3 pos;              // hit point
+  1417→  1417→  Entity* entity;        // ENTITY: entity pointer
+  1418→  1418→  bool indirectHit;      // when targeting the block we're standing on, without actually looking at it
+  1419→  1419→}
+  1420→  1420→  HitResult()                                // type=NO_HIT
+  1421→  1421→  HitResult(x,y,z,f,pos)                     // type=TILE
+  1422→  1422→  HitResult(Entity*)                         // type=ENTITY
+  1423→  1423→  HitResult(const HitResult&)                // copy
+  1424→  1424→  isHit() { return type != NO_HIT; }
+  1425→  1425→  distanceTo(Entity*) const
+  1426→  1426→```
+  1427→  1427→
+  1428→  1428→# 8. Level chunk storage & tick flow summary
+  1429→  1429→
+  1430→  1430→## 8.1 Chunk storage layout
+  1431→  1431→
+  1432→  1432→- World is a 16×16 grid of chunks = 256×256 columns horizontally, height 128
+  1433→  1433→  (`LEVEL_HEIGHT=128`, `CHUNK_CACHE_WIDTH=16`, `CHUNK_WIDTH=16`).
+  1434→  1434→- Each `LevelChunk` (16×16×128 = 32768 blocks) stores:
+  1435→  1435→  - `unsigned char* blocks` — 32768 bytes, one byte per block (id 0..255),
+  1436→  1436→    indexed `x<<11 | z<<7 | y` (i.e. y is the lowest 7 bits because height=128
+  1437→  1437→    fits in 7 bits).
+  1438→  1438→  - `DataLayer data` — 4-bit per block (16384 bytes), block data / aux value.
+  1439→  1439→  - `DataLayer skyLight` — 4-bit per block, sky light (0..15).
+  1440→  1440→  - `DataLayer blockLight` — 4-bit per block, emitted light (0..15).
+  1441→  1441→  - `char heightmap[256]` — per-column highest non-air block (for sky-light
+  1442→  1442→    propagation).
+  1443→  1443→  - `unsigned char updateMap[256]` — per-column dirty-flag (16 sub-columns of
+  1444→  1444→    8 blocks each, `UpdateMapBitShift=4`).
+  1445→  1445→  - `int minHeight` — lowest modified block (for save-band optimization).
+  1446→  1446→  - `std::vector<Entity*> entityBlocks[8]` — entities bucketed by 16-block-tall
+  1447→  1447→    y-slice (8 slices × 16 blocks = 128).
+  1448→  1448→  - `TEMap tileEntities` — `std::map<TilePos, TileEntity*>` of tile entities in
+  1449→  1449→    this chunk.
+  1450→  1450→  - Flags: `loaded, unsaved, dontSave, createdFromSave, lastSaveHadEntities,
+  1451→  1451→    terrainPopulated; long lastSaveTime`.
+  1452→  1452→
+  1453→  1453→## 8.2 Chunk storage hierarchy (read path)
+  1454→  1454→
+  1455→  1455→```
+  1456→  1456→Level
+  1457→  1457→  └── ChunkSource* _chunkSource           (Level::createChunkSource returns:)
+  1458→  1458→        new ChunkCache(this, chunkStorage, dimension->createRandomLevelSource())
+  1459→  1459→                                 ↑                ↑
+  1460→  1460→                                 │                └── RandomLevelSource
+  1461→  1461→                                 │                    (terrain generator with
+  1462→  1462→                                 │                     PerlinNoise, caves,
+  1463→  1463→                                 │                     ores, trees, flowers)
+  1464→  1464→                                 │
+  1465→  1465→                                 └── ChunkStorage* chunkStorage
+  1466→  1466→                                       (levelStorage->createChunkStorage(dimension))
+  1467→  1467→                                       implementations:
+  1468→  1468→                                       - MemoryChunkStorage (RAM only, demo)
+  1469→  1469→                                       - ExternalFileLevelStorage (region files:
+  1470→  1470→                                         RegionFile packs 1024 chunks per file)
+  1471→  1471→```
+  1472→  1472→
+  1473→  1473→`ChunkSource` interface: `hasChunk(x,z)`, `getChunk(x,z)→LevelChunk*`,
+  1474→  1474→`create(x,z)`, `postProcess(parent,x,z)`, `tick()→bool`, `shouldSave()→bool`,
+  1475→  1475→`saveAll(onlyUnsaved)`, `getMobsAt(cat,x,y,z)→Biome::MobList`,
+  1476→  1476→`gatherStats()→string`.
+  1477→  1477→
+  1478→  1478→`ChunkCache` is the LRU/cache layer that wraps `RandomLevelSource` (terrain
+  1479→  1479→gen) + `ChunkStorage` (persistence). On a `getChunk(x,z)` cache miss it
+  1480→  1480→asks `ChunkStorage::load(level,x,z)` (returns NULL if not saved) and
+  1481→  1481→falls back to `RandomLevelSource::getChunk(x,z)` to generate, then stores
+  1482→  1482→in cache and marks for save.
+  1483→  1483→
+  1484→  1484→## 8.3 Level tick flow (per game tick, called from Minecraft::tick)
+  1485→  1485→
+  1486→  1486→`Minecraft::tick(i, max)` calls in order (from Task 3-a notes):
+  1487→  1487→1. `gameMode->tick()`
+  1488→  1488→2. `commandServer->tick()`
+  1489→  1489→3. `tickInput()`
+  1490→  1490→4. `gui->tick()`
+  1491→  1491→5. `gameRenderer->tick()` (interpolation prep)
+  1492→  1492→6. `levelRenderer->tick()` (chunk dirty queue)
+  1493→  1493→7. `level->tickEntities()`     ← entity + tile-entity update
+  1494→  1494→8. `level->tick()`             ← world tick (mobs, chunks, time, tiles)
+  1495→  1495→9. `level->animateTick(xt,yt,zt)`  ← random block particle effects
+  1496→  1496→10. `textures->tick()`
+  1497→  1497→11. `particleEngine->tick()`
+  1498→  1498→12. `screen->tick()`
+  1499→  1499→
+  1500→  1500→### `Level::tickEntities()` (Level.cpp:1330-1468)
+  1501→  1501→1. For each `Entity* e : entities`:
+  1502→  1502→   - if `!e->removed`: `tick(e)` → `tick(e, true)`:
+  1503→  1503→     - save xOld/yOld/zOld, yRotO/xRotO
+  1504→  1504→     - if `e->inChunk && hasChunksAround(e, 32)`: `e->tick()` (virtual —
+  1505→  1505→       Mob::tick → aiStep → travel + updateAi + baseTick)
+  1506→  1506→     - NaN sanity checks (x ≠ x ⇒ restore)
+  1507→  1507→     - recompute chunk membership if entity moved chunks; if `hasChunk(xcn,zcn)`:
+  1508→  1508→       `addEntity(e)` into new chunk's `entityBlocks[ycn]`; else `inChunk=false`
+  1509→  1509→   - if `e->removed && (!isPlayer || reallyRemoveIfPlayer)`:
+  1510→  1510→     remove from chunk, erase from `entities` + `entityIdLookup`,
+  1511→  1511→     `entityRemoved(e)`, queue for `delete` (players deferred via
+  1512→  1512→     `_pendingPlayerRemovals` with 16-tick grace).
+  1513→  1513→2. Walk `_pendingPlayerRemovals` decrementing ticks; `delete` when 0.
+  1514→  1514→3. `updatingTileEntities = true`:
+  1515→  1515→   - For each `TileEntity* te : tileEntities`:
+  1516→  1516→     - if `!te->isRemoved() && te->level != NULL && hasChunkAt(x,y,z)`:
+  1517→  1517→       `te->tick()` (furnace cooking, sign nothing, chest nothing, nether
+  1518→  1518→       reactor pattern check)
+  1519→  1519→     - if `te->isRemoved()`: erase from `tileEntities`, remove from chunk's
+  1520→  1520→       TEMap, `delete te`.
+  1521→  1521→4. `updatingTileEntities = false`.
+  1522→  1522→5. Process `pendingTileEntities`: dedupe against `tileEntities`, attach to
+  1523→  1523→   `LevelChunk::setTileEntity(x&15, y, z&15, e)`, `sendTileUpdated(x,y,z)`.
+  1524→  1524→
+  1525→  1525→### `Level::tick()` (Level.cpp:184-254)
+  1526→  1526→1. Mob spawning: if `!isClientSide && levelData.getSpawnMobs()` every
+  1527→  1527→   `MobSpawnInterval=2` ticks call `MobSpawner::tick(this, _spawnEnemies &&
+  1528→  1528→   difficulty>PEACEFUL, _spawnFriendlies && (time % 400) < 2)`.
+  1529→  1529→2. `_chunkSource->tick()` (process chunk gen/save queue).
+  1530→  1530→3. `updateSkyDarken()` (recompute `skyDarken` from time-of-day).
+  1531→  1531→4. Time advance:
+  1532→  1532→   - If `_nightMode`: snap/accelerate time toward `MIDDLE_OF_NIGHT_TIME=12000`,
+  1533→  1533→     broadcast `SetTimePacket`.
+  1534→  1534→   - Else: `time = levelData.getTime() + 1; levelData.setTime(time)`; broadcast
+  1535→  1535→     `SetTimePacket` every 256 ticks.
+  1536→  1536→5. `tickPendingTicks(false)` — run up to `MAX_TICK_TILES_PER_TICK=100` scheduled
+  1537→  1537→   tile ticks (`_tickNextTickSet` sorted by delay); each calls
+  1538→  1538→   `Tile::tiles[id]->tick(this, x, y, z, &random)` if the tile id at the
+  1539→  1539→   position still matches and surrounding 8-chunk radius is loaded.
+  1540→  1540→6. `tickTiles()` — random-block-tick loop:
+  1541→  1541→   - Build `_chunksToPoll` set: for each player, poll the 49 surrounding
+  1542→  1542→     chunks (`pollChunkOffsets[]` spiral out to ±4 chunks).
+  1543→  1543→   - For each polled chunk, run 20 random ticks (`_randValue = _randValue*3 +
+  1544→  1544→     _addend` LCG; extract `x = val&15`, `z = (val>>8)&15`, `y = (val>>16)&127`).
+  1545→  1545→     If `Tile::shouldTick[id]` is true, call `Tile::tiles[id]->tick(this,
+  1546→  1546→     x+xo, y, z+zo, &random)`.
+  1547→  1547→7. For each `Entity* e : entities` with dirty `SynchedEntityData`, broadcast
+  1548→  1548→   `SetEntityDataPacket(e->entityId, *data)` to all clients.
+  1549→  1549→
+  1550→  1550→### `Level::tick(Entity* e, bool actual)` (Level.cpp:1500-1556)
+  1551→  1551→- Bail out if surrounding 32-block chunks aren't loaded.
+  1552→  1552→- `e->xOld=e->x; e->yOld=e->y; e->zOld=e->z; e->yRotO=e->yRot; e->xRotO=e->xRot;`
+  1553→  1553→- If `actual && e->inChunk`: `e->tick()` (virtual dispatch).
+  1554→  1554→- NaN sanity restore.
+  1555→  1555→- Recompute chunk membership:
+  1556→  1556→  - `xcn = floor(e->x/16); ycn = floor(e->y/16); zcn = floor(e->z/16);`
+  1557→  1557→  - If chunk changed and old chunk loaded: `getChunk(old)->removeEntity(e,
+  1558→  1558→    old_ycn)`.
+  1559→  1559→  - If new chunk loaded: `e->inChunk=true; getChunk(new)->addEntity(e);`
+  1560→  1560→    else `e->inChunk=false`.
+  1561→  1561→
+  1562→  1562→### `Level::tickTiles()` (Level.cpp:257-337)
+  1563→  1563→- See step 6 above. Spawns 20 random block ticks per polled chunk per game
+  1564→  1564→  tick (so up to ~980 tile ticks per tick across 49 chunks). Limited to tiles
+  1565→  1565→  whose `Tile::shouldTick[id]` flag is set (crops, saplings, leaves, grass,
+  1566→  1566→  mushrooms, farmland, liquid, fire, etc.). The LCG `_randValue = _randValue
+  1567→  1567→  * 3 + _addend` (seed 42184323, addend 1013904223 — java.util.Random
+  1568→  1568→  constants) is the same used by Java edition's `Random` class.
+  1569→  1569→
+  1570→  1570→### `Level::addToTickNextTick(x,y,z,tileId,tickDelay)` (Level.cpp:1307-1328)
+  1571→  1571→- Schedule a tile tick: insert `TickNextTickData(x,y,z,tileId)` with
+  1572→  1572→  `delay = tickDelay + levelData.getTime()` into `_tickNextTickSet` (a
+  1573→  1573→  `std::set<TickNextTickData>` ordered by delay then by position).
+  1574→  1574→- If `instaTick`: run immediately instead of queuing.
+  1575→  1575→
+  1576→  1576→### `Level::getCubes(source, AABB)` (Level.cpp:1119-1161)
+  1577→  1577→- The collision query: scan every block in the AABB's integer extent, look up
+  1578→  1578→  `Tile::tiles[getTile(x,y,z)]`, and call `tile->addAABBs(this, x, y, z, box,
+  1579→  1579→  boxes)` to append the tile's collision boxes. Returns a `vector<AABB>&`
+  1580→  1580→  reused across calls (cleared at start). Used by `Entity::move()` and
+  1581→  1581→  `Entity::isFree()` for clip-and-slide.
+  1582→  1582→
+  1583→  1583→### `Level::clip(Vec3 a, Vec3 b, liquid, solidOnly)` (Level.cpp:849-954)
+  1584→  1584→- The block ray-pick used by `Minecraft::pick(a)`: DDA voxel traversal (≤200
+  1585→  1585→  steps) from `a` to `b`. At each crossed voxel, look up the tile; if it
+  1586→  1586→  `mayPick(data, liquid)`, call `Tile::tiles[t]->clip(this, x, y, z, a, b)`
+  1587→  1587→  to do the exact ray-AABB intersection, and return the closest hit as a
+  1588→  1588→  `HitResult(type=TILE, x,y,z, face, pos)`.
+  1589→  1589→- `solidOnly=true` skips tiles with NULL collision AABB (liquids, fire, etc.).
+  1590→  1590→- `liquid=true` allows picking liquid tiles (for bucket fill).
+  1591→  1591→
+  1592→  1592→### `Level::getRawBrightness(x,y,z[,propagate])` (Level.cpp:725-761)
+  1593→  1593→- Special cases: stoneSlabHalf & farmland take the max of neighbor brightness
+  1594→  1594→  (so light passes through gaps).
+  1595→  1595→- If `y >= DEPTH`: return `MAX_BRIGHTNESS - skyDarken` (clamped to 0).
+  1596→  1596→- Else: `chunk->getRawBrightness(x, y, z, skyDarken)` which combines skyLight
+  1597→  1597→  and blockLight (max), reduced by `skyDarken` for night.
+  1598→  1598→- `getBrightness(x,y,z)→float` applies `dimension->brightnessRamp[raw]` to
+  1599→  1599→  convert the 0..15 integer to a 0..1 float with gamma curve.
+  1600→  1600→
+  1601→  1601→### `Level::updateLight(LightLayer&, x0,y0,z0, x1,y1,z1, join)` (Level.cpp:1823+)
+  1602→  1602→- BFS light propagation: enqueue boundary blocks, propagate light via
+  1603→  1603→  `_lightUpdates` queue (`LightUpdate{layer, x, y, z, brightness}`), set
+  1604→  1604→  `chunk->setBrightness(layer, ...)`, recurse. `join=true` merges with an
+  1605→  1605→  existing in-flight update.
+  1606→  1606→
+  1607→  1607→### `Level::addEntity(Entity* e)` (Level.cpp:1004-1030)
+  1608→  1608→- If `entityIdLookup[e->entityId]` already exists, `removeEntity(prev)`.
+  1609→  1609→- Compute `xc=floor(e->x/16); zc=floor(e->z/16)`.
+  1610→  1610→- `forced=true` (always add even if chunk not loaded — chunk will catch up).
+  1611→  1611→- If `e->isPlayer()` and not already in `players`: `players.push_back((Player*)e)`.
+  1612→  1612→- `getChunk(xc,zc)->addEntity(e)` (bucket by y-slice).
+  1613→  1613→- `entities.push_back(e); entityIdLookup[e->entityId]=e; entityAdded(e);`
+  1614→  1614→- Notify all `LevelListener`s via `entityAdded`.
+  1615→  1615→
+  1616→  1616→### `Level::tileUpdated(x,y,z,tile)` (Level.cpp:667-670)
+  1617→  1617→- `sendTileUpdated(x,y,z)` → notify listeners (`LevelListener::tileChanged`).
+  1618→  1618→- `updateNeighborsAt(x,y,z,tile)` → for each of the 6 neighbors, look up
+  1619→  1619→  their tile and call `tile->neighborChanged(this, x, y, z, type)` (e.g. for
+  1620→  1620→  redstone wire, lever, button, door, liquid propagation).
+  1621→  1621→
+  1622→  1622→### `Level::updateNeighborsAt(x,y,z,tile)` (Level.cpp:706-713)
+  1623→  1623→- Calls `neighborChanged` on the 6 face-adjacent blocks.
+  1624→  1624→
+  1625→  1625→### `Level::explode(source, x, y, z, r[, fire])` (Level.cpp:1658+)
+  1626→  1626→- Delegates to `Explosion` (world/level/Explosion.cpp), which:
+  1627→  1627→  - Computes affected blocks (ray from center outward, dropping blocks
+  1628→  1628→    that intersect terrain).
+  1629→  1629→  - Calls `Tile::tiles[t]->wasExploded(level, x, y, z)` for each affected
+  1630→  1630→    block (drops resources, may chain-trigger TNT).
+  1631→  1631→  - Damages entities in radius.
+  1632→  1632→  - Spawns `ExplodePacket` for clients + `HugeExplosionParticle`.
+  1633→  1633→  - Optionally ignites blocks if `fire=true`.
+  1634→  1634→
+  1635→  1635→## 8.4 Tick constants recap
+  1636→  1636→
+  1637→  1637→| Constant                          | Value | Source |
+  1638→  1638→|-----------------------------------|-------|--------|
+  1639→  1639→| `SharedConstants::TicksPerSecond` | 20    | (used everywhere) |
+  1640→  1640→| `Level::TICKS_PER_DAY`            | 19200 | 20*60*16 |
+  1641→  1641→| `Level::MIDDLE_OF_NIGHT_TIME`     | 12000 | midnight |
+  1642→  1642→| `Level::MAX_TICK_TILES_PER_TICK`  | 100   | scheduled-tile cap |
+  1643→  1643→| `Level::MAX_BRIGHTNESS`            | 15    | light cap |
+  1644→  1644→| `Level::DEPTH = LEVEL_HEIGHT`     | 128   | world height |
+  1645→  1645→| `Level::SEA_LEVEL`                | 63    | DEPTH/2 - 1 |
+  1646→  1646→| `Level::MAX_LEVEL_SIZE`           | 32000000 | coord clamp |
+  1647→  1647→| `MobSpawnerInterval`              | 2     | ticks between spawn checks |
+  1648→  1648→| Random block-ticks per chunk/tick | 20    | hardcoded in tickTiles |
+  1649→  1649→| Chunk poll radius                 | ±4    | `pollChunkOffsets[]` |
+  1650→  1650→| `Mob::ATTACK_DURATION`            | 5     | swing anim ticks |
+  1651→  1651→| `Mob::SWING_DURATION`             | 8     | swing anim ticks |
+  1652→  1652→| `Player::MAX_HEALTH`              | 20    | full health |
+  1653→  1653→| `Player::SLEEP_DURATION`          | 100   | ticks to fall asleep |
+  1654→  1654→| `Player::WAKE_UP_DURATION`        | 10    | ticks to wake |
+  1655→  1655→| `Entity::TOTAL_AIR_SUPPLY`        | 300   | 15 sec breath |
+  1656→  1656→| `Item::MAX_STACK_SIZE`            | 64    | default stack |
+  1657→  1657→| `Item::MAX_ITEMS`                 | 512   | item registry size |
+  1658→  1658→| `Tile::NUM_BLOCK_TYPES`           | 256   | tile registry size |
+  1659→  1659→| `Container::LARGE_MAX_STACK_SIZE`| 64    | container stack cap |
+  1660→  1660→| `FillingContainer::MAX_INVENTORY_STACK_SIZE` | 254 | internal stack cap |
+  1661→  1661→| `Inventory::MAX_SELECTION_SIZE`  | 9     | hotbar slots |
+  1662→  1662→| `FoodConstants::MAX_FOOD`         | 20    | hunger bar |
+  1663→  1663→| `FoodConstants::HEALTH_TICK_COUNT`| 80    | regen interval |
+  1664→  1664→| `FoodConstants::HEAL_LEVEL`      | 18    | auto-heal threshold |
+  1665→  1665→
+  1666→  1666→

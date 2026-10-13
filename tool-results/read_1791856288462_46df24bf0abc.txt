@@ -1,0 +1,925 @@
+     1→#include "Player.h"
+     2→#include "Inventory.h"
+     3→#include "../item/ItemEntity.h"
+     4→#include "../../level/Level.h"
+     5→#include "../../item/ItemInstance.h"
+     6→#include "../../item/BowItem.h"
+     7→#include "../../inventory/BaseContainerMenu.h"
+     8→#include "../../../nbt/CompoundTag.h"
+     9→
+    10→#include "../../../network/RakNetInstance.h"
+    11→#include "../../../network/packet/AnimatePacket.h"
+    12→#include "../../inventory/FurnaceMenu.h"
+    13→#include "../SharedFlags.h"
+    14→#include "../../level/tile/BedTile.h"
+    15→#include "../../Direction.h"
+    16→#include "../EntityEvent.h"
+    17→#include "../../Difficulty.h"
+    18→#include "../../item/ArmorItem.h"
+    19→
+    20→const float Player::DEFAULT_WALK_SPEED = 0.1f;
+    21→const float Player::DEFAULT_FLY_SPEED = 0.02f;
+    22→
+    23→// @todo: Move out to ArmorInventory
+    24→static ListTag* saveArmor(ItemInstance* armor);
+    25→static void loadArmor(ItemInstance* armor, ListTag* listTag);
+    26→
+    27→Player::Player(Level* level, bool isCreative)
+    28→:       super(level),
+    29→        userType(0),
+    30→        playerHasRespawnPosition(false),
+    31→        hasFakeInventory(false),
+    32→        containerMenu(NULL),
+    33→        useItemDuration(0),
+    34→        playerIsSleeping(false),
+    35→        sleepCounter(0),
+    36→        bedOffsetX(0),
+    37→        bedOffsetY(0),
+    38→        bedOffsetZ(0),
+    39→        respawnPosition(0, -1, 0),
+    40→        allPlayersSleeping(false)
+    41→{
+    42→        canRemove = false;
+    43→
+    44→        _init();
+    45→        entityRendererId = ER_PLAYER_RENDERER;
+    46→
+    47→        autoSendPosRot = false;
+    48→        inventory = new Inventory(this, isCreative);
+    49→
+    50→        //inventoryMenu = /*new*/ InventoryMenu(inventory, !level.isOnline);
+    51→    //containerMenu = inventoryMenu;
+    52→
+    53→        heightOffset = 1.62f;
+    54→
+    55→        Pos spawnPos = level->getSharedSpawnPos();
+    56→    this->moveTo((float)spawnPos.x + 0.5f, (float)(spawnPos.y + 1), (float)spawnPos.z + 0.5f, 0, 0);
+    57→
+    58→    health = MAX_HEALTH;
+    59→    modelName = "humanoid";
+    60→    rotOffs = 180;
+    61→    flameTime = 20;
+    62→
+    63→    textureName = "mob/char.png";
+    64→        entityData.define(DATA_PLAYER_FLAGS_ID, (PlayerFlagIDType) 0);
+    65→        entityData.define(DATA_BED_POSITION_ID, Pos());
+    66→        //entityData.define(DATA_PLAYER_RUNNING_ID, (SynchedEntityData::TypeChar) 0);
+    67→}
+    68→
+    69→Player::~Player() {
+    70→        delete inventory;
+    71→}
+    72→bool Player::isSleeping() {
+    73→        return playerIsSleeping;
+    74→}
+    75→int Player::startSleepInBed( int x, int y, int z ) {
+    76→        if(!level->isClientSide) {
+    77→                if(isSleeping() || !isAlive()) {
+    78→                        return BedSleepingResult::OTHER_PROBLEM;
+    79→                }
+    80→                if(Mth::abs(this->x - x) > 3 || Mth::abs(this->y - y) > 4 || Mth::abs(this->z - z) > 3) {
+    81→                        return BedSleepingResult::TOO_FAR_AWAY;
+    82→                }
+    83→                if(level->dimension->isNaturalDimension()) {
+    84→                        return BedSleepingResult::NOT_POSSIBLE_HERE;
+    85→                }
+    86→                if(level->isDay()) {
+    87→                        return BedSleepingResult::NOT_POSSIBLE_NOW;
+    88→                }
+    89→                float hRange = 8;
+    90→                float vRange = 5;
+    91→                EntityList monsters;
+    92→                level->getEntitiesOfClass(MobTypes::BaseEnemy, AABB(x- hRange, y - vRange, z - hRange, x + hRange, y + vRange, z + hRange), monsters);
+    93→                if(!monsters.empty()) {
+    94→                        return BedSleepingResult::NOT_SAFE;
+    95→                }
+    96→        }
+    97→
+    98→        setSize(0.2f, 0.2f);
+    99→        heightOffset = 0.2f;
+   100→        if(level->hasChunkAt(x, y, z)) {
+   101→                int data = level->getData(x, y, z);
+   102→                int direction = BedTile::getDirection(data);
+   103→                float xo = 0.5f, zo = 0.5f;
+   104→                switch(direction) {
+   105→                case Direction::SOUTH:
+   106→                        zo = 0.9f;
+   107→                        break;
+   108→                case Direction::NORTH:
+   109→                        zo = 0.1f;
+   110→                        break;
+   111→                case Direction::WEST:
+   112→                        xo = 0.1f;
+   113→                        break;
+   114→                case Direction::EAST:
+   115→                        xo = 0.9f;
+   116→                        break;
+   117→                }
+   118→                setBedOffset(direction);
+   119→                setPos(x + xo, y + 15.0f / 16.0f, z + zo);
+   120→        } else {
+   121→                setPos(x + 0.5f, y + 1.0f / 16.0f, z + 0.5f);
+   122→        }
+   123→        playerIsSleeping = true;
+   124→        sleepCounter = 0;
+   125→        bedPosition = Pos(x, y, z);
+   126→        xd = zd = yd = 0;
+   127→        if(!level->isClientSide) {
+   128→                level->updateSleepingPlayerList();
+   129→        }
+   130→        entityData.set<Pos>(DATA_BED_POSITION_ID, bedPosition);
+   131→        entityData.setFlag<SharedFlagsInformation::SharedFlagsInformationType>(DATA_PLAYER_FLAGS_ID, PLAYER_SLEEP_FLAG);
+   132→        return BedSleepingResult::OK;
+   133→}
+   134→
+   135→void Player::stopSleepInBed( bool forcefulWakeUp, bool updateLevelList, bool saveRespawnPoint ) {
+   136→        if(!isSleeping())
+   137→                return;
+   138→        setSize(0.6f, 1.8f);
+   139→        setDefaultHeadHeight();
+   140→        Pos standUp = bedPosition;
+   141→        if(level->getTile(int(bedPosition.x), int(bedPosition.y), int(bedPosition.z)) == Tile::bed->id) {
+   142→                BedTile::setOccupied(level, int(bedPosition.x), int(bedPosition.y), int(bedPosition.z), false);
+   143→                bool foundStandUpPosition = BedTile::findStandUpPosition(level, int(bedPosition.x), int(bedPosition.y), int(bedPosition.z), 0, standUp);
+   144→                if(!foundStandUpPosition) {
+   145→                        standUp = Pos(bedPosition.x, bedPosition.y, bedPosition.z);
+   146→                }
+   147→                setPos(standUp.x + 0.5f, standUp.y + heightOffset + 0.1f, standUp.z + 0.5f);
+   148→        }
+   149→        playerIsSleeping = false;
+   150→        if(!level->isClientSide && updateLevelList) {
+   151→                level->updateSleepingPlayerList();
+   152→        }
+   153→        if(forcefulWakeUp) {
+   154→                sleepCounter = 0;
+   155→        } else {
+   156→                sleepCounter = SLEEP_DURATION;
+   157→        }
+   158→        // Quick fix to make the spawn position always saved, not sure if we always want to save this position but I like it.
+   159→        if(true || saveRespawnPoint) {
+   160→                Pos newRespawnPos;
+   161→                BedTile::findStandUpPosition(level, bedPosition.x, bedPosition.y, bedPosition.z, 0, newRespawnPos);
+   162→                setRespawnPosition(newRespawnPos);
+   163→        }
+   164→        entityData.clearFlag<SharedFlagsInformation::SharedFlagsInformationType>(DATA_PLAYER_FLAGS_ID, PLAYER_SLEEP_FLAG);
+   165→        allPlayersSleeping = false;
+   166→}
+   167→
+   168→int Player::getSleepTimer() {
+   169→        return allPlayersSleeping ? sleepCounter : 0;
+   170→}
+   171→void Player::setAllPlayersSleeping() {
+   172→        sleepCounter = 0;
+   173→        allPlayersSleeping = true;
+   174→}
+   175→void Player::setBedOffset( int bedDirection ) {
+   176→        bedOffsetX = 0;
+   177→        bedOffsetZ = 0;
+   178→        switch(bedDirection) {
+   179→        case Direction::SOUTH:
+   180→                bedOffsetZ = -1.8f;
+   181→                break;
+   182→        case Direction::NORTH:
+   183→                bedOffsetZ = 1.8f;
+   184→                break;
+   185→        case Direction::WEST:
+   186→                bedOffsetX = 1.8f;
+   187→                break;
+   188→        case Direction::EAST:
+   189→                bedOffsetX = -1.8f;
+   190→                break;
+   191→        }
+   192→}
+   193→bool Player::isSleepingLongEnough() {
+   194→        return isSleeping() && sleepCounter >= SLEEP_DURATION;
+   195→}
+   196→
+   197→float Player::getSleepRotation() {
+   198→        if(isSleeping()) {
+   199→                int data = level->getData(bedPosition.x, bedPosition.y, bedPosition.z);
+   200→                int direction = BedTile::getDirection(data);
+   201→                switch(direction) {
+   202→                case Direction::SOUTH:
+   203→                        return 90;
+   204→                case Direction::WEST:
+   205→                        return 0;
+   206→                case Direction::NORTH:
+   207→                        return 270;
+   208→                case Direction::EAST:
+   209→                        return 180;
+   210→                }
+   211→        }
+   212→        return 0;
+   213→}
+   214→
+   215→bool Player::checkBed() {
+   216→        return (level->getTile(bedPosition.x, bedPosition.y, bedPosition.z) == Tile::bed->id);
+   217→}
+   218→
+   219→void Player::tick() {
+   220→        bool shouldSleep = entityData.getFlag<SharedFlagsInformation::SharedFlagsInformationType>(DATA_PLAYER_FLAGS_ID, PLAYER_SLEEP_FLAG);
+   221→        if(shouldSleep != isSleeping()) {
+   222→                if(isSleeping()) {
+   223→                        stopSleepInBed(true, true, true);
+   224→                } else {
+   225→                        bedPosition = entityData.getPos(DATA_BED_POSITION_ID);
+   226→                        startSleepInBed(bedPosition.x, bedPosition.y, bedPosition.z);
+   227→                }
+   228→        }
+   229→        if(isSleeping()) {
+   230→                sleepCounter++;
+   231→                if(sleepCounter > SLEEP_DURATION) {
+   232→                        sleepCounter = SLEEP_DURATION;
+   233→                }
+   234→                if(!level->isClientSide) {
+   235→                        if(!checkBed()) {
+   236→                                stopSleepInBed(true, true, false);
+   237→                        } else if(level->isDay()) {
+   238→                                stopSleepInBed(false, true, true);
+   239→                        }
+   240→                } 
+   241→        } else if(sleepCounter > 0) {
+   242→                sleepCounter++;
+   243→                if(sleepCounter >= (SLEEP_DURATION + WAKE_UP_DURATION)) {
+   244→                        sleepCounter = 0;
+   245→                }
+   246→        }
+   247→    super::tick();
+   248→
+   249→        if (!level->isClientSide) {
+   250→                foodData.tick(this);
+   251→        //      if (containerMenu != NULL && !containerMenu->stillValid(this)) {
+   252→        //              closeContainer();
+   253→        //      }
+   254→        }
+   255→}
+   256→
+   257→int Player::getMaxHealth() {
+   258→        return MAX_HEALTH;
+   259→}
+   260→
+   261→//
+   262→// Use items
+   263→//
+   264→bool Player::isUsingItem() {
+   265→        return !useItem.isNull();
+   266→}
+   267→
+   268→ItemInstance* Player::getUseItem() {
+   269→        return &useItem;
+   270→}
+   271→
+   272→void Player::spawnEatParticles(const ItemInstance* useItem, int count) {
+   273→        if (useItem->getUseAnimation() == UseAnim::drink) {
+   274→                level->playSound(this, "random.drink", 0.5f, level->random.nextFloat() * 0.1f + 0.9f);
+   275→        }
+   276→        else if (useItem->getUseAnimation() == UseAnim::eat) {
+   277→                for (int i = 0; i < count; i++) {
+   278→                        const float xx = -xRot * Mth::PI / 180;
+   279→                        const float yy = -yRot * Mth::PI / 180;
+   280→                        Vec3 d((random.nextFloat() - 0.5f) * 0.1f, Mth::random() * 0.1f + 0.1f, 0);
+   281→                        d.xRot(xx);
+   282→                        d.yRot(yy);
+   283→                        Vec3 p((random.nextFloat() - 0.5f) * 0.3f, -random.nextFloat() * 0.6f - 0.3f, 0.6f);
+   284→                        p.xRot(xx);
+   285→                        p.yRot(yy);
+   286→                        p = p.add(x, y + getHeadHeight(), z);
+   287→                        level->addParticle(PARTICLETYPE(iconcrack), p.x, p.y, p.z, d.x, d.y + 0.05f, d.z, useItem->getItem()->id);
+   288→                }
+   289→                level->playSound(this, "random.eat", .5f + .5f * random.nextInt(2), (random.nextFloat() - random.nextFloat()) * 0.2f + 1.0f);
+   290→        }
+   291→}
+   292→
+   293→void Player::startUsingItem(ItemInstance instance, int duration) {
+   294→        if(instance == useItem) return;
+   295→        useItem = instance;
+   296→        useItemDuration = duration;
+   297→        if(!level->isClientSide) {
+   298→                setSharedFlag(SharedFlagsInformation::FLAG_USINGITEM, true);
+   299→        }
+   300→}
+   301→
+   302→void Player::stopUsingItem() {
+   303→        if(getCarriedItem() != NULL && useItem.id == getCarriedItem()->id)
+   304→                getCarriedItem()->setAuxValue(useItem.getAuxValue());
+   305→        useItem.setNull();
+   306→        useItemDuration = 0;
+   307→        if(!level->isClientSide) {
+   308→                setSharedFlag(SharedFlagsInformation::FLAG_USINGITEM, false);
+   309→        }
+   310→}
+   311→
+   312→void Player::releaseUsingItem() {
+   313→        if(!useItem.isNull()) {
+   314→                useItem.releaseUsing(level, this, useItemDuration);
+   315→        }
+   316→        stopUsingItem();
+   317→}
+   318→
+   319→void Player::completeUsingItem() {
+   320→        if(!useItem.isNull()) {
+   321→                spawnEatParticles(&useItem, 10);
+   322→
+   323→                // Check if the item is valid, and if we should overwrite the
+   324→                // inventory item afterwards.
+   325→                ItemInstance* selected = inventory->getSelected();
+   326→                bool doOverwrite = selected && ItemInstance::matches(&useItem, selected);
+   327→
+   328→                ItemInstance itemInstance = useItem.useTimeDepleted(level, this);
+   329→
+   330→                if (doOverwrite) {
+   331→                        *selected = useItem;
+   332→                        if (selected->count == 0)
+   333→                                inventory->clearSlot(inventory->selected);
+   334→                }
+   335→
+   336→                /*
+   337→                int oldCount = useItem.count;
+   338→                if (!itemInstance.matches(&useItem)) {
+   339→                        ItemInstance* selected = inventory->getSelected();
+   340→                        if (ItemInstance::matches(&useItem, selected)) {
+   341→                                if (selected) *selected = itemInstance;
+   342→                                if (itemInstance.count == 0) {
+   343→                                        inventory->clearSlot(inventory->selected);
+   344→                                }
+   345→                        }
+   346→                }
+   347→                */
+   348→
+   349→                stopUsingItem();
+   350→        }
+   351→}
+   352→
+   353→int Player::getUseItemDuration() {
+   354→        return useItemDuration;
+   355→}
+   356→
+   357→int Player::getTicksUsingItem() {
+   358→        if(isUsingItem()) {
+   359→                return useItem.getUseDuration() - useItemDuration;      
+   360→        }
+   361→        return 0;
+   362→}
+   363→
+   364→void Player::travel(float xa, float ya) {
+   365→        if (abilities.flying) {
+   366→                float ydo = yd;
+   367→                float ofs = flyingSpeed;
+   368→                flyingSpeed = 0.05f;
+   369→                super::travel(xa, ya);
+   370→                yd = ydo * 0.6f;
+   371→                flyingSpeed = ofs;
+   372→        } else {
+   373→                super::travel(xa, ya);
+   374→        }
+   375→}
+   376→
+   377→/*protected*/
+   378→bool Player::isImmobile() {
+   379→    return health <= 0 || isSleeping();
+   380→}
+   381→
+   382→/*protected*/
+   383→void Player::closeContainer() {
+   384→        containerMenu = NULL;
+   385→    //containerMenu = inventoryMenu;
+   386→}
+   387→
+   388→void Player::resetPos(bool clearMore) {
+   389→    if(!isSleeping()) {
+   390→                heightOffset = 1.62f;
+   391→                setSize(0.6f, 1.8f);
+   392→                super::resetPos(clearMore);
+   393→        }
+   394→        invisible = false;
+   395→        
+   396→        if (clearMore) {
+   397→                health = getMaxHealth();
+   398→                deathTime = 0;
+   399→                playerIsSleeping = false;
+   400→        }
+   401→}
+   402→
+   403→/*protected*/
+   404→void Player::updateAi() {
+   405→        updateAttackAnim();
+   406→}
+   407→
+   408→int Player::getItemInHandIcon(ItemInstance* item, int layer) {
+   409→        int icon = item->getIcon();
+   410→        if(useItem.id != 0 && item->id == Item::bow->id) {
+   411→                int ticksHeld = (item->getUseDuration() - useItemDuration);
+   412→                if(ticksHeld >= BowItem::MAX_DRAW_DURATION - 2) {
+   413→                        return 5 + 8 * 16;
+   414→                }
+   415→                if(ticksHeld > (2 * BowItem::MAX_DRAW_DURATION) / 3) {
+   416→                        return 5 + 7*16;
+   417→                }
+   418→                if(ticksHeld > 0) {
+   419→                        return 5 + 6 * 16;
+   420→                }
+   421→        }
+   422→        return icon;
+   423→}
+   424→
+   425→void Player::aiStep() {
+   426→    if (level->difficulty == Difficulty::PEACEFUL && health < MAX_HEALTH) {
+   427→        if (tickCount % (12 * SharedConstants::TicksPerSecond) == 0) heal(1);
+   428→    }
+   429→    //inventory.tick();
+   430→    oBob = bob;
+   431→        // moved the super::aiStep() part to the local player
+   432→
+   433→    float tBob = (float) Mth::sqrt(xd * xd + zd * zd);
+   434→    float tTilt = (float) Mth::atan(-yd * 0.2f) * 15.f;
+   435→    if (tBob > 0.1f) tBob = 0.1f;
+   436→    if (!onGround || health <= 0) tBob = 0;
+   437→    if (onGround || health <= 0) tTilt = 0;
+   438→    bob += (tBob - bob) * 0.4f;
+   439→    tilt += (tTilt - tilt) * 0.8f;
+   440→
+   441→    if (health > 0) {
+   442→        EntityList& entities = level->getEntities(this, bb.grow(1, 0, 1));
+   443→        for (unsigned int i = 0; i < entities.size(); i++) {
+   444→            Entity* e = entities[i];
+   445→            if (!e->removed) {
+   446→                touch(e);
+   447→            }
+   448→        }
+   449→    }
+   450→}
+   451→
+   452→/*private*/
+   453→void Player::touch(Entity* entity) {
+   454→    entity->playerTouch(this);
+   455→}
+   456→
+   457→int Player::getScore() {
+   458→    return score;
+   459→}
+   460→
+   461→void Player::die(Entity* source) {
+   462→    super::die(source);
+   463→    this->setSize(0.2f, 0.2f);
+   464→    setPos(x, y, z);
+   465→    yd = 0.1f;
+   466→
+   467→        //inventory->dropAll(level->isClientSide);
+   468→
+   469→    if (source != NULL) {
+   470→        xd = -(float) Mth::cos((hurtDir + yRot) * Mth::PI / 180) * 0.1f;
+   471→        zd = -(float) Mth::sin((hurtDir + yRot) * Mth::PI / 180) * 0.1f;
+   472→    } else {
+   473→        xd = zd = 0;
+   474→    }
+   475→    this->heightOffset = 0.1f;
+   476→}
+   477→
+   478→void Player::reset() {
+   479→        super::reset();
+   480→        this->_init();
+   481→}
+   482→
+   483→void Player::_init() {
+   484→        oBob = bob = 0;
+   485→        swinging = 0;
+   486→        swingTime = 0;
+   487→        score = 0;
+   488→}
+   489→
+   490→float Player::getWalkingSpeedModifier() {
+   491→        return 1.0f;
+   492→}
+   493→
+   494→
+   495→void Player::awardKillScore(Entity* victim, int score) {
+   496→    this->score += score;
+   497→}
+   498→
+   499→bool Player::isShootable() {
+   500→    return true;
+   501→}
+   502→
+   503→bool Player::isCreativeModeAllowed() {
+   504→    return true;
+   505→}
+   506→
+   507→//void Player::drop() {
+   508→//    //drop(inventory.removeItem(inventory.selected, 1), false);
+   509→//}
+   510→
+   511→void Player::drop(ItemInstance* item) {
+   512→    drop(item, false);
+   513→}
+   514→
+   515→void Player::drop(ItemInstance* item, bool randomly) {
+   516→    if (item == NULL || item->isNull())
+   517→        return;
+   518→
+   519→    ItemEntity* thrownItem = new ItemEntity(level, x, y - 0.3f + getHeadHeight(), z, *item);
+   520→        { //@todo:itementity
+   521→                delete item;
+   522→                item = NULL;
+   523→        }
+   524→    thrownItem->throwTime = 20 * 2;
+   525→
+   526→    float pow = 0.1f;
+   527→    if (randomly) {
+   528→        float _pow = random.nextFloat() * 0.5f;
+   529→        float dir = random.nextFloat() * Mth::PI * 2;
+   530→        thrownItem->xd = -Mth::sin(dir) * _pow;
+   531→        thrownItem->zd = Mth::cos(dir) * _pow;
+   532→        thrownItem->yd = 0.2f;
+   533→
+   534→    } else {
+   535→        pow = 0.3f;
+   536→        thrownItem->xd = -Mth::sin(yRot / 180 * Mth::PI) * Mth::cos(xRot / 180 * Mth::PI) * pow;
+   537→        thrownItem->zd = Mth::cos(yRot / 180 * Mth::PI) * Mth::cos(xRot / 180 * Mth::PI) * pow;
+   538→        thrownItem->yd = -Mth::sin(xRot / 180 * Mth::PI) * pow + 0.1f;
+   539→        pow = 0.02f;
+   540→
+   541→        float dir = random.nextFloat() * Mth::PI * 2;
+   542→        pow *= random.nextFloat();
+   543→        thrownItem->xd += Mth::cos(dir) * pow;
+   544→        thrownItem->yd += (random.nextFloat() - random.nextFloat()) * 0.1f;
+   545→        thrownItem->zd += Mth::sin(dir) * pow;
+   546→    }
+   547→
+   548→    reallyDrop(thrownItem);
+   549→}
+   550→
+   551→/*protected*/
+   552→void Player::reallyDrop(ItemEntity* thrownItem) {
+   553→    level->addEntity(thrownItem);
+   554→}
+   555→
+   556→float Player::getDestroySpeed(Tile* tile) {
+   557→    float speed = inventory->getDestroySpeed(tile);
+   558→    //if (isUnderLiquid(Material.water)) speed /= 5;
+   559→    //if (!onGround) speed /= 5;
+   560→    return speed;
+   561→}
+   562→
+   563→bool Player::canDestroy(Tile* tile) {
+   564→        return inventory->canDestroy(tile);
+   565→}
+   566→
+   567→//@SuppressWarnings("unchecked")
+   568→void Player::readAdditionalSaveData(CompoundTag* entityTag) {
+   569→    super::readAdditionalSaveData(entityTag);
+   570→
+   571→        if (entityTag->contains("Inventory", Tag::TAG_List)) {
+   572→                ListTag* inventoryList = entityTag->getList("Inventory");
+   573→                inventory->load(inventoryList);
+   574→        }
+   575→        if (entityTag->contains("Armor", Tag::TAG_List)) {
+   576→                loadArmor(armor, entityTag->getList("Armor"));
+   577→        }
+   578→
+   579→    dimension = entityTag->getInt("Dimension");
+   580→
+   581→        //return;
+   582→        if(entityTag->contains("Sleeping") && entityTag->contains("SleepTimer")
+   583→                && entityTag->contains("BedPositionX") && entityTag->contains("BedPositionY") && entityTag->contains("BedPositionZ")) {
+   584→                        playerIsSleeping = entityTag->getBoolean("Sleeping");
+   585→                        sleepCounter = entityTag->getShort("SleepTimer");
+   586→                        bedPosition = Pos(entityTag->getInt("BedPositionX"), entityTag->getInt("BedPositionY"), entityTag->getInt("BedPositionZ"));
+   587→        } else {
+   588→                playerIsSleeping = false;
+   589→                bedPosition = Pos(0,0,0);
+   590→        }
+   591→
+   592→        if(!playerIsSleeping) {
+   593→                stopSleepInBed(true, true, false);
+   594→                entityData.clearFlag<SharedFlagsInformation::SharedFlagsInformationType>(DATA_PLAYER_FLAGS_ID, PLAYER_SLEEP_FLAG);
+   595→        } else {
+   596→                playerIsSleeping = false;
+   597→                startSleepInBed(bedPosition.x, bedPosition.y, bedPosition.z);
+   598→                entityData.setFlag<SharedFlagsInformation::SharedFlagsInformationType>(DATA_PLAYER_FLAGS_ID, PLAYER_SLEEP_FLAG);
+   599→        }
+   600→        entityData.set<Pos>(DATA_BED_POSITION_ID, bedPosition);
+   601→    if (entityTag->contains("SpawnX") && entityTag->contains("SpawnY") && entityTag->contains("SpawnZ")) {
+   602→                respawnPosition.set(entityTag->getInt("SpawnX"), entityTag->getInt("SpawnY"), entityTag->getInt("SpawnZ"));
+   603→    }
+   604→        playerHasRespawnPosition = respawnPosition.y >= 0;
+   605→}
+   606→
+   607→void Player::addAdditonalSaveData(CompoundTag* entityTag) {
+   608→    super::addAdditonalSaveData(entityTag);
+   609→        
+   610→        ListTag* inventoryTag = inventory->save(new ListTag());
+   611→ //   if (inventoryTag->size() > 0)
+   612→                entityTag->put("Inventory", inventoryTag);
+   613→        //else
+   614→        //      delete inventoryTag;
+   615→
+   616→        ListTag* armorTag = saveArmor(armor);
+   617→        entityTag->put("Armor", armorTag);
+   618→
+   619→    entityTag->putInt("Dimension", dimension);
+   620→        //return;
+   621→        
+   622→        entityTag->putBoolean("Sleeping", isSleeping());
+   623→        entityTag->putShort("SleepTimer", sleepCounter);
+   624→        entityTag->putInt("BedPositionX", bedPosition.x);
+   625→        entityTag->putInt("BedPositionY", bedPosition.y);
+   626→        entityTag->putInt("BedPositionZ", bedPosition.z);
+   627→    
+   628→        entityTag->putInt("SpawnX", respawnPosition.x);
+   629→        entityTag->putInt("SpawnY", respawnPosition.y);
+   630→        entityTag->putInt("SpawnZ", respawnPosition.z);
+   631→}
+   632→
+   633→//static Pos getRespawnPosition(Level level, CompoundTag entityTag) {
+   634→//    if (entityTag.contains("SpawnX") && entityTag.contains("SpawnY") && entityTag.contains("SpawnZ")) {
+   635→//        return /*new*/ Pos(entityTag.getInt("SpawnX"), entityTag.getInt("SpawnY"), entityTag.getInt("SpawnZ"));
+   636→//    }
+   637→//    return level.getSharedSpawnPos();
+   638→//}
+   639→
+   640→void Player::startCrafting(int x, int y, int z, int tableSize) {
+   641→}
+   642→
+   643→void Player::startStonecutting(int x, int y, int z) {
+   644→}
+   645→
+   646→void Player::openFurnace(FurnaceTileEntity* e) {
+   647→}
+   648→
+   649→void Player::take(Entity* e, int orgCount) {
+   650→}
+   651→
+   652→float Player::getHeadHeight() {
+   653→    return 0.12f; // heightOffset; // 0.12f;
+   654→}
+   655→
+   656→/*protected*/
+   657→void Player::setDefaultHeadHeight() {
+   658→    heightOffset = 1.62f;
+   659→}
+   660→
+   661→bool Player::isHurt() {
+   662→        return health > 0 && health < getMaxHealth();
+   663→}
+   664→
+   665→bool Player::hurt(Entity* source, int dmg) {
+   666→        if (abilities.invulnerable) return false;
+   667→
+   668→        noActionTime = 0;
+   669→    if (health <= 0) return false;
+   670→        if(isSleeping() && !level->isClientSide) {
+   671→                stopSleepInBed(true, true, false);
+   672→        }
+   673→
+   674→    if (source != NULL && (source->getCreatureBaseType() == MobTypes::BaseEnemy
+   675→                                                || source->getEntityTypeId() == EntityTypes::IdArrow)) {
+   676→
+   677→                if (source->isMob() && level->adventureSettings.noMvP)
+   678→                        return false;
+   679→
+   680→        if (level->difficulty == Difficulty::PEACEFUL) dmg = 0;
+   681→        else if (level->difficulty == Difficulty::EASY) dmg = dmg / 3 + 1;
+   682→        else if (level->difficulty == Difficulty::HARD) dmg = dmg * 3 / 2;
+   683→    }
+   684→
+   685→   if (dmg == 0) return false;
+   686→
+   687→ //   Entity* attacker = source;
+   688→ //   //if (attacker instanceof Arrow) {
+   689→ //   //    if (((Arrow) attacker).owner != NULL) {
+   690→ //   //        attacker = ((Arrow) attacker).owner;
+   691→ //   //    }
+   692→ //   //}
+   693→    return super::hurt(source, dmg);
+   694→}
+   695→
+   696→void Player::interact(Entity* entity) {
+   697→    if (entity->interact(this)) return;
+   698→        ItemInstance* item = inventory->getSelected();
+   699→        if (item != NULL && entity->isMob()) {
+   700→        item->interactEnemy((Mob*)entity);
+   701→        if (item->count <= 0) {
+   702→            //item.snap(this);
+   703→            inventory->clearSlot(inventory->selected);
+   704→        }
+   705→    }
+   706→}
+   707→
+   708→//void Player::swing() {
+   709→        //LOGI("swinging: %d\n", swinging);
+   710→//      if (!swinging || swingTime >= 3 || swingTime < 0) {
+   711→//              swingTime = -1;
+   712→//              swinging = true;
+   713→//      }
+   714→
+   715→                //level->raknetInstance->send(owner, new AnimatePacket(AnimatePacket::Swing, this));
+   716→        //}
+   717→//}
+   718→
+   719→void Player::attack(Entity* entity) {
+   720→        int dmg = inventory->getAttackDamage(entity);
+   721→    if (dmg > 0) {
+   722→        entity->hurt(this, dmg);
+   723→        ItemInstance* item = inventory->getSelected();
+   724→        if (item != NULL && entity->isMob() && abilities.instabuild != true) {
+   725→            item->hurtEnemy((Mob*) entity);
+   726→            if (item->count <= 0) {
+   727→                //item->snap(this);
+   728→                inventory->clearSlot(inventory->selected);
+   729→            }
+   730→        }
+   731→    }
+   732→}
+   733→
+   734→void Player::respawn() {
+   735→}
+   736→
+   737→/*protected static*/
+   738→void Player::animateRespawn(Player* player, Level* level) {
+   739→    //for (int i = 0; i < 45; i++) {
+   740→    //    float angle = i * Mth::PI * 4.0f / 25.0f;
+   741→    //    float xo = Mth::cos(angle) * .7f;
+   742→    //    float zo = Mth::sin(angle) * .7f;
+   743→    //}
+   744→}
+   745→
+   746→/*virtual*/
+   747→void Player::animateRespawn() {}
+   748→
+   749→//void carriedChanged(ItemInstance carried) {
+   750→//}
+   751→ItemInstance* Player::getCarriedItem() {
+   752→        return inventory->getSelected();
+   753→}
+   754→
+   755→void Player::remove() {
+   756→        invisible = true;
+   757→    super::remove();
+   758→}
+   759→
+   760→//@Override
+   761→bool Player::isInWall() {
+   762→    return super::isInWall();
+   763→}
+   764→
+   765→bool Player::hasResource( int id ) {
+   766→        return inventory->hasResource(id);
+   767→}
+   768→
+   769→/**
+   770→    * This method is currently only relevant to client-side players. It will
+   771→    * try to load the messageId from the language file and display it to the
+   772→    * client.
+   773→    */
+   774→void Player::displayClientMessage(const std::string& messageId) {
+   775→}
+   776→
+   777→Pos Player::getRespawnPosition() {
+   778→    return respawnPosition;
+   779→}
+   780→
+   781→void Player::setRespawnPosition(const Pos& respawnPosition) { // @attn WARNING CHECK THIS THROUGH @fix @todo: rewrite
+   782→        if (respawnPosition.y < 0) {
+   783→                playerHasRespawnPosition = false;
+   784→        }
+   785→        else {
+   786→                playerHasRespawnPosition = true;
+   787→        }
+   788→        this->respawnPosition = respawnPosition;
+   789→}
+   790→
+   791→bool Player::isPlayer() { return true; }
+   792→
+   793→/*static*/
+   794→bool Player::isPlayer( Entity* e ) {
+   795→    return e && e->isPlayer();
+   796→}
+   797→
+   798→Player* Player::asPlayer( Entity* e ) {
+   799→    return isPlayer(e)? (Player*) e : NULL;
+   800→}
+   801→
+   802→void Player::openContainer(ChestTileEntity* container)
+   803→{
+   804→}
+   805→
+   806→void Player::tileEntityDestroyed( int tileEntityId ) {
+   807→
+   808→        //LOGI("TileEntityDestroyed, container: %p, %p\n", this, containerMenu);
+   809→
+   810→        if (!containerMenu) return;
+   811→
+   812→        //LOGI("TileEntityDestroyed, id: %d, %p, %d\n", this, tileEntityId, ((FurnaceMenu*)containerMenu)->furnaceTileEntityId);
+   813→
+   814→        if (containerMenu->tileEntityDestroyedIsInvalid(tileEntityId))
+   815→                closeContainer();
+   816→}
+   817→
+   818→bool Player::canUseCarriedItemWhileMoving() {
+   819→        ItemInstance* item = getCarriedItem();
+   820→        return item &&
+   821→                (       item->id == Item::bow->id
+   822→                ||      item->getItem()->isFood());
+   823→}
+   824→
+   825→void Player::handleEntityEvent( char id ) {
+   826→        if (id == EntityEvent::USE_ITEM_COMPLETE) {
+   827→                completeUsingItem();
+   828→        } else {
+   829→                super::handleEntityEvent(id);
+   830→        }
+   831→}
+   832→
+   833→ItemInstance* Player::getSelectedItem() {
+   834→        return inventory->getSelected();
+   835→}
+   836→
+   837→bool Player::hasRespawnPosition(){
+   838→        return playerHasRespawnPosition;
+   839→}
+   840→
+   841→void Player::openTextEdit( TileEntity* tileEntity ) {
+   842→        // Do nothing on the server, this is a client thing :)
+   843→}
+   844→
+   845→//
+   846→// Armor code. Move this out to an ArmorInventory
+   847→//
+   848→static ListTag* saveArmor(ItemInstance* armor) {
+   849→        ListTag* listTag = new ListTag();
+   850→        for (int i = 0; i < 4; ++i) {
+   851→                CompoundTag* tag = new CompoundTag();
+   852→                armor[i].save(tag);
+   853→                listTag->add(tag);
+   854→        }
+   855→        return listTag;
+   856→}
+   857→
+   858→static void loadArmor(ItemInstance* armor, ListTag* listTag) {
+   859→        if (!listTag)
+   860→                return;
+   861→
+   862→        const int count = Mth::Min(4, listTag->size());
+   863→        for (int i = 0; i < count; ++i) {
+   864→                Tag* tag = listTag->get(i);
+   865→                if (tag->getId() != Tag::TAG_Compound) continue;
+   866→
+   867→                armor[i].load((CompoundTag*) tag);
+   868→        }
+   869→}
+   870→
+   871→ItemInstance* Player::getArmor(int slot) {
+   872→        if (slot < 0 || slot >= NUM_ARMOR)
+   873→                return NULL;
+   874→
+   875→        if (armor[slot].isNull())
+   876→                return NULL;
+   877→
+   878→        return &armor[slot];
+   879→}
+   880→
+   881→void Player::setArmor(int slot, const ItemInstance* item) {
+   882→        if (item == NULL)
+   883→                armor[slot].setNull();
+   884→        else {
+   885→                armor[slot] = *item;
+   886→        }
+   887→}
+   888→
+   889→void Player::hurtArmor( int dmg ) {
+   890→        dmg = Mth::Max(1, dmg / 4);
+   891→
+   892→        for (int i = 0; i < NUM_ARMOR; i++) {
+   893→                ItemInstance& item = armor[i];
+   894→                if (!ItemInstance::isArmorItem(&item))
+   895→                        continue;
+   896→
+   897→                item.hurt(dmg);
+   898→                if (item.count == 0) {
+   899→                        item.setNull();
+   900→                }
+   901→        }
+   902→}
+   903→
+   904→int Player::getArmorTypeHash() {
+   905→        return  (armor[0].id      ) +
+   906→                        (armor[1].id <<  8) +
+   907→                        (armor[2].id << 16) +
+   908→                        (armor[3].id << 24);
+   909→}
+   910→
+   911→int Player::getArmorValue() {
+   912→    int val = 0;
+   913→
+   914→    for (int i = 0; i < NUM_ARMOR; i++) {
+   915→        ItemInstance& item = armor[i];
+   916→        if (!ItemInstance::isArmorItem(&item))
+   917→            continue;
+   918→
+   919→        int baseProtection = ((ArmorItem*) item.getItem())->defense;
+   920→        val += baseProtection;
+   921→    }
+   922→    return val;
+   923→}
+   924→
+   925→

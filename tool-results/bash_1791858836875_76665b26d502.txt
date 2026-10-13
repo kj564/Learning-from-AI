@@ -1,0 +1,501 @@
+49. `GameMode::GameMode / createPlayer / interact / attack / startDestroyBlock / destroyBlock / useItemOn / useItem / getPickRange / initPlayer / releaseUsingItem / tick / render` (GameMode.cpp:19–173)
+50. `SurvivalMode::SurvivalMode / continueDestroyBlock / destroyBlock / stopDestroyBlock / initAbilities / startDestroyBlock` (SurvivalMode.cpp:11–98)
+51. `CreativeMode::CreativeMode / startDestroyBlock / creativeDestroyBlock / continueDestroyBlock / stopDestroyBlock / initAbilities / isCreativeType / releaseUsingItem` (CreativeMode.cpp:16–72)
+52. `RandomLevelSource::RandomLevelSource / ~RandomLevelSource` (RandomLevelSource.cpp:19–62)
+53. `RandomLevelSource::prepareHeights` (RandomLevelSource.cpp:65–136)
+54. `RandomLevelSource::buildSurfaces` (RandomLevelSource.cpp:138–215)
+55. `RandomLevelSource::postProcess` (RandomLevelSource.cpp:218–482)
+56. `RandomLevelSource::getChunk` (RandomLevelSource.cpp:488–511)
+57. `RandomLevelSource::getHeights` (RandomLevelSource.cpp:513–602)
+58. `RandomLevelSource::calcWaterDepths` (RandomLevelSource.cpp:604–648)
+59. `RandomLevelSource::hasChunk / tick / shouldSave / gatherStats / getMobsAt` (RandomLevelSource.cpp:650–684)
+60. `PerformanceTestChunkSource::create` (RandomLevelSource.cpp:687–723)
+61. `MobSpawner::tick` (MobSpawner.cpp:28–172)
+62. `MobSpawner::postProcessSpawnMobs` (MobSpawner.cpp:175–224)
+63. `MobSpawner::getRandomPosWithin` (MobSpawner.cpp:226–233)
+64. `MobSpawner::isSpawnPositionOk` (MobSpawner.cpp:235–242)
+65. `MobSpawner::finalizeMobSettings` (MobSpawner.cpp:245–261)
+66. `MobSpawner::addMob` (MobSpawner.cpp:264–276)
+67. `MobSpawner::makeBabyMob` (MobSpawner.cpp:278–284)
+68. `Level::getRandomMobSpawnAt` (Level.cpp:1100–1108)
+69. `Dimension::Dimension / init / isValidSpawn / getTimeOfDay / createRandomLevelSource / updateLightRamp / getSunriseColor / getFogColor / mayRespawn / getNew` (Dimension.cpp:13–140)
+70. `DimensionFactory::createDefaultDimension` (Dimension.cpp:126–140)
+71. `NormalDayCycleDimension::getTimeOfDay / getFogColor` (NormalDayCycleDimension.h:12–37)
+72. `LightLayer` constants (LightLayer.cpp:1–4)
+73. `MobCategory::monster / creature / waterCreature / values / initMobCategories` (MobCategory.cpp:9–48)
+74. `Biome::Biome()` (Biome.cpp:30–62) — default mob lists
+75. `Biome::initBiomes` + `recalc` (Biome.cpp:97–124)
+76. `Biome::getTreeFeature / getCreatureProbability / getMobs` (Biome.cpp:140–225)
+
+### Verified constants table — Level/LevelChunk/Tile/GameMode/LevelGen/MobSpawner
+
+| Constant | Value | Source |
+|---|---|---|
+| `LEVEL_HEIGHT` | 128 | LevelConstants.h:5 |
+| `CHUNK_CACHE_WIDTH` | 16 (chunks per side) | LevelConstants.h:6 |
+| `CHUNK_WIDTH` / `CHUNK_DEPTH` | 16 (blocks per chunk side) | LevelConstants.h:7–8 |
+| `LEVEL_WIDTH` / `LEVEL_DEPTH` | 256 (blocks per side, fixed) | LevelConstants.h:9–10 |
+| `CHUNK_COLUMNS` | 256 (16×16) | LevelConstants.h:11 |
+| `CHUNK_BLOCK_COUNT` | 32768 (16×16×128) | LevelConstants.h:12 |
+| `Level::MAX_LEVEL_SIZE` | 32000000 | Level.h:69 |
+| `Level::DEPTH` | 128 (= LEVEL_HEIGHT) | Level.h:70 |
+| `Level::SEA_LEVEL` | 63 (= DEPTH/2 - 1) | Level.h:71 |
+| `Level::MAX_BRIGHTNESS` | 15 | Level.h:73 |
+| `Level::TICKS_PER_DAY` | 19200 (= 20×60×16) | Level.h:74 |
+| `Level::MIDDLE_OF_NIGHT_TIME` | 12000 ticks | Level.h:75 |
+| `Level::MAX_TICK_TILES_PER_TICK` | 100 | Level.h:66 |
+| `Level::genDepthBits` | 7 | Level.h:76 |
+| `Level::genDepth` | 128 | Level.h:78 |
+| `TicksPerSecond` (SharedConstants) | 20 | SharedConstants.h:28 |
+| `_randValue` initial seed | 42184323 | Level.cpp:42 |
+| `_addend` (LCG) | 1013904223 | Level.cpp:43 |
+| `MobSpawnInterval` (per-tick gate) | 2 | Level.cpp:187 |
+| Friendly spawn window | first 2 ticks per 400-tick period | Level.cpp:192 |
+| Random ticks per chunk per tick | 20 (hardcoded in tickTiles loop) | Level.cpp:320 |
+| Tick-tile LCG | `_randValue = _randValue * 3 + _addend` | Level.cpp:321 |
+| Random tick index decode | `x = (val)&15; z = (val>>8)&15; y = (val>>16)&127` | Level.cpp:323–325 |
+| Chunk polling pattern (tickTiles) | 80 diamond-shaped offsets, ±4 chunks | Level.cpp:260–267 |
+| Block index in chunk | `blocks[(x<<11) \| (z<<7) \| y]` | LevelChunk.cpp:65, 111, 145, 370 |
+| Heightmap index in chunk | `heightmap[(z<<4) \| x]` | LevelChunk.cpp:63, 109, 162, 179, 220, 341 |
+| updateMap index in chunk | `updateMap[x \| (z<<4)] \|= (1 << (y>>4))` | LevelChunk.cpp:100, 140 |
+| `EntityBlocksArraySize` (entity Y buckets) | 8 (= 128/16) | LevelChunk.h:137 |
+| `UpdateMapBitShift` | 4 (= y>>4 → 8 sub-chunk regions per column) | LevelChunk.h:111 |
+| `LightLayer::Sky.surrounding` | 15 | LightLayer.cpp:3 |
+| `LightLayer::Block.surrounding` | 0 | LightLayer.cpp:4 |
+| `LevelChunk::touchedSky` (static) | false initially | LevelChunk.cpp:14 |
+| `Dimension::brightnessRamp` | `((1-v)/(v*3+1))*0.95 + 0.15` where v=1-i/16, i∈[0,15] | Dimension.cpp:66–74 |
+| `Dimension::fogColor` | `0x80daff` (light blue) | Dimension.h:53 |
+| `Dimension::NORMAL` id | 0 | Dimension.h:15 |
+| `Dimension::NORMAL_DAYCYCLE` id | 10 | Dimension.h:16 |
+| Game type → Dimension | Survival→NormalDayCycle; Creative→base Dimension (always day) | Dimension.cpp:130–137 |
+| `RandomLevelSource::SNOW_CUTOFF` | 0.5f | RandomLevelSource.cpp:15 |
+| `RandomLevelSource::SNOW_SCALE` | 0.3f | RandomLevelSource.cpp:16 |
+| `RandomLevelSource::CHUNK_HEIGHT` (noise grid) | 8 | RandomLevelSource.h:37 |
+| `RandomLevelSource::CHUNK_WIDTH` (noise grid) | 4 | RandomLevelSource.h:38 |
+| `MAX_BUFFER_SIZE` (getHeights buffer) | 1024 | RandomLevelSource.cpp:17 |
+| Per-chunk RNG seed for worldgen | `xOffs * 341872712 + zOffs * 132899541` | RandomLevelSource.cpp:496 |
+| Noise height scale `s` | 684.412 | RandomLevelSource.cpp:520 |
+| Sea level (used in worldgen) | 64 (= Level::DEPTH - 64) | RandomLevelSource.cpp:68, 139 |
+| Tile::RENDERLAYER_OPAQUE | 0 | Tile.cpp:26 |
+| Tile::RENDERLAYER_ALPHATEST | 1 | Tile.cpp:27 |
+| Tile::RENDERLAYER_BLEND | 2 | Tile.cpp:28 |
+| Tile::NUM_BLOCK_TYPES | 256 | Tile.h:103 |
+| Tile default friction | 0.6 | Tile.cpp:328, 344 |
+| Tile default gravity | 1.0 | Tile.cpp:327, 343 |
+| Ice friction override | 0.98 | IceTile.h:18 |
+| `Tile::getTickDelay()` default | 10 | Tile.cpp:582 |
+| `Tile::getExplosionResistance()` | `explosionResistance / 5` (= `explodeableArg * 3 / 5`) | Tile.cpp:597 |
+| `Tile::getDestroyProgress(player)` | `0` if destroySpeed<0; `1/destroySpeed/100` if !canDestroy; `(toolSpeed/destroySpeed)/30` otherwise | Tile.cpp:391–395 |
+| `Item::getDestroySpeed` default | 1.0 | Item.h:267 |
+| `Inventory::getDestroySpeed` for non-tool | 1.0 (or item's speed) | Inventory.cpp:316–323 |
+| `Material::isAlwaysDestroyable` default | true (except stone, metal, topSnow, snow — set via notAlwaysDestroyable()) | Material.cpp:42–43, 58–59 |
+| Creative break repeat interval | 10 ticks (`DestructionTickDelay = 10`) = 0.5s | CreativeMode.cpp:16 |
+| Survival post-break cooldown | 5 ticks (destroyDelay = 5 in continueDestroyBlock) | SurvivalMode.cpp:45 |
+| Survival break-step sound period | every 4 ticks (`++destroyTicks & 3 == 1`) | SurvivalMode.cpp:32 |
+| GameMode pick range | 5.0 blocks | GameMode.cpp:142 |
+| DestroyProgress render interpolation | `oDestroyProgress + (destroyProgress - oDestroyProgress) * a` | GameMode.cpp:168 |
+| DestroyProgress decay | reset to 0 when player looks away or releases; in Creative stopDestroyBlock = no-op | SurvivalMode.cpp:48–54, 78–81; CreativeMode.cpp:48–49 |
+| `MobSpawner::MIN_SPAWN_DISTANCE` | 24 blocks (player & spawn point) | MobSpawner.h:36 |
+| Mob enemy-spawn radius around player | 8 chunks = 128 blocks | MobSpawner.cpp:55 |
+| Friendly spawn pattern | poll all 256 chunks | MobSpawner.cpp:44–45 |
+| Random spawn pos Y range | `random.nextInt(Level::DEPTH)` = 0..127 | MobSpawner.cpp:229 |
+| Spawn cluster random-walk step | ±6 blocks (X/Z), ±1 (Y) | MobSpawner.cpp:97–109 |
+| `MobCategory::monster` | BaseEnemy, max 20/level, enemy, material air | MobCategory.cpp:9–13 |
+| `MobCategory::creature` | BaseCreature, max 15/level, friendly, material air | MobCategory.cpp:17–21 |
+| `MobCategory::waterCreature` | BaseWaterCreature, max 10/level, friendly, material water | MobCategory.cpp:25–29 |
+| Monster per-type cap | `1.5 * randomWeight * maxPerLevel / defaultTotalEnemyWeight` | MobSpawner.cpp:140 |
+| `defaultTotalEnemyWeight` | 30 (8+12+6+4) | Biome.cpp:55–57 |
+| `defaultTotalFriendlyWeight` | 40 (12+10+10+8) | Biome.cpp:59–61 |
+| `Biome::getCreatureProbability()` | 0.08 (8% per worldgen cluster iteration) | Biome.cpp:227 |
+| `MobSpawner::makeBabyMob` probability | 0.5 | MobSpawner.cpp:260 |
+| Baby animal age set | -24000 ticks (= -20 min real-time) | MobSpawner.cpp:282 |
+| Baby animal RNG seed | 98495119L (static, deterministic) | MobSpawner.cpp:279 |
+| Player save period (Level::tick) | every 30 real seconds | Level.cpp:1549–1553 |
+| SetTime broadcast period (normal mode) | every 256 ticks (`time & 255 == 0`) | Level.cpp:225 |
+| SetTime broadcast period (night mode) | every 20 ticks | Level.cpp:211 |
+| Initial spawn search start | (128, 64, 128) — center of world | Level.cpp:431–433 |
+| Initial spawn random walk | ±32 blocks per iteration, bounded [4, 252) | Level.cpp:435–441 |
+
+### Verified ore distribution (per 16×16 chunk, per `postProcess` call)
+
+| Ore (block id) | Veins/chunk | Vein size | Y range |
+|---|---|---|---|
+| Clay | 10 | 32 | 0..127 |
+| Dirt (3) | 20 | 32 | 0..127 |
+| Gravel (13) | 10 | 32 | 0..127 |
+| Coal (16) | 20 | 16 | 0..127 |
+| Iron (15) | 20 | 8 | 0..63 |
+| Gold (14) | 2 | 8 | 0..31 |
+| Redstone (73) | 8 | 7 | 0..15 |
+| Diamond (56, "emeraldOre") | 1 | 7 | 0..15 |
+| Lapis (21) | 1 | 6 | 0..31 (triangular) |
+
+### Verified feature distribution (per chunk, per `postProcess`)
+
+| Feature | Count per chunk | Y range | Notes |
+|---|---|---|---|
+| ClayFeature | 10 | 0..127 | |
+| Dirt ore | 20 | 0..127 | |
+| Gravel ore | 10 | 0..127 | |
+| Coal ore | 20 | 0..127 | |
+| Iron ore | 20 | 0..63 | |
+| Gold ore | 2 | 0..31 | |
+| Redstone ore | 8 | 0..15 | |
+| Diamond ore | 1 | 0..15 | |
+| Lapis ore | 1 | 0..31 (triangular) | |
+| Trees | biome-dependent: forest/rainForest: oFor+2; seasonalForest/taiga: oFor+1; desert/tundra/plains: -20 (none); else 0 + 10% chance of +1 | on surface (heightmap) | oFor = `(forestNoise/8 + rand*4 + 4) / 3` ≈ 1..3 |
+| Flowers (37) | 2 | 0..127 | |
+| Roses (38) | 0 or 1 (50% chance) | 0..127 | |
+| Mushroom1 (39) | 0 or 1 (25% chance) | 0..127 | |
+| Mushroom2 (40) | 0 or 1 (12.5% chance) | 0..127 | |
+| Reeds/sugarcane (83) | 10 | 0..127 | |
+| Cactus | 5 (Desert only, else 0) | 0..127 | |
+| Water spring | 50 | 0..127 (triangular via nested nextInt(120)+8) | |
+| Lava spring | 20 | 0..119 (deeply triangular via nested nextInt(nextInt(112)+8)+8) | |
+| Snow layer | per-column, where `temp - (y-64)/64 * 0.3 < 0.5` | on top solid block | |
+| Worldgen mob spawn (creatures only) | geometric 8% per iteration | on surface | MobSpawner::postProcessSpawnMobs |
+
+### UNVERIFIED items (flagged for follow-up)
+1. **`buildSurfaces` block-array index quirk** (RandomLevelSource.cpp:160): uses `offs = (z * 16 + x) * 128 + y` which is `z * 2048 + x * 128 + y`, while `LevelChunk` and `prepareHeights` use `x << 11 | z << 7 | y` = `x * 2048 + z * 128 + y`. **This appears to be a transposition bug in MCPE 2013 worldgen** — surface materials get applied at transposed (z,x) positions relative to where the heightmap noise placed rock. The faithful port may need to reproduce this bug for exact-seed world parity, OR fix it if the goal is "fixed MCPE worldgen". UNVERIFIED — needs cross-reference against an actual generated world save or a side-by-side comparison.
+2. **Tile subclass constructors**: the explicit fields set in `initTiles` (destroySpeed, soundType, etc.) are listed, but the constructors of `BedTile`, `WebTile`, `TallGrass`, `Bush`, `Mushroom`, `DoorTile`, `StairTile`, `FenceTile`, `LiquidTile*`, `TorchTile`, `LadderTile`, `SignTile`, `OreTile`, etc. may set additional fields (lightBlock, shape, renderShape, mayPick, etc.) not visible from `initTiles` alone. For exact port, each tile subclass header (BedTile.h, Bush.h, StairTile.h, LiquidTile.h, etc.) needs to be read.
+3. **`StairTile` destroySpeed/explodeable inheritance**: in `initTiles`, stairs_* tiles don't call `setDestroyTime`/`setExplodeable` — they presumably inherit from their source tile (`wood`, `stoneBrick`, `redBrick`, etc.). UNVERIFIED — need StairTile.h to confirm whether it copies destroySpeed/explosionResistance from source.
+4. **`FireTile` shape & ticking**: created LAST in initTiles (after other tiles); tile id 51. `setLightEmission(1.0)` → emission 15. `shouldTick[51]` should be true (fire needs to tick to spread). UNVERIFIED whether FireTile constructor calls `setTicking(true)` (likely yes — need FireTile.h).
+5. **`LiquidTile` shape & ticking**: water/lava should tick (`shouldTick[8..11] = true`). UNVERIFIED — need LiquidTile.h, LiquidTileDynamic.h, LiquidTileStatic.h.
+6. **`getTopSolidBlock` semantics** when no solid block exists in a column: returns `-1`. The callers in `MobSpawner::postProcessSpawnMobs` and `RandomLevelSource::postProcess` use `getTopSolidBlock` as Y for spawn/snow placement; if -1 (no solid), the `y > 0 && y < 128` check would skip the snow. UNVERIFIED — confirm `-1` propagates safely.
+7. **`Minecraft.cpp` tick driver** (where `Level::tick()` and `Level::tickEntities()` are called from): UNVERIFIED — these are called from the main game loop, but the exact call order, the game-tick vs render-tick split, and the `Minecraft::tick()`/`Minecraft::tickEntities()` distinction need reading Minecraft.cpp.
+8. **`ChunkCache::tick()` and chunk loading/unloading**: `_chunkSource->tick()` is called every level tick; the actual chunk streaming, save/load, and async generation happen there. UNVERIFIED — need ChunkCache.h.
+9. **`SynchedEntityData` dirty-flag mechanism**: `Level::tick()` sends dirty entity data, but the dirty-tracking code is in `SynchedEntityData::isDirty()` — UNVERIFIED how the dirty bit is set/cleared.
+10. **Player getDestroySpeed underwater/on-ground multipliers**: Player.cpp:558–559 has commented-out `speed /= 5` for underwater and `speed /= 5` for not-on-ground. **In MCPE 2013, these multipliers are NOT applied** (commented out). UNVERIFIED whether the commented-out code is actually applied somewhere else.
+11. **`Item::bow->id`**: referenced in GameMode and SurvivalMode/CreativeMode — UNVERIFIED the bow item id (likely `Item::bow` is set in Item::initItems, not in Tile::initTiles).
+12. **`Difficulty::PEACEFUL`** constant value (Level.cpp:191): UNVERIFIED — likely 0 (with EASY=1, NORMAL=2, HARD=3) but need Difficulty.h.
+13. **Biome temperature/downfall array**: `level->getBiomeSource()->temperatures` and `downfalls` are 16×16 arrays per chunk (BiomeSource.cpp). UNVERIFIED the exact biome-by-temperature/downfall lookup (Biome.cpp:151–193 uses `(int)(temperature*63), (int)(downfall*63)` as the map lookup — but downfall is multiplied by temperature first in `_getBiome`).
+14. **`PerformanceTestChunkSource`** is unused (Dimension::createRandomLevelSource always returns `new RandomLevelSource`). Listed for completeness; the port doesn't need it unless reproducing the dev/test mode.
+15. **`LargeCaveFeature`** (RandomLevelSource.h:65): declared but **NOT invoked** in getChunk or postProcess (cave gen code is commented out at RandomLevelSource.cpp:507). UNVERIFIED whether caves are actually generated in MCPE 2013 — they may not be, or they may be generated elsewhere (LargeCaveFeature.h has logic but isn't called).
+16. **`CanyonFeature`, `DungeonFeature`, `TownFeature`** (levelgen dir): present in the source tree but UNVERIFIED — they may not be called from RandomLevelSource at all (the file CanyonFeature.cpp exists but its `place()` may be invoked from elsewhere, or unused like caves).
+17. **`Level::explode` and `Explosion`**: full explosion logic not read; only the dispatcher `Level::explode` (Level.cpp:1658–1672) is verified.
+18. **`Level::clip` ray-cast** (Level.cpp:849–954): the block-selection ray cast — copied in full but it's complex (DDA-style ray traversal). Verified but some edge cases (NaN, exact hit position) may need additional verification against the `Vec3::clipX/Y/Z` helpers.
+19. **`TileItem`/`Item` registration** at end of `initTiles` (Tile.cpp:279–298): each tile gets a default `TileItem` (item id = tile id - 256) UNLESS explicitly overridden (cloth, treeTrunk, stoneSlabHalf, sapling, leaves, sandStone, quartzBlock, stoneBrickSmooth). UNVERIFIED the exact behavior of these custom item classes (`ClothTileItem`, `AuxDataTileItem`, `StoneSlabTileItem`, `SaplingTileItem`, `LeafTileItem`).
+20. **`LevelData`** fields & methods (`getSpawnMobs`, `getTime`, `setTime`, `getGameType`, `getSeed`, `getXSpawn`, `getYSpawn`, `getZSpawn`, `getLoadedPlayerTag`, etc.): referenced extensively but UNVERIFIED — need LevelData.{h,cpp} for save/load format.
+
+### Corrected values vs. earlier MODLOG entries (if any)
+- **Entry 5 (Player::travel)** referenced `flyingSpeed = 0.05` override — this is consistent with `Player::travel` (Player.cpp:368), but `getDestroySpeed` (Player.cpp:556) returns `inventory->getDestroySpeed(tile)` and the commented-out underwater/not-on-ground penalties are NOT applied in MCPE 2013 (Player.cpp:558–559). **Player getDestroySpeed has NO environment multipliers** in this version.
+- No other corrections needed — Entries 9–13 are the FIRST Level/Tile/GameMode/LevelGen entries in MODLOG.
+
+### Next actions for the port
+1. **Implement the world-tick loop exactly as Entry 9**: mob-spawn gate (every 2 ticks), chunk-source tick, sky-darken, time-of-day, scheduled-ticks (100/tick cap), random-ticks (20/chunk/tick), entity-data sync.
+2. **Implement the random-tick LCG** with seed 42184323, addend 1013904223, the `*3+addend` step, and the index decode `x = val&15, z = (val>>8)&15, y = (val>>16)&127`.
+3. **Implement chunk polling** with the exact 80-offset diamond pattern from Level.cpp:260–267.
+4. **Implement LevelChunk storage** as 32768-byte block array + 3 nibble arrays (data/skyLight/blockLight at 16384 bytes each) + 256-byte heightmap + 256-byte updateMap.
+5. **Use the exact index formula** `blocks[x << 11 | z << 7 | y]` everywhere in chunk access.
+6. **Implement brightness** as `max(skyLight - skyDarken, blockLight)` with the brightnessRamp shading curve.
+7. **Implement the half-slab/farmland brightness leak** (max of 5 neighbors).
+8. **Implement the full Tile registry** with exact destroySpeed, soundType, lightBlock, lightEmission per Entry 11 table.
+9. **Implement Tile::getDestroyProgress** as `if (destroySpeed<0) return 0; if (!canDestroy) return 1/destroySpeed/100; return (toolSpeed/destroySpeed)/30`.
+10. **Implement Inventory::canDestroy** (material isAlwaysDestroyable → true; else item.canDestroySpecial(tile)).
+11. **Implement SurvivalMode::continueDestroyBlock** with the 5-tick post-break delay, 4-tick step sound, break-when-destroyProgress>=1, reset on crosshair move.
+12. **Implement CreativeMode** with instant break + 10-tick repeat (`DestructionTickDelay = 10`).
+13. **Implement GameMode::tick/render** with the `oDestroyProgress → destroyProgress` interpolation by frame-time `a`.
+14. **Implement worldgen** (RandomLevelSource) with the exact noise layout (5×17×5 control points), 8-octave PerlinNoise (lperlinNoise1/2 at 16 oct, perlinNoise1 at 8 oct, etc.), trilinear interpolation, `val > 0` = rock / `val <= 0 && y < 64` = water / `temp < 0.5` = ice rule.
+15. **Implement buildSurfaces** with the bedrock layer (y ≤ rand(5)), surface biome materials, sand/gravel patches. **DECIDE: faithfully reproduce the `(z * 16 + x) * 128 + y` index bug or fix to `(x << 11) | (z << 7) | y`.** Recommendation: FIX IT (use `x << 11 | z << 7 | y`) since exact-seed parity with MCPE 2013 is not required for a "faithful" port — the surface materials should align with where the noise placed rock.
+16. **Implement ore distribution** per Entry 13 table (20 coal veins, 20 iron veins, 2 gold, 8 redstone, 1 diamond, 1 lapis, plus 10 clay, 20 dirt, 10 gravel).
+17. **Implement tree distribution** with the per-biome `oFor + N` formula and `random.nextInt(10) == 0` base +1.
+18. **Implement flowers/mushrooms/reeds/cacti/snow/water-lava springs** per Entry 13 table.
+19. **Implement MobSpawner::tick** with the player-round-robin enemy spawn (8-chunk radius), whole-world friendly spawn, `MIN_SPAWN_DISTANCE = 24` exclusion, `MobCategory` cap (`maxPerLevel`), per-type monster cap formula.
+20. **Implement `isSpawnPositionOk`** exactly: solid floor at y-1, non-solid at y and y+1, non-liquid at y for land mobs; liquid at y, non-solid at y+1 for water mobs.
+21. **Implement `makeBabyMob`** with the static `Random(98495119L)` and 50% baby chance for `BaseCreature`, age set to -24000 ticks.
+22. **Implement worldgen-time friendly spawn** (`postProcessSpawnMobs`) with the 8% per-iteration geometric loop, 4-attempt random walk per mob, ±5 block step within the chunk cell.
+
+**RE-Level-Tile stage COMPLETE.** All entries 9–13 written with exact code, exact constants, full tile registry, and UNVERIFIED items flagged for follow-up.
+
+---
+
+# RE-Chunk-Animal-Screen stage
+
+## Entry 14: Chunk.cpp / Chunk.h — mesh rebuild & chunk render state
+
+**File:** `handheld/src/client/renderer/Chunk.cpp` (269 lines), `Chunk.h` (74 lines)
+**Verified by direct line-by-line read of the source.**
+
+### Chunk.h — class layout — VERIFIED
+
+```cpp
+class Chunk
+{
+    static const int NumLayers = 3;        // 3 render layers (0=solid, 1=alpha-tested, 2=translucent/water)
+public:
+    Chunk(Level* level_, int x, int y, int z, int size, int lists_, GLuint* ptrBuf = NULL);
+
+    void setPos(int x, int y, int z);
+
+    void rebuild();           // <-- mesh rebuild (called by LevelRenderer::updateDirtyChunks)
+    void setDirty();          // dirty = true
+    void setClean();          // dirty = false
+    bool isDirty();           // return dirty
+    void reset();             // mark all layers empty, visible=false, compiled=false, _empty=true
+
+    float distanceToSqr(const Entity* player) const;
+    float squishedDistanceToSqr(const Entity* player) const;   // y distance x2 (used for culling)
+
+    int getAllLists(int displayLists[], int p, int layer);
+    int getList(int layer);   // returns lists+layer if visible & !empty[layer], else -1
+    RenderChunk& getRenderChunk(int layer);
+
+    bool isEmpty();           // compiled && _empty
+    void cull(Culler* culler);  // sets visible flag based on AABB
+    void renderBB();          // empty (was occlusion query display list)
+    static void resetUpdates();   // updates = 0
+
+private:
+    void translateToPos();   // glTranslatef2(x, y, z)
+public:
+    Level* level;
+    static int updates;       // incremented each rebuild()
+
+    int x, y, z, xs, ys, zs;   // chunk origin and size (xs==ys==zs==CHUNK_SIZE)
+    bool empty[NumLayers];     // per-layer "no vertices" flag
+    int xm, ym, zm;            // chunk center
+    float radius;
+    AABB bb;                   // bounding box (with +1 x/z padding, +2 top, 0 bottom)
+
+    int id;
+    bool visible;
+    bool occlusion_visible;
+    bool occlusion_querying;
+    int occlusion_id;
+    bool skyLit;               // set to LevelChunk::touchedSky at end of rebuild()
+
+    RenderChunk renderChunk[NumLayers];   // VBOs for each layer
+private:
+    Tesselator& t;             // reference to Tesselator::instance
+    int lists;                 // base display-list id (if !USE_VBO)
+    GLuint* vboBuffers;        // pointer into LevelRenderer::chunkBuffers array
+    bool compiled;
+    bool dirty;
+    bool _empty;               // overall "all layers empty"
+};
+```
+
+### Chunk constructor — VERIFIED (Chunk.cpp:17-39)
+
+```cpp
+Chunk::Chunk( Level* level_, int x, int y, int z, int size, int lists_, GLuint* ptrBuf/*= NULL*/)
+:       level(level_),
+        visible(false),
+        compiled(false),
+    _empty(true),
+        xs(size), ys(size), zs(size),
+        dirty(false),
+        occlusion_visible(true),
+        occlusion_querying(false),
+        lists(lists_),
+        vboBuffers(ptrBuf),
+        bb(0,0,0,1,1,1),
+        t(Tesselator::instance)
+{
+    for (int l = 0; l < NumLayers; l++) {
+        empty[l] = false;
+    }
+
+    radius = Mth::sqrt((float)(xs * xs + ys * ys + zs * zs)) * 0.5f;
+
+    this->x = -999;
+    setPos(x, y, z);
+}
+```
+**Radius:** `0.5 * sqrt(xs^2 + ys^2 + zs^2)` — for CHUNK_SIZE=16 → radius ≈ 13.86.
+
+### Chunk::setPos — VERIFIED (Chunk.cpp:41-62)
+
+```cpp
+void Chunk::setPos( int x, int y, int z )
+{
+    if (x == this->x && y == this->y && z == this->z) return;
+
+    reset();
+    this->x = x;
+    this->y = y;
+    this->z = z;
+    xm = x + xs / 2;
+    ym = y + ys / 2;
+    zm = z + zs / 2;
+
+    const float xzg = 1.0f;     // x/z grow
+    const float yp  = 2.0f;     // top grow
+    const float yn  = 0.0f;     // bottom grow
+    bb.set(x-xzg, y-yn, z-xzg, x + xs+xzg, y + ys+yp, z + zs+xzg);
+
+    setDirty();
+}
+```
+**AABB padding:** +1 in x and z (both sides), +2 on top, 0 on bottom — used for frustum culling.
+
+### Chunk::rebuild — VERIFIED (Chunk.cpp:69-185) — THE mesh rebuild routine
+
+```cpp
+void Chunk::rebuild()
+{
+    if (!dirty) return;
+    updates++;
+
+    int x0 = x;
+    int y0 = y;
+    int z0 = z;
+    int x1 = x + xs;
+    int y1 = y + ys;
+    int z1 = z + zs;
+    for (int l = 0; l < NumLayers; l++) {
+        empty[l] = true;
+    }
+    _empty = true;
+
+    LevelChunk::touchedSky = false;
+
+    // Region is a 1-block-padded view of the level for culling-neighbour lookups.
+    int r = 1;
+    Region region(level, x0 - r, y0 - r, z0 - r, x1 + r, y1 + r, z1 + r);
+    TileRenderer tileRenderer(&region);
+
+    bool doRenderLayer[NumLayers] = {true, false, false};  // start: layer 0 only; layers 1/2 added on demand
+    for (int l = 0; l < NumLayers; l++) {
+        if (!doRenderLayer[l]) continue;
+        bool renderNextLayer = false;
+        bool rendered = false;
+
+        bool started = false;
+        int cindex = -1;
+
+        for (int y = y0; y < y1; y++) {
+            for (int z = z0; z < z1; z++) {
+                for (int x = x0; x < x1; x++) {
+                    ++cindex;
+                    int tileId = region.getTile(x, y, z);
+                    if (tileId > 0) {
+                        if (!started) {
+                            started = true;
+
+#ifndef USE_VBO
+                            glNewList(lists + l, GL_COMPILE);
+                            glPushMatrix2();
+                            translateToPos();
+                            float ss = 1.000001f;
+                            glTranslatef2(-zs / 2.0f, -ys / 2.0f, -zs / 2.0f);
+                            glScalef2(ss, ss, ss);
+                            glTranslatef2(zs / 2.0f, ys / 2.0f, zs / 2.0f);
+#endif
+                            t.begin();
+                            // Offset Tesselator so block-local coords are absolute (this->x..this->x+xs)
+                            t.offset((float)(-this->x), (float)(-this->y), (float)(-this->z));
+                        }
+
+                        Tile* tile = Tile::tiles[tileId];
+                        int renderLayer = tile->getRenderLayer();
+
+                        if (renderLayer > l) {
+                            // tile belongs to a higher (alpha/translucent) layer — schedule it for a later pass
+                            renderNextLayer = true;
+                            doRenderLayer[renderLayer] = true;
+                        } else if (renderLayer == l) {
+                            rendered |= tileRenderer.tesselateInWorld(tile, x, y, z);
+                        }
+                    }
+                }
+            }
+        }
+
+        if (started) {
+#ifdef USE_VBO
+            renderChunk[l] = t.end(true, vboBuffers[l]);
+            renderChunk[l].pos.x = (float)this->x;
+            renderChunk[l].pos.y = (float)this->y;
+            renderChunk[l].pos.z = (float)this->z;
+#else
+            t.end(false, -1);
+            glPopMatrix2();
+            glEndList();
+#endif
+            t.offset(0, 0, 0);
+        } else {
+            rendered = false;
+        }
+        if (rendered) {
+            empty[l] = false;
+            _empty = false;
+        }
+        if (!renderNextLayer) break;
+    }
+
+    skyLit = LevelChunk::touchedSky;
+    compiled = true;
+    return;
+}
+```
+
+**Face culling (delegated):** `Chunk::rebuild` does NOT itself skip faces. It calls `tileRenderer.tesselateInWorld(tile, x, y, z)` which dispatches per renderShape (`SHAPE_BLOCK`, `SHAPE_WATER`, `SHAPE_CROSS_TEXTURE`, `SHAPE_TORCH`, `SHAPE_LADDER`, `SHAPE_DOOR`, `SHAPE_STAIRS`, `SHAPE_FENCE`, `SHAPE_FENCE_GATE`, `SHAPE_CACTUS`, `SHAPE_STEM`, `SHAPE_ROWS`, `SHAPE_IRON_FENCE`, `SHAPE_BED`).
+
+For `SHAPE_BLOCK`, `TileRenderer::tesselateBlockInWorld` (TileRenderer.cpp:44-129) is called and **per-face culling** is done by `tt->shouldRenderFace(level, nx, ny, nz, Facing::*)`. Only faces whose neighbour (one block away) returns `shouldRenderFace = true` get tesselated. The noCulling flag bypasses this.
+
+**Per-face brightness modulation (TileRenderer.cpp:54-126):**
+- c10 = 0.5  (down face)
+- c11 = 1.0  (up face)
+- c2  = 0.8  (north/south)
+- c3  = 0.6  (west/east)
+
+Brightness for each face: `tt->getBrightness(level, nx, ny, nz)` from the neighbour block. If the block doesn't extend to the full cube (e.g. slabs/stairs where `yy1 != 1`, `zz0 > 0`, etc.), the brightness falls back to the block's own center brightness (`centerBrightness = tt->getBrightness(level, x, y, z)`).
+
+**Color:** color from `tt->getColor(level, x, y, z)` (biome tint, used by grass/leaves); for grass, `r=g=b=1.0`.
+
+**UV mapping (TileRenderer.cpp:1743-1831) — VERIFIED:**
+- The terrain.png is 256×256, divided into 16×16 tiles. Tile index `tex` (0..255) decodes to:
+  - `xt = (tex & 0x0F) << 4`  (x-pixel offset, column 0..15 → 0..240)
+  - `yt = tex & 0xF0`          (y-pixel offset, row 0..15 → 0..240)
+- For the down/up face, using the tile's box `(xx0, xx1, zz0, zz1)` (0..1 range):
+  - `u0 = (xt + xx0*16) / 256`,  `u1 = (xt + xx1*16 - 0.01) / 256`
+  - `v0 = (yt + zz0*16) / 256`,  `v1 = (yt + zz1*16 - 0.01) / 256`
+- The `-0.01` inset prevents texture bleeding at tile seams.
+- For north/south faces (TileRenderer.cpp:1833, 1882): the v axis is flipped — `v0 = (yt + 16 - yy1*16) / 256`, `v1 = (yt + 16 - yy0*16 - 0.01) / 256`.
+- For tiles whose box extends beyond [0,1] (e.g. fences), the UV maps to `15.99/256` instead of `16/256` (avoiding wraparound).
+- The 4 vertices of each face are emitted in GL_QUADS winding order (CCW for down/up; specific patterns for north/south/east/west).
+
+**Layer system:**
+- Layer 0 — solid tiles (Tile::getRenderLayer() == 0). Rendered with `glDisable(GL_ALPHA_TEST)`, `glDisable(GL_BLEND)`.
+- Layer 1 — alpha-tested tiles (leaves, ice, glass, iron bars, etc. — Tile::getRenderLayer() == 1). Rendered with `glEnable(GL_ALPHA_TEST)`.
+- Layer 2 — water/translucent (Tile::getRenderLayer() == 2). Rendered with depth-write disabled, blend enabled, no culling.
+
+The `doRenderLayer[]` array starts with only layer 0 enabled. As `rebuild` walks blocks, if any tile has `renderLayer > l`, the corresponding higher layer is enabled and `renderNextLayer = true` triggers another pass.
+
+**Dirty propagation:** `LevelChunk::touchedSky` is reset to false before rebuild and copied to `Chunk::skyLit` after. `LevelRenderer::skyColorChanged()` re-dirties all chunks where `skyLit == true`.
+
+### Chunk::distanceToSqr / squishedDistanceToSqr — VERIFIED (Chunk.cpp:187-201)
+
+```cpp
+float Chunk::distanceToSqr( const Entity* player ) const
+{
+    float xd = (float) (player->x - xm);
+    float yd = (float) (player->y - ym);
+    float zd = (float) (player->z - zm);
+    return xd * xd + yd * yd + zd * zd;
+}
+
+float Chunk::squishedDistanceToSqr( const Entity* player ) const
+{
+    float xd = (float) (player->x - xm);
+    float yd = (float) (player->y - ym) * 2;  // y distance doubled (chunks appear "twice as far" in y)
+    float zd = (float) (player->z - zm);
+    return xd * xd + yd * yd + zd * zd;
+}
+```
+**Note:** `squishedDistanceToSqr` is defined but not called from Chunk.cpp or LevelRenderer.cpp directly in this version (it's used in DistanceChunkSorter.h indirectly? — UNVERIFIED).
+
+### Chunk::cull / getList / isEmpty / getAllLists — VERIFIED (Chunk.cpp:213-247)
+
+```cpp
+int Chunk::getList( int layer )
+{
+    if (!visible) return -1;
+    if (!empty[layer]) return lists + layer;
+    return -1;
+}
+
+RenderChunk& Chunk::getRenderChunk( int layer )
+{
+    return renderChunk[layer];

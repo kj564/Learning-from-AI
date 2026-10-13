@@ -1,0 +1,802 @@
+     1→     1→#include "Level.h"
+     2→     2→#include "LevelListener.h"
+     3→     3→#include "tile/entity/TileEntity.h"
+     4→     4→#include "../entity/player/Player.h"
+     5→     5→#include "../entity/EntityEvent.h"
+     6→     6→
+     7→     7→#include "biome/BiomeSource.h"
+     8→     8→#include "chunk/storage/ChunkStorage.h"
+     9→     9→#include "chunk/ChunkCache.h"
+    10→    10→#include "storage/LevelStorage.h"
+    11→    11→#include "Region.h"
+    12→    12→#include "Explosion.h"
+    13→    13→#include "LevelConstants.h"
+    14→    14→#include "pathfinder/PathFinder.h"
+    15→    15→
+    16→    16→#include "../Facing.h"
+    17→    17→#include "../../util/PerfTimer.h"
+    18→    18→
+    19→    19→#include "tile/LiquidTile.h"
+    20→    20→
+    21→    21→#include "biome/Biome.h"
+    22→    22→#include "MobSpawner.h"
+    23→    23→#include "../../network/packet/SetEntityDataPacket.h"
+    24→    24→#include "../../network/RakNetInstance.h"
+    25→    25→#include "../../network/packet/EntityEventPacket.h"
+    26→    26→#include "../../network/packet/SetTimePacket.h"
+    27→    27→#include "../entity/monster/Zombie.h"
+    28→    28→#include "../inventory/BaseContainerMenu.h"
+    29→    29→#include "../Difficulty.h"
+    30→    30→#include "../../network/packet/ExplodePacket.h"
+    31→    31→
+    32→    32→Level::Level(LevelStorage* levelStorage, const std::string& levelName, const LevelSettings& settings, int generatorVersion, Dimension* fixedDimension /* = NULL */)
+    33→    33→:       levelStorage(levelStorage),
+    34→    34→        isClientSide(false),
+    35→    35→        isFindingSpawn(false),
+    36→    36→        noNeighborUpdate(false),
+    37→    37→        skyDarken(0),
+    38→    38→        instaTick(false),
+    39→    39→        random(1),
+    40→    40→        _isNew(false),
+    41→    41→        _chunkSource(NULL),
+    42→    42→        _randValue(42184323),
+    43→    43→        _addend(1013904223),
+    44→    44→        _maxRecurse(0),
+    45→    45→        _updateLights(true),
+    46→    46→        _pathFinder(NULL),
+    47→    47→        _spawnFriendlies(true),
+    48→    48→        _spawnEnemies(true),
+    49→    49→        _lastSavedPlayerTime(0), // @attn: @time: clock starts on 0 now, change if not
+    50→    50→        raknetInstance(0),
+    51→    51→        updatingTileEntities(false),
+    52→    52→        allPlayersAreSleeping(false),
+    53→    53→        _nightMode(false)
+    54→    54→{
+    55→    55→    _init(levelName, settings, generatorVersion, fixedDimension);
+    56→    56→}
+    57→    57→
+    58→    58→Level::~Level() {
+    59→    59→        LOGI("Erasing chunk source\n");
+    60→    60→        delete _chunkSource;
+    61→    61→        LOGI("Erasing dimension\n");
+    62→    62→        delete dimension;
+    63→    63→        delete _pathFinder;
+    64→    64→
+    65→    65→        std::set<Entity*> all;
+    66→    66→        all.insert(entities.begin(), entities.end());
+    67→    67→        all.insert(players.begin(), players.end());
+    68→    68→        PendingList::iterator it = _pendingPlayerRemovals.begin();
+    69→    69→        while (it != _pendingPlayerRemovals.end()) {
+    70→    70→                all.insert(it->e);
+    71→    71→                ++it;
+    72→    72→        }
+    73→    73→        for (std::set<Entity*>::iterator it = all.begin(); it != all.end(); ++it)
+    74→    74→                delete *it;
+    75→    75→
+    76→    76→        std::set<TileEntity*> allTileEntities;
+    77→    77→        allTileEntities.insert(tileEntities.begin(), tileEntities.end());
+    78→    78→        allTileEntities.insert(pendingTileEntities.begin(), pendingTileEntities.end());
+    79→    79→        for (std::set<TileEntity*>::iterator it = allTileEntities.begin(); it != allTileEntities.end(); ++it)
+    80→    80→                delete *it;
+    81→    81→}
+    82→    82→
+    83→    83→void Level::_init(const std::string& levelName, const LevelSettings& settings, int generatorVersion, Dimension* fixedDimension) {
+    84→    84→
+    85→    85→        isGeneratingTerrain = false;
+    86→    86→
+    87→    87→        LevelData* preparedData = levelStorage->prepareLevel(this);
+    88→    88→    _isNew = (preparedData == NULL);
+    89→    89→
+    90→    90→    if (preparedData == NULL) {
+    91→    91→        levelData = LevelData(settings, levelName, generatorVersion);
+    92→    92→    } else {
+    93→    93→                levelData = *preparedData;
+    94→    94→        levelData.setLevelName(levelName);
+    95→    95→    }
+    96→    96→
+    97→    97→        if (fixedDimension != NULL) {
+    98→    98→                dimension = fixedDimension;
+    99→    99→        } else {
+   100→   100→                dimension = DimensionFactory::createDefaultDimension( &levelData );
+   101→   101→        }
+   102→   102→
+   103→   103→    dimension->init(this);
+   104→   104→    _chunkSource = createChunkSource();
+   105→   105→
+   106→   106→        _pathFinder = new PathFinder();
+   107→   107→        _nightMode = false;
+   108→   108→    updateSkyBrightness();
+   109→   109→}
+   110→   110→
+   111→   111→/*protected*/
+   112→   112→ChunkSource* Level::createChunkSource() {
+   113→   113→        if (!levelStorage) {
+   114→   114→                printf("no level data, calling dimension->createRandomLevelSource\n");
+   115→   115→                return dimension->createRandomLevelSource(); //@note
+   116→   116→        }
+   117→   117→
+   118→   118→        ChunkStorage* chunkStorage = levelStorage->createChunkStorage(dimension);
+   119→   119→        return new ChunkCache(this, chunkStorage, dimension->createRandomLevelSource());
+   120→   120→}
+   121→   121→
+   122→   122→/*public*/
+   123→   123→bool Level::checkAndHandleWater(const AABB& box, const Material* material, Entity* e) {
+   124→   124→    int x0 = Mth::floor(box.x0);
+   125→   125→    int x1 = Mth::floor(box.x1 + 1);
+   126→   126→
+   127→   127→    int y0 = Mth::floor(box.y0);
+   128→   128→    int y1 = Mth::floor(box.y1 + 1);
+   129→   129→
+   130→   130→    int z0 = Mth::floor(box.z0);
+   131→   131→    int z1 = Mth::floor(box.z1 + 1);
+   132→   132→
+   133→   133→    if (!hasChunksAt(x0, y0, z0, x1, y1, z1)) {
+   134→   134→        return false;
+   135→   135→    }
+   136→   136→
+   137→   137→    bool ok = false;
+   138→   138→    Vec3 current(0,0,0);
+   139→   139→    for (int x = x0; x < x1; x++)
+   140→   140→        for (int y = y0; y < y1; y++)
+   141→   141→            for (int z = z0; z < z1; z++) {
+   142→   142→                Tile* tile = Tile::tiles[getTile(x, y, z)];
+   143→   143→                if (tile != NULL && tile->material == material) {
+   144→   144→                    float yt0 = y + 1 - LiquidTile::getHeight(getData(x, y, z));
+   145→   145→                    if (y1 >= yt0) {
+   146→   146→                        ok = true;
+   147→   147→                        tile->handleEntityInside(this, x, y, z, e, current);
+   148→   148→                    }
+   149→   149→                }
+   150→   150→            }
+   151→   151→        float len = current.length();
+   152→   152→    if (len > 0) {
+   153→   153→        const float pow = 0.004f / len;
+   154→   154→        e->xd += current.x * pow;
+   155→   155→        e->yd += current.y * pow;
+   156→   156→        e->zd += current.z * pow;
+   157→   157→    }
+   158→   158→    return ok;
+   159→   159→}
+   160→   160→
+   161→   161→/*public*/
+   162→   162→Player* Level::getNearestPlayer(Entity* source, float maxDist) {
+   163→   163→    return getNearestPlayer(source->x, source->y, source->z, maxDist);
+   164→   164→}
+   165→   165→
+   166→   166→/*public*/
+   167→   167→Player* Level::getNearestPlayer(float x, float y, float z, float maxDist) {
+   168→   168→    float maxDistSqr = maxDist * maxDist;
+   169→   169→        float best = -1;
+   170→   170→    Player* result = NULL;
+   171→   171→    for (unsigned int i = 0; i < players.size(); i++) {
+   172→   172→        Player* p = players[i];
+   173→   173→                if (p->removed) continue;
+   174→   174→                float dist = p->distanceToSqr(x, y, z);
+   175→   175→        if ((maxDist < 0 || dist < maxDistSqr) && (best == -1 || dist < best)) {
+   176→   176→            best = dist;
+   177→   177→            result = p;
+   178→   178→        }
+   179→   179→    }
+   180→   180→    return result;
+   181→   181→}
+   182→   182→
+   183→   183→/*public*/
+   184→   184→void Level::tick() {
+   185→   185→        if (!isClientSide && levelData.getSpawnMobs()) {
+   186→   186→                static int _mobSpawnTick = 0;
+   187→   187→                const int MobSpawnInterval = 2;
+   188→   188→                if (++_mobSpawnTick >= MobSpawnInterval) {
+   189→   189→                        _mobSpawnTick = 0;
+   190→   190→                        TIMER_PUSH("mobSpawner");
+   191→   191→                        MobSpawner::tick(this,  _spawnEnemies && difficulty > Difficulty::PEACEFUL,
+   192→   192→                                                                        _spawnFriendlies && (levelData.getTime() % 400) < MobSpawnInterval);
+   193→   193→                        TIMER_POP();
+   194→   194→                }
+   195→   195→        }
+   196→   196→
+   197→   197→        TIMER_PUSH("chunkSource");
+   198→   198→        _chunkSource->tick();
+   199→   199→
+   200→   200→        updateSkyDarken();
+   201→   201→        if(_nightMode) {
+   202→   202→                long curTime = levelData.getTime();
+   203→   203→                if(curTime % TICKS_PER_DAY  != MIDDLE_OF_NIGHT_TIME) {
+   204→   204→                        if(curTime % TICKS_PER_DAY < MIDDLE_OF_NIGHT_TIME && (curTime + 20) % TICKS_PER_DAY > MIDDLE_OF_NIGHT_TIME) {
+   205→   205→                                curTime = MIDDLE_OF_NIGHT_TIME;
+   206→   206→                                SetTimePacket packet(curTime);
+   207→   207→                                raknetInstance->send(packet);
+   208→   208→                        }
+   209→   209→                        else {
+   210→   210→                                curTime += 20;
+   211→   211→                                if(curTime % 20  == 0) {
+   212→   212→                                        SetTimePacket packet(curTime);
+   213→   213→                                        raknetInstance->send(packet);
+   214→   214→                                }
+   215→   215→                        }
+   216→   216→                        setTime(curTime%TICKS_PER_DAY);
+   217→   217→                }
+   218→   218→        }
+   219→   219→        else {
+   220→   220→                long time = levelData.getTime() + 1;
+   221→   221→                //if (time % (saveInterval) == 0) {
+   222→   222→                //    save(false, NULL);
+   223→   223→                //}
+   224→   224→                levelData.setTime(time);
+   225→   225→                if ((time & 255) == 0) {
+   226→   226→                        SetTimePacket packet(time);
+   227→   227→                        raknetInstance->send(packet);
+   228→   228→                }
+   229→   229→        }
+   230→   230→        TIMER_POP_PUSH("tickPending");
+   231→   231→        tickPendingTicks(false);
+   232→   232→
+   233→   233→        TIMER_POP_PUSH("tickTiles");
+   234→   234→    tickTiles();
+   235→   235→
+   236→   236→        TIMER_POP_PUSH("sendEntityData");
+   237→   237→        for (unsigned int i = 0; i < entities.size(); ++i) {
+   238→   238→                Entity* e = entities[i];
+   239→   239→                SynchedEntityData* data = e->getEntityData();
+   240→   240→                if (data && data->isDirty()) {
+   241→   241→                        SetEntityDataPacket packet(e->entityId, *data);
+   242→   242→                        raknetInstance->send(packet);
+   243→   243→                }
+   244→   244→        }
+   245→   245→
+   246→   246→        //if (!_pendingEntityData.empty()) {
+   247→   247→        //      for (EntityMap::iterator it = _pendingEntityData.begin(); it != _pendingEntityData.end(); ++it) {
+   248→   248→        //              SetEntityDataPacket packet(it->first, it->second->getEntityData());
+   249→   249→        //              raknetInstance->send(packet);
+   250→   250→        //      }
+   251→   251→        //      _pendingEntityData.clear();
+   252→   252→        //}
+   253→   253→        TIMER_POP();
+   254→   254→}
+   255→   255→
+   256→   256→/*protected*/
+   257→   257→void Level::tickTiles() {
+   258→   258→    _chunksToPoll.clear();
+   259→   259→
+   260→   260→        static const int pollChunkOffsets[] = {
+   261→   261→                -1,-4,  0,-4,  1,-4,  -2,-3,  -1,-3,  0,-3,  1,-3,  2,-3,  -3,-2,
+   262→   262→                -2,-2,  -1,-2,  0,-2,  1,-2,  2,-2,  3,-2,  -4,-1,  -3,-1,  -2,-1,
+   263→   263→                -1,-1,  0,-1,  1,-1,  2,-1,  3,-1,  4,-1,  -4,0,  -3,0,  -2,0,  -1,0,
+   264→   264→                0,0,  1,0,  2,0,  3,0,  4,0,  -4,1,  -3,1,  -2,1,  -1,1,  0,1,  1,1,
+   265→   265→                2,1,  3,1,  4,1,  -3,2,  -2,2,  -1,2,  0,2, 1,2,  2,2,  3,2,  -2,3,
+   266→   266→                -1,3,  0,3,  1,3,  2,3,  -1,4,  0,4,  1,4
+   267→   267→        };
+   268→   268→        const int pollChunkOffsetsSize = sizeof(pollChunkOffsets) / sizeof(int);
+   269→   269→
+   270→   270→        TIMER_PUSH("buildList");
+   271→   271→        //static Stopwatch w;
+   272→   272→        //w.start();
+   273→   273→    for (size_t i = 0; i < players.size(); i++) {
+   274→   274→        Player* player = players[i];
+   275→   275→        int xx = Mth::floor(player->x / 16);
+   276→   276→        int zz = Mth::floor(player->z / 16);
+   277→   277→
+   278→   278→                for (int i = 0; i < pollChunkOffsetsSize; i += 2) {
+   279→   279→                        const int xp = xx + pollChunkOffsets[i];
+   280→   280→                        const int zp = zz + pollChunkOffsets[i+1];
+   281→   281→                        if (xp >= 0 && xp < CHUNK_CACHE_WIDTH &&
+   282→   282→                                zp >= 0 && zp < CHUNK_CACHE_WIDTH)
+   283→   283→                                _chunksToPoll.insert(ChunkPos(xp, zp));
+   284→   284→                }
+   285→   285→    }
+   286→   286→        TIMER_POP();
+   287→   287→
+   288→   288→    //if (delayUntilNextMoodSound > 0) delayUntilNextMoodSound--;
+   289→   289→        TIMER_PUSH("loop");
+   290→   290→    for (ChunkPosSet::iterator it = _chunksToPoll.begin(); it != _chunksToPoll.end(); ++it) {
+   291→   291→                const ChunkPos& cp = *it;
+   292→   292→        int xo = cp.x * 16;
+   293→   293→        int zo = cp.z * 16;
+   294→   294→        // LevelSource region = new Region(this, xo, 0, zo, xo + 16, 128, zo + 16);
+   295→   295→                TIMER_PUSH("getChunk");
+   296→   296→        LevelChunk* lc = this->getChunk(cp.x, cp.z);
+   297→   297→                TIMER_POP_PUSH("tickChunk");
+   298→   298→                //lc->tick();
+   299→   299→
+   300→   300→        //if (delayUntilNextMoodSound == 0) {
+   301→   301→        //    randValue = randValue * 3 + addend;
+   302→   302→        //    int val = (randValue >> 2);
+   303→   303→        //    int x = (val & 15);
+   304→   304→        //    int z = ((val >> 8) & 15);
+   305→   305→        //    int y = ((val >> 16) & 127);
+   306→   306→
+   307→   307→        //    int id = lc->getTile(x, y, z);
+   308→   308→        //    x += xo;
+   309→   309→        //    z += zo;
+   310→   310→        //    if (id == 0 && getRawBrightness(x, y, z) <= random.nextInt(8) && getBrightness(LightLayer::Sky, x, y, z) <= 0) {
+   311→   311→        //        Player* player = getNearestPlayer(x + 0.5, y + 0.5, z + 0.5, 8);
+   312→   312→        //        if (player != NULL && player.distanceToSqr(x + 0.5, y + 0.5, z + 0.5) > 2 * 2) {
+   313→   313→        //            //this.playSound(x + 0.5, y + 0.5, z + 0.5, "ambient.cave.cave", 0.7f, 0.8f + random.nextFloat() * 0.2f);
+   314→   314→        //            delayUntilNextMoodSound = random.nextInt(20 * 60 * 10) + 20 * 60 * 5;
+   315→   315→        //        }
+   316→   316→        //    }
+   317→   317→        //}
+   318→   318→
+   319→   319→                TIMER_POP_PUSH("tickTiles");
+   320→   320→        for (int i = 0; i < 20; i++) { //@todo: CHUNK_TILE_TICK_COUNT
+   321→   321→            _randValue = _randValue * 3 + _addend;
+   322→   322→            int val = (_randValue >> 2);
+   323→   323→            int x = (val & 15);
+   324→   324→            int z = ((val >> 8) & 15);
+   325→   325→            int y = ((val >> 16) & 127);
+   326→   326→
+   327→   327→            int id = lc->getTile(x, y, z);
+   328→   328→            if (Tile::shouldTick[id]) {
+   329→   329→                Tile::tiles[id]->tick(this, x + xo, y, z + zo, &random);
+   330→   330→            }
+   331→   331→        }
+   332→   332→                TIMER_POP();
+   333→   333→    }
+   334→   334→        TIMER_POP();
+   335→   335→        //w.stop();
+   336→   336→        //w.printEvery(30, "ticktiles");
+   337→   337→}
+   338→   338→
+   339→   339→bool Level::tickPendingTicks(bool force) {
+   340→   340→    int count = _tickNextTickSet.size();
+   341→   341→    if (count > MAX_TICK_TILES_PER_TICK) count = MAX_TICK_TILES_PER_TICK;
+   342→   342→    for (int i = 0; i < count; i++) {
+   343→   343→                TickDataSet::iterator td = _tickNextTickSet.begin();
+   344→   344→        if (!force && td->delay > levelData.getTime()) {
+   345→   345→            break;
+   346→   346→        }
+   347→   347→
+   348→   348→                int r = 8;
+   349→   349→        if (hasChunksAt(td->x - r, td->y - r, td->z - r, td->x + r, td->y + r, td->z + r)) {
+   350→   350→            int id = getTile(td->x, td->y, td->z);
+   351→   351→            if (id == td->tileId && id > 0) {
+   352→   352→                Tile::tiles[id]->tick(this, td->x, td->y, td->z, &random);
+   353→   353→            }
+   354→   354→        }
+   355→   355→        _tickNextTickSet.erase(td);
+   356→   356→    }
+   357→   357→    return _tickNextTickSet.size() != 0;
+   358→   358→}
+   359→   359→
+   360→   360→/*public*/
+   361→   361→void Level::loadPlayer(Player* player, bool doAddPlayer /*= true*/) {
+   362→   362→        if (player) {
+   363→   363→                CompoundTag* loadedPlayerTag = levelData.getLoadedPlayerTag();
+   364→   364→        if (loadedPlayerTag != NULL) {
+   365→   365→            player->load(loadedPlayerTag);
+   366→   366→            levelData.setLoadedPlayerTag(NULL);
+   367→   367→        } else {
+   368→   368→                        levelData.setLoadedPlayerTo(player);
+   369→   369→                }
+   370→   370→                if (doAddPlayer)
+   371→   371→                        addEntity(player);
+   372→   372→        }
+   373→   373→    //} catch (Exception e) {
+   374→   374→    //    e.printStackTrace();
+   375→   375→    //}
+   376→   376→}
+   377→   377→
+   378→   378→bool Level::findPath(Path* path, Entity* from, Entity* to, float maxDist, bool canOpenDoors, bool avoidWater) {
+   379→   379→    TIMER_PUSH("pathfind");
+   380→   380→        int x = Mth::floor(from->x);
+   381→   381→    int y = Mth::floor(from->y);
+   382→   382→    int z = Mth::floor(from->z);
+   383→   383→
+   384→   384→    int r = (int) (maxDist + 16);
+   385→   385→    int x1 = x - r;
+   386→   386→    int y1 = y - r;
+   387→   387→    int z1 = z - r;
+   388→   388→    int x2 = x + r;
+   389→   389→    int y2 = y + r;
+   390→   390→    int z2 = z + r;
+   391→   391→        //LOGI("trying to move! 1: %ld\n", levelData.getTime());
+   392→   392→    Region region(this, x1, y1, z1, x2, y2, z2);
+   393→   393→        _pathFinder->setLevelSource(&region);
+   394→   394→        _pathFinder->canOpenDoors = canOpenDoors;
+   395→   395→        _pathFinder->avoidWater = avoidWater;
+   396→   396→        _pathFinder->findPath(path, from, to, maxDist);
+   397→   397→        TIMER_POP();
+   398→   398→        return true;
+   399→   399→}
+   400→   400→
+   401→   401→bool Level::findPath(Path* path, Entity* from, int xBest, int yBest, int zBest, float maxDist, bool canOpenDoors, bool avoidWater) {
+   402→   402→    TIMER_PUSH("pathfind");
+   403→   403→        int x = Mth::floor(from->x);
+   404→   404→    int y = Mth::floor(from->y);
+   405→   405→    int z = Mth::floor(from->z);
+   406→   406→
+   407→   407→    int r = (int) (maxDist + 8);
+   408→   408→    int x1 = x - r;
+   409→   409→    int y1 = y - r;
+   410→   410→    int z1 = z - r;
+   411→   411→    int x2 = x + r;
+   412→   412→    int y2 = y + r;
+   413→   413→    int z2 = z + r;
+   414→   414→    Region region(this, x1, y1, z1, x2, y2, z2);
+   415→   415→        //LOGI("trying to move! 2: %ld\n", levelData.getTime());
+   416→   416→        _pathFinder->setLevelSource(&region);
+   417→   417→        _pathFinder->canOpenDoors = canOpenDoors;
+   418→   418→        _pathFinder->avoidWater = avoidWater;
+   419→   419→    _pathFinder->findPath(path, from, xBest, yBest, zBest, maxDist);
+   420→   420→        TIMER_POP();
+   421→   421→        return true;
+   422→   422→}
+   423→   423→
+   424→   424→/**
+   425→   425→* Sets the initial spawn, created this method so we could do a special
+   426→   426→* location for the demo version.
+   427→   427→*/
+   428→   428→/*protected*/
+   429→   429→void Level::setInitialSpawn() {
+   430→   430→    isFindingSpawn = true;
+   431→   431→    int xSpawn = CHUNK_CACHE_WIDTH * CHUNK_WIDTH / 2; // (Level.MAX_LEVEL_SIZE - 100) * 0;
+   432→   432→    int ySpawn = 64;
+   433→   433→    int zSpawn = CHUNK_CACHE_WIDTH * CHUNK_DEPTH / 2; // (Level.MAX_LEVEL_SIZE - 100) * 0;
+   434→   434→    while (!dimension->isValidSpawn(xSpawn, zSpawn)) {
+   435→   435→        xSpawn += random.nextInt(32) - random.nextInt(32);
+   436→   436→        zSpawn += random.nextInt(32) - random.nextInt(32);
+   437→   437→
+   438→   438→                if (xSpawn < 4) xSpawn += 32;
+   439→   439→                if (xSpawn >= LEVEL_WIDTH-4) xSpawn -= 32;
+   440→   440→                if (zSpawn < 4) zSpawn += 32;
+   441→   441→                if (zSpawn >= LEVEL_DEPTH-4) zSpawn -= 32;
+   442→   442→    }
+   443→   443→    levelData.setSpawn(xSpawn, ySpawn, zSpawn);
+   444→   444→    isFindingSpawn = false;
+   445→   445→}
+   446→   446→
+   447→   447→/*public*/
+   448→   448→void Level::validateSpawn() {
+   449→   449→    if (levelData.getYSpawn() <= 0) {
+   450→   450→        levelData.setYSpawn(64);
+   451→   451→    }
+   452→   452→    int xSpawn = levelData.getXSpawn();
+   453→   453→    int zSpawn = levelData.getZSpawn();
+   454→   454→    while (getTopTile(xSpawn, zSpawn) == 0 || getTopTile(xSpawn, zSpawn) == Tile::invisible_bedrock->id) {
+   455→   455→        xSpawn += random.nextInt(8) - random.nextInt(8);
+   456→   456→        zSpawn += random.nextInt(8) - random.nextInt(8);
+   457→   457→
+   458→   458→                if (xSpawn < 4) xSpawn += 8;
+   459→   459→                if (xSpawn >= LEVEL_WIDTH-4) xSpawn -= 8;
+   460→   460→                if (zSpawn < 4) zSpawn += 8;
+   461→   461→                if (zSpawn >= LEVEL_DEPTH-4) zSpawn -= 8;
+   462→   462→    }
+   463→   463→    levelData.setXSpawn(xSpawn);
+   464→   464→    levelData.setZSpawn(zSpawn);
+   465→   465→}
+   466→   466→
+   467→   467→int Level::getTopTile(int x, int z) {
+   468→   468→    int y = 63;
+   469→   469→    while (!isEmptyTile(x, y + 1, z)) {
+   470→   470→        y++;
+   471→   471→    }
+   472→   472→    return getTile(x, y, z);
+   473→   473→}
+   474→   474→
+   475→   475→int Level::getTopTileY(int x, int z) {
+   476→   476→    int y = 63;
+   477→   477→    while (!isEmptyTile(x, y + 1, z)) {
+   478→   478→        y++;
+   479→   479→    }
+   480→   480→    return y;
+   481→   481→}
+   482→   482→//
+   483→   483→//    void clearLoadedPlayerData() {
+   484→   484→//    }
+   485→   485→//
+   486→   486→//    void save(bool force, ProgressListener progressListener) {
+   487→   487→//        if (!chunkSource.shouldSave()) return;
+   488→   488→//
+   489→   489→//        if (progressListener != NULL) progressListener.progressStartNoAbort("Saving level");
+   490→   490→//        saveLevelData();
+   491→   491→//
+   492→   492→//        if (progressListener != NULL) progressListener.progressStage("Saving chunks");
+   493→   493→//        chunkSource.save(force, progressListener);
+   494→   494→//    }
+   495→   495→//
+   496→   496→
+   497→   497→//void Level::saveAllChunks() {
+   498→   498→//      _chunkSource->saveAll();
+   499→   499→//}
+   500→   500→
+   501→   501→void Level::saveLevelData() {
+   502→   502→        levelStorage->saveLevelData(levelData, &players);
+   503→   503→}
+   504→   504→
+   505→   505→//    bool pauseSave(int step) {
+   506→   506→//        if (!chunkSource.shouldSave()) return true;
+   507→   507→//        if (step == 0) saveLevelData();
+   508→   508→//        return chunkSource.save(false, NULL);
+   509→   509→//    }
+   510→   510→
+   511→   511→//void Level::savePlayerData() {
+   512→   512→//      levelStorage->savePlayerData(&levelData, players);
+   513→   513→//}
+   514→   514→
+   515→   515→int Level::getTile(int x, int y, int z) {
+   516→   516→    //if (x < -MAX_LEVEL_SIZE || z < -MAX_LEVEL_SIZE || x >= MAX_LEVEL_SIZE || z > MAX_LEVEL_SIZE) {
+   517→   517→    //    return 0;
+   518→   518→    //}
+   519→   519→    if (y < 0) return 0;
+   520→   520→    if (y >= DEPTH) return 0;
+   521→   521→        //if (z == 128) {
+   522→   522→        //      int a = 0;
+   523→   523→        //}
+   524→   524→        //LOGI("%d ", z);
+   525→   525→    return getChunk(x >> 4, z >> 4)->getTile(x & 15, y, z & 15);
+   526→   526→}
+   527→   527→
+   528→   528→bool Level::isEmptyTile(int x, int y, int z) {
+   529→   529→    return getTile(x, y, z) == 0;
+   530→   530→}
+   531→   531→
+   532→   532→bool Level::hasChunkAt(int x, int y, int z) {
+   533→   533→    if (y < 0 || y >= Level::DEPTH) return false;
+   534→   534→    return hasChunk(x >> 4, z >> 4);
+   535→   535→}
+   536→   536→
+   537→   537→
+   538→   538→bool Level::hasChunksAt(int x, int y, int z, int r) {
+   539→   539→    return hasChunksAt(x - r, y - r, z - r, x + r, y + r, z + r);
+   540→   540→}
+   541→   541→
+   542→   542→bool Level::hasChunksAt(int x0, int y0, int z0, int x1, int y1, int z1) {
+   543→   543→    if (y1 < 0 || y0 >= Level::DEPTH) return false;
+   544→   544→
+   545→   545→    x0 >>= 4;
+   546→   546→    z0 >>= 4;
+   547→   547→    x1 >>= 4;
+   548→   548→    z1 >>= 4;
+   549→   549→
+   550→   550→    for (int x = x0; x <= x1; x++)
+   551→   551→        for (int z = z0; z <= z1; z++)
+   552→   552→            if (!hasChunk(x, z)) return false;
+   553→   553→
+   554→   554→    return true;
+   555→   555→}
+   556→   556→
+   557→   557→bool Level::hasChunk(int x, int z) {
+   558→   558→    return _chunkSource->hasChunk(x, z);
+   559→   559→}
+   560→   560→
+   561→   561→LevelChunk* Level::getChunkAt(int x, int z) {
+   562→   562→    return getChunk(x >> 4, z >> 4);
+   563→   563→}
+   564→   564→
+   565→   565→LevelChunk* Level::getChunk(int x, int z) {
+   566→   566→    return _chunkSource->getChunk(x, z);
+   567→   567→}
+   568→   568→
+   569→   569→bool Level::setTileAndDataNoUpdate(int x, int y, int z, int tile, int data) {
+   570→   570→    //if (x < -MAX_LEVEL_SIZE || z < -MAX_LEVEL_SIZE || x >= MAX_LEVEL_SIZE || z > MAX_LEVEL_SIZE) {
+   571→   571→    //    return false;
+   572→   572→    //}
+   573→   573→    if (y < 0) return false;
+   574→   574→    if (y >= DEPTH) return false;
+   575→   575→    LevelChunk* c = getChunk(x >> 4, z >> 4);
+   576→   576→    return c->setTileAndData(x & 15, y, z & 15, tile, data);
+   577→   577→}
+   578→   578→
+   579→   579→bool Level::setTileNoUpdate(int x, int y, int z, int tile) {
+   580→   580→    //if (x < -MAX_LEVEL_SIZE || z < -MAX_LEVEL_SIZE || x >= MAX_LEVEL_SIZE || z > MAX_LEVEL_SIZE) {
+   581→   581→    //    return false;
+   582→   582→    //}
+   583→   583→    if (y < 0) return false;
+   584→   584→    if (y >= DEPTH) return false;
+   585→   585→    LevelChunk* c = getChunk(x >> 4, z >> 4);
+   586→   586→    return c->setTile(x & 15, y, z & 15, tile);
+   587→   587→}
+   588→   588→
+   589→   589→const Material* Level::getMaterial(int x, int y, int z) {
+   590→   590→    int t = getTile(x, y, z);
+   591→   591→    if (t == 0) return Material::air;
+   592→   592→    return Tile::tiles[t]->material;
+   593→   593→}
+   594→   594→
+   595→   595→int Level::getData(int x, int y, int z) {
+   596→   596→    //if (x < -MAX_LEVEL_SIZE || z < -MAX_LEVEL_SIZE || x >= MAX_LEVEL_SIZE || z > MAX_LEVEL_SIZE) {
+   597→   597→    //    return 0;
+   598→   598→    //}
+   599→   599→    if (y < 0) return 0;
+   600→   600→    if (y >= DEPTH) return 0;
+   601→   601→    LevelChunk* c = getChunk(x >> 4, z >> 4);
+   602→   602→    x &= 15;
+   603→   603→    z &= 15;
+   604→   604→    return c->getData(x, y, z);
+   605→   605→}
+   606→   606→
+   607→   607→void Level::setData(int x, int y, int z, int data) {
+   608→   608→        //// @newway
+   609→   609→        //if (setDataNoUpdate(x, y, z, data)) {
+   610→   610→ //       int t = getTile(x, y, z);
+   611→   611→        //      if (Tile::sendTileData[t]) {
+   612→   612→        //              tileUpdated(x, y, z, t);
+   613→   613→        //      } else {
+   614→   614→        //              updateNeighborsAt(x, y, z, t);
+   615→   615→        //      }
+   616→   616→        //}
+   617→   617→
+   618→   618→        // @oldway
+   619→   619→    if (setDataNoUpdate(x, y, z, data)) {
+   620→   620→        tileUpdated(x, y, z, getTile(x, y, z));
+   621→   621→    }
+   622→   622→}
+   623→   623→
+   624→   624→bool Level::setDataNoUpdate(int x, int y, int z, int data) {
+   625→   625→    //if (x < -MAX_LEVEL_SIZE || z < -MAX_LEVEL_SIZE || x >= MAX_LEVEL_SIZE || z > MAX_LEVEL_SIZE) {
+   626→   626→    //    return false;
+   627→   627→    //}
+   628→   628→    if (y < 0) return false;
+   629→   629→    if (y >= DEPTH) return false;
+   630→   630→    LevelChunk* c = getChunk(x >> 4, z >> 4);
+   631→   631→    x &= 15;
+   632→   632→    z &= 15;
+   633→   633→
+   634→   634→        //return c->setData(x, y, z, data);
+   635→   635→
+   636→   636→        if (c->getData(x, y, z) != data) {
+   637→   637→                c->setData(x, y, z, data);
+   638→   638→                return true;
+   639→   639→        }
+   640→   640→        return false;
+   641→   641→}
+   642→   642→
+   643→   643→bool Level::setTile(int x, int y, int z, int tile) {
+   644→   644→    if (setTileNoUpdate(x, y, z, tile)) {
+   645→   645→                //printf("TILE UPDATED %d, %d, %d\n", x, y, z);
+   646→   646→        tileUpdated(x, y, z, tile);
+   647→   647→        return true;
+   648→   648→    }
+   649→   649→    return false;
+   650→   650→}
+   651→   651→
+   652→   652→bool Level::setTileAndData(int x, int y, int z, int tile, int data) {
+   653→   653→    if (setTileAndDataNoUpdate(x, y, z, tile, data)) {
+   654→   654→        tileUpdated(x, y, z, tile);
+   655→   655→        return true;
+   656→   656→    }
+   657→   657→    return false;
+   658→   658→}
+   659→   659→
+   660→   660→void Level::sendTileUpdated(int x, int y, int z) {
+   661→   661→    for (unsigned int i = 0; i < _listeners.size(); i++) {
+   662→   662→        _listeners[i]->tileChanged(x, y, z);
+   663→   663→    }
+   664→   664→}
+   665→   665→
+   666→   666→/*protected*/
+   667→   667→void Level::tileUpdated(int x, int y, int z, int tile) {
+   668→   668→    sendTileUpdated(x, y, z);
+   669→   669→    this->updateNeighborsAt(x, y, z, tile);
+   670→   670→}
+   671→   671→
+   672→   672→void Level::lightColumnChanged(int x, int z, int y0, int y1) {
+   673→   673→    if (y0 > y1) {
+   674→   674→        int tmp = y1;
+   675→   675→        y1 = y0;
+   676→   676→        y0 = tmp;
+   677→   677→    }
+   678→   678→    setTilesDirty(x, y0, z, x, y1, z);
+   679→   679→}
+   680→   680→
+   681→   681→void Level::setTileDirty(int x, int y, int z) {
+   682→   682→    for (unsigned int i = 0; i < _listeners.size(); i++) {
+   683→   683→        _listeners[i]->setTilesDirty(x, y, z, x, y, z);
+   684→   684→    }
+   685→   685→}
+   686→   686→
+   687→   687→void Level::setTilesDirty(int x0, int y0, int z0, int x1, int y1, int z1) {
+   688→   688→    for (unsigned int i = 0; i < _listeners.size(); i++) {
+   689→   689→        _listeners[i]->setTilesDirty(x0, y0, z0, x1, y1, z1);
+   690→   690→    }
+   691→   691→}
+   692→   692→
+   693→   693→void Level::swap(int x1, int y1, int z1, int x2, int y2, int z2) {
+   694→   694→    int t1 = getTile(x1, y1, z1);
+   695→   695→    int d1 = getData(x1, y1, z1);
+   696→   696→    int t2 = getTile(x2, y2, z2);
+   697→   697→    int d2 = getData(x2, y2, z2);
+   698→   698→
+   699→   699→    setTileAndDataNoUpdate(x1, y1, z1, t2, d2);
+   700→   700→    setTileAndDataNoUpdate(x2, y2, z2, t1, d1);
+   701→   701→
+   702→   702→    updateNeighborsAt(x1, y1, z1, t2);
+   703→   703→    updateNeighborsAt(x2, y2, z2, t1);
+   704→   704→}
+   705→   705→
+   706→   706→void Level::updateNeighborsAt(int x, int y, int z, int tile) {
+   707→   707→    neighborChanged(x - 1, y, z, tile);
+   708→   708→    neighborChanged(x + 1, y, z, tile);
+   709→   709→    neighborChanged(x, y - 1, z, tile);
+   710→   710→    neighborChanged(x, y + 1, z, tile);
+   711→   711→    neighborChanged(x, y, z - 1, tile);
+   712→   712→    neighborChanged(x, y, z + 1, tile);
+   713→   713→}
+   714→   714→
+   715→   715→/*private*/ void Level::neighborChanged(int x, int y, int z, int type) {
+   716→   716→    if (noNeighborUpdate || isClientSide) return;
+   717→   717→    Tile* tile = Tile::tiles[getTile(x, y, z)];
+   718→   718→    if (tile != NULL) tile->neighborChanged(this, x, y, z, type);
+   719→   719→}
+   720→   720→
+   721→   721→bool Level::canSeeSky(int x, int y, int z) {
+   722→   722→    return getChunk(x >> 4, z >> 4)->isSkyLit(x & 15, y, z & 15);
+   723→   723→}
+   724→   724→
+   725→   725→int Level::getRawBrightness(int x, int y, int z) {
+   726→   726→    return getRawBrightness(x, y, z, true);
+   727→   727→}
+   728→   728→
+   729→   729→int Level::getRawBrightness(int x, int y, int z, bool propagate) {
+   730→   730→    //if (x < -MAX_LEVEL_SIZE || z < -MAX_LEVEL_SIZE || x >= MAX_LEVEL_SIZE || z > MAX_LEVEL_SIZE) {
+   731→   731→    //    return MAX_BRIGHTNESS;
+   732→   732→    //}
+   733→   733→
+   734→   734→    if (propagate) {
+   735→   735→        int id = getTile(x, y, z);
+   736→   736→        if (id == Tile::stoneSlabHalf->id || id == Tile::farmland->id) {
+   737→   737→            int br = getRawBrightness(x, y + 1, z, false);
+   738→   738→            int br1 = getRawBrightness(x + 1, y, z, false);
+   739→   739→            int br2 = getRawBrightness(x - 1, y, z, false);
+   740→   740→            int br3 = getRawBrightness(x, y, z + 1, false);
+   741→   741→            int br4 = getRawBrightness(x, y, z - 1, false);
+   742→   742→            if (br1 > br) br = br1;
+   743→   743→            if (br2 > br) br = br2;
+   744→   744→            if (br3 > br) br = br3;
+   745→   745→            if (br4 > br) br = br4;
+   746→   746→            return br;
+   747→   747→        }
+   748→   748→    }
+   749→   749→
+   750→   750→    if (y < 0) return 0;
+   751→   751→    if (y >= DEPTH) {
+   752→   752→        int br = MAX_BRIGHTNESS - skyDarken;
+   753→   753→        if (br < 0) br = 0;
+   754→   754→        return br;
+   755→   755→    }
+   756→   756→
+   757→   757→    LevelChunk* c = getChunk(x >> 4, z >> 4);
+   758→   758→    x &= 15;
+   759→   759→    z &= 15;
+   760→   760→    return c->getRawBrightness(x, y, z, skyDarken);
+   761→   761→}
+   762→   762→
+   763→   763→bool Level::isSkyLit(int x, int y, int z) {
+   764→   764→    //if (x < -MAX_LEVEL_SIZE || z < -MAX_LEVEL_SIZE || x >= MAX_LEVEL_SIZE || z > MAX_LEVEL_SIZE) {
+   765→   765→    //    return false;
+   766→   766→    //}
+   767→   767→    if (y < 0) return false;
+   768→   768→    if (y >= DEPTH) return true;
+   769→   769→    if (!hasChunk(x >> 4, z >> 4)) return false;
+   770→   770→
+   771→   771→    LevelChunk* c = getChunk(x >> 4, z >> 4);
+   772→   772→    x &= 15;
+   773→   773→    z &= 15;
+   774→   774→
+   775→   775→        return c->isSkyLit(x, y, z);
+   776→   776→}
+   777→   777→
+   778→   778→int Level::getHeightmap(int x, int z) {
+   779→   779→    //if (x < -MAX_LEVEL_SIZE || z < -MAX_LEVEL_SIZE || x >= MAX_LEVEL_SIZE || z > MAX_LEVEL_SIZE) {
+   780→   780→    //    return 0;
+   781→   781→    //}
+   782→   782→    if (!hasChunk(x >> 4, z >> 4)) return 0;
+   783→   783→
+   784→   784→    LevelChunk* c = getChunk(x >> 4, z >> 4);
+   785→   785→    return c->getHeightmap(x & 15, z & 15);
+   786→   786→}
+   787→   787→
+   788→   788→BiomeSource* Level::getBiomeSource() {
+   789→   789→        return dimension->biomeSource;
+   790→   790→}
+   791→   791→Biome* Level::getBiome( int x, int z ) {
+   792→   792→        return dimension->biomeSource->getBiome(x, z);
+   793→   793→}
+   794→   794→
+   795→   795→void Level::updateLightIfOtherThan(const LightLayer& layer, int x, int y, int z, int expected) {
+   796→   796→    if (dimension->hasCeiling && (&layer) == &LightLayer::Sky) return;
+   797→   797→
+   798→   798→    if (!hasChunkAt(x, y, z)) return;
+   799→   799→
+   800→   800→    if (&layer == &LightLayer::Sky) {
+
+[showing lines 1-800 of 2002; use offset=801 with limit to continue reading]
