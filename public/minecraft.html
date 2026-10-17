@@ -1577,15 +1577,34 @@
     highlightEdges.visible = false;
     scene.add(highlightEdges);
 
+    // ============================================================
+    //  FIXED-TIMESTEP PHYSICS (rujukan Timer.h verified)
+    //  rujukan runs 20 ticks/second. Browser renders at 60fps. We
+    //  accumulate real time and run movePlayerTick() at a fixed 20 tps,
+    //  with camera interpolation between ticks for smooth visuals.
+    //  MAX_TICKS_PER_UPDATE = 10 (Timer.h) prevents spiral-of-death.
+    // ============================================================
+    const TICKS_PER_SECOND = 20;
+    const MAX_TICKS_PER_UPDATE = 10;
+    const TICK_DT = 1 / TICKS_PER_SECOND;
+    const TICK_MS = 1000 / TICKS_PER_SECOND;  // 50ms per tick (integer-safe)
+    let physicsAccumMs = 0;
+
     // Player
+    // rujukan Player.h: AABB 0.6×1.8, eye 1.62, MAX_HEALTH 20.
+    // speed/flySpeed are now PER-TICK values (rujukan Mob.h walkingSpeed/flyingSpeed):
+    //   walkingSpeed = DEFAULT_WALK_SPEED = 0.1 (Player.h)
+    //   flyingSpeed  = 0.05 (Player::travel flying override scales 0.02→0.05)
+    // prevPos used for camera interpolation between physics ticks.
     const player = {
       pos: new THREE.Vector3(8, WATER_LEVEL + 16, 8),
+      prevPos: new THREE.Vector3(8, WATER_LEVEL + 16, 8),
       vel: new THREE.Vector3(),
       yaw: 0, pitch: 0,
       onGround: false,
       fly: false,
       width: 0.6, height: 1.8, eye: 1.62,
-      speed: 4.5, flySpeed: 9,
+      speed: 0.1, flySpeed: 0.05,  // PER-TICK (rujukan verified)
       sprinting: false,
     };
     // Base FOV follows the menu option; sprinting temporarily widens it. The
@@ -2325,48 +2344,44 @@
       return false;
     }
 
-    function movePlayer(dt) {
-      // input -> wishdir
-      const forward = new THREE.Vector3(-Math.sin(player.yaw), 0, -Math.cos(player.yaw));
-      const right = new THREE.Vector3(Math.cos(player.yaw), 0, -Math.sin(player.yaw));
-      const wish = new THREE.Vector3();
-      if (keys['KeyW']) wish.add(forward);
-      if (keys['KeyS']) wish.sub(forward);
-      if (keys['KeyD']) wish.add(right);
-      if (keys['KeyA']) wish.sub(right);
-      if (wish.lengthSq() > 0) wish.normalize();
-      const sprint = keys['ShiftLeft'] && !player.fly;
-      player.sprinting = sprint;
-      const sp = player.fly ? player.flySpeed : player.speed * (sprint ? 1.5 : 1);
-      player.vel.x = wish.x * sp;
-      player.vel.z = wish.z * sp;
-
-      if (player.fly) {
-        let vy = 0;
-        if (keys['Space']) vy += 1;
-        if (keys['ShiftLeft']) vy -= 1;
-        player.vel.y = vy * player.flySpeed;
-      } else {
-        player.vel.y -= 24 * dt; // gravity
-        if (player.vel.y < -40) player.vel.y = -40;
-      }
-
-      // Substep each axis to prevent tunneling through blocks during fast falls
-      // or a delayed frame. Each collision check moves at most 0.25 world units.
+    // ============================================================
+    //  movePlayerTick — PER-TICK physics (rujukan Mob::travel + LocalPlayer)
+    //  VERIFIED constants from MODLOG (reverse-engineering skill, Rule Zero):
+    //    gravity = 0.08/tick, airDrag = 0.98/tick
+    //    groundFriction = 0.6 * 0.91 (× tile.friction; 0.6 default — DEVIATION:
+    //      minecraft.html has no per-tile friction table, uses 0.6 default)
+    //    jumpFromGround = 0.42 (single value, no water/lava branch)
+    //    friction2 = (0.6*0.6*0.91*0.91*0.6*0.91) / (friction^3)
+    //    moveRelative adds to velocity (momentum model, not instant-set)
+    //    Entity::move order: Y → X → Z (verified Entry 1)
+    //  DEVIATION: minecraft.html uses slide=true (per-axis zeroing on collision,
+    //    slide along walls) matching Minecraft feel. rujukan default !slide zeros
+    //    all velocity on any collision.
+    // ============================================================
+    function moveRelativeTick(xa, za, speed) {
+      // rujukan Entity::moveRelative (Entry 1): adds to vel using yaw rotation.
+      // DEVIATION: rujukan yRot=0 looks south (+Z); minecraft.html yaw=0 looks -Z
+      // (Three.js). The mapping is yRot = yaw - 180°, so cos(yRot)=-cos(yaw),
+      // sin(yRot)=-sin(yaw). Substituting into rujukan's formula gives:
+      //   vel.x += za*sin(yaw) - xa*cos(yaw)
+      //   vel.z += -za*cos(yaw) - xa*sin(yaw)
+      // Verified at yaw=0: W(za=+1)→vel.z=-1 (forward -Z ✓); A(xa=+1)→vel.x=-1 (left -X ✓)
+      let dist = Math.sqrt(xa*xa + za*za);
+      if (dist < 0.01) return;
+      if (dist < 1) dist = 1;
+      const f = speed / dist;
+      xa *= f; za *= f;
+      const sinY = Math.sin(player.yaw);
+      const cosY = Math.cos(player.yaw);
+      player.vel.x += za * sinY - xa * cosY;
+      player.vel.z += -za * cosY - xa * sinY;
+    }
+    function moveWithCollision() {
+      // rujukan Entity::move: Y first, then X, then Z (Entry 1 verified)
+      // slide=true: only zero the collided axis (Minecraft slide-along-wall feel)
       const maxStep = 0.25;
-      const dx = player.vel.x * dt;
-      const xSteps = Math.max(1, Math.ceil(Math.abs(dx) / maxStep));
-      const stepX = dx / xSteps;
-      for (let i = 0; i < xSteps; i++) {
-        const nx = player.pos.x + stepX;
-        if (collidesAABB(nx, player.pos.y, player.pos.z)) {
-          player.vel.x = 0;
-          break;
-        }
-        player.pos.x = nx;
-      }
-
-      const dy = player.vel.y * dt;
+      // Y axis
+      const dy = player.vel.y;
       const ySteps = Math.max(1, Math.ceil(Math.abs(dy) / maxStep));
       const stepY = dy / ySteps;
       for (let i = 0; i < ySteps; i++) {
@@ -2379,8 +2394,20 @@
         player.pos.y = ny;
         player.onGround = false;
       }
-
-      const dz = player.vel.z * dt;
+      // X axis
+      const dx = player.vel.x;
+      const xSteps = Math.max(1, Math.ceil(Math.abs(dx) / maxStep));
+      const stepX = dx / xSteps;
+      for (let i = 0; i < xSteps; i++) {
+        const nx = player.pos.x + stepX;
+        if (collidesAABB(nx, player.pos.y, player.pos.z)) {
+          player.vel.x = 0;
+          break;
+        }
+        player.pos.x = nx;
+      }
+      // Z axis
+      const dz = player.vel.z;
       const zSteps = Math.max(1, Math.ceil(Math.abs(dz) / maxStep));
       const stepZ = dz / zSteps;
       for (let i = 0; i < zSteps; i++) {
@@ -2391,11 +2418,57 @@
         }
         player.pos.z = nz;
       }
+    }
+    function movePlayerTick() {
+      // rujukan LocalPlayer::aiStep + Mob::aiStep + Mob::travel (land branch)
+      // Input → xxa (strafe, +1=left), yya (forward, +1=forward)
+      let xxa = (keys['KeyA'] ? 1 : 0) - (keys['KeyD'] ? 1 : 0);
+      let yya = (keys['KeyW'] ? 1 : 0) - (keys['KeyS'] ? 1 : 0);
+      if (xxa !== 0 && yya !== 0) {
+        const m = Math.sqrt(xxa*xxa + yya*yya);
+        xxa /= m; yya /= m;
+      }
+      const sprint = keys['ShiftLeft'] && !player.fly;
+      player.sprinting = sprint;
+      // rujukan Mob::aiStep: xxa *= 0.98, yya *= 0.98 (per-tick input decay).
+      // minecraft.html resets input each tick so this has no visible effect; skip.
 
-      // jump
+      // Jump (rujukan Mob::aiStep: if jumping && onGround, jumpFromGround = 0.42)
       if (keys['Space'] && player.onGround && !player.fly) {
-        player.vel.y = 8.5;
+        player.vel.y = 0.42;
         player.onGround = false;
+      }
+
+      if (player.fly) {
+        // rujukan LocalPlayer::calculateFlight (simplified): direct velocity from input
+        // VERIFIED: abilities.flyingSpeed = 0.05, vertical impulse ±0.15/tick
+        // Same yaw-convention adaptation as moveRelativeTick (yRot = yaw - 180°).
+        const sinY = Math.sin(player.yaw), cosY = Math.cos(player.yaw);
+        const fsp = player.flySpeed;
+        player.vel.x = (yya * sinY - xxa * cosY) * fsp;
+        player.vel.z = (-yya * cosY - xxa * sinY) * fsp;
+        player.vel.y = ((keys['Space'] ? 1 : 0) - (keys['ShiftLeft'] ? 1 : 0)) * 0.15;
+        moveWithCollision();
+      } else {
+        // rujukan Mob::travel land branch (Entry 2 verified)
+        let friction = 0.91;
+        if (player.onGround) {
+          friction = 0.6 * 0.91;
+          // DEVIATION: rujukan reads Tile::tiles[t]->friction. minecraft.html
+          // has no per-tile friction table; uses default 0.6.
+        }
+        const friction2 = (0.6*0.6*0.91*0.91*0.6*0.91) / (friction*friction*friction);
+        // DEVIATION from rujukan: minecraft.html adds sprint (Shift) as a 1.5×
+        // walk-speed multiplier. rujukan has no sprint in 2013 MCPE. Preserved
+        // to keep minecraft.html's gameplay feel intact during the merge.
+        const speed = player.onGround ? player.speed * (sprint ? 1.5 : 1) * friction2 : player.flySpeed;
+        moveRelativeTick(xxa, yya, speed);
+        moveWithCollision();
+        // gravity + air drag + horizontal friction (per-tick, verified)
+        player.vel.y -= 0.08;
+        player.vel.y *= 0.98;
+        player.vel.x *= friction;
+        player.vel.z *= friction;
       }
 
       // prevent falling forever
@@ -2752,16 +2825,36 @@
       }
 
       const gameplayActive = getActiveUiScreen() === 'playing';
-      if (gameplayActive) movePlayer(dt);
 
-      // Pause gameplay systems while the title, pause, inventory, or guide UI is open.
+      // ---- Fixed-timestep physics (rujukan Timer.h: 20 tps, MAX_TICKS_PER_UPDATE=10) ----
+      // Integer-millisecond accumulator avoids floating-point precision loss
+      // that occurred with dt≈TICK_DT (Math.floor(0.05/0.05) returned 0 on some
+      // frames, halving the effective tick rate). Integer ms is exact.
+      if (gameplayActive) {
+        physicsAccumMs += dt * 1000;
+        let nTicks = 0;
+        while (physicsAccumMs >= TICK_MS && nTicks < MAX_TICKS_PER_UPDATE) {
+          physicsAccumMs -= TICK_MS;
+          nTicks++;
+          player.prevPos.copy(player.pos);
+          movePlayerTick();
+        }
+      }
+
+      // Visual systems stay at 60fps (dt-based) — particles, mobs, day/night.
       if (gameplayActive) {
         updateParticles(dt);
         updateMobs(dt);
       }
 
-      // camera follow
-      camera.position.set(player.pos.x, player.pos.y + player.eye, player.pos.z);
+      // camera follow with interpolation between physics ticks.
+      // alpha = physicsAccumMs / TICK_MS (0..1) interpolates prevPos→pos so
+      // 20 tps physics looks smooth at 60 fps render.
+      const alpha = gameplayActive ? Math.min(1, physicsAccumMs / TICK_MS) : 1;
+      const camX = player.prevPos.x + (player.pos.x - player.prevPos.x) * alpha;
+      const camY = player.prevPos.y + (player.pos.y - player.prevPos.y) * alpha;
+      const camZ = player.prevPos.z + (player.pos.z - player.prevPos.z) * alpha;
+      camera.position.set(camX, camY + player.eye, camZ);
       camera.rotation.order = 'YXZ';
       camera.rotation.y = player.yaw;
       camera.rotation.x = player.pitch;
