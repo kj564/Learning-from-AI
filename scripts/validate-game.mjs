@@ -49,7 +49,7 @@ if (source.includes('const BROWSER_STATS_KEY') &&
 } else {
   fail('Browser stats should safely persist visits, coins, and block activity');
 }
-if (source.includes('const coinRewards = { 20: 2, 21: 3, 22: 5, 23: 15, 24: 4, 26: 3, 28: 20, 31: 2 }')) {
+if (source.includes('const coinRewards = { 18: 2, 19: 3, 20: 5, 21: 15, 22: 4, 24: 3 }')) {
   pass('Browser ore coin rewards match the Behavior Pack reward table');
 } else {
   fail('Browser ore coin rewards must match the Behavior Pack reward table');

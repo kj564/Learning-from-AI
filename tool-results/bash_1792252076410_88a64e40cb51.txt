@@ -1,0 +1,600 @@
+     1→#!/usr/bin/env node
+     2→import { existsSync, readFileSync } from 'node:fs';
+     3→import { resolve } from 'node:path';
+     4→
+     5→const gamePath = resolve('public/minecraft.html');
+     6→const source = readFileSync(gamePath, 'utf8');
+     7→const placementSource = readFileSync(resolve('src/game/interaction/placement.ts'), 'utf8');
+     8→const miningSource = readFileSync(resolve('src/game/interaction/mining.ts'), 'utf8');
+     9→const raycastSource = readFileSync(resolve('src/game/interaction/raycast.ts'), 'utf8');
+    10→const raycastTestSource = readFileSync(resolve('src/game/interaction/raycast.test.ts'), 'utf8');
+    11→const failures = [];
+    12→const pass = (message) => console.log('✓ ' + message);
+    13→const fail = (message) => failures.push(message);
+    14→
+    15→function section(pattern, label) {
+    16→  const match = source.match(pattern);
+    17→  if (!match) throw new Error('Could not parse ' + label + ' from public/minecraft.html');
+    18→  return match[1];
+    19→}
+    20→
+    21→const styleStart = source.indexOf('<style>');
+    22→const styleEnd = source.indexOf('</style>', styleStart);
+    23→if (styleStart < 0 || styleEnd < 0) throw new Error('Could not parse CSS from public/minecraft.html');
+    24→const uiPanelSource = source.slice(styleStart, styleEnd);
+    25→
+    26→function lastCssRule(selector, predicate = () => true) {
+    27→  const escaped = selector.replaceAll('.', '\\.').replaceAll(' ', '\\s+');
+    28→  const expression = new RegExp(escaped + '\\s*\\{([^}]*)\\}', 'g');
+    29→  let selectedRule = '';
+    30→  for (const match of uiPanelSource.matchAll(expression)) {
+    31→    if (predicate(match[1])) selectedRule = match[1];
+    32→  }
+    33→  return selectedRule;
+    34→}
+    35→
+    36→const menuPanelRule = lastCssRule('#overlay .menu-wrap');
+    37→if (!source.includes("url('./VoxelCraft/textures/ui/menubackground.png')") ||
+    38→    !menuPanelRule.includes('padding:')) {
+    39→  fail('Main menu must retain its Resource Pack backdrop and responsive menu panel');
+    40→} else pass('Main menu retains its Resource Pack backdrop and responsive panel');
+    41→
+    42→for (const selector of ['#hotbar', '#overlay .help-options-panel', '.inv-grid']) {
+    43→  const rule = lastCssRule(selector, body =>
+    44→    body.includes("url('./VoxelCraft/textures/ui/background_panel.png')") &&
+    45→    body.includes("url('./VoxelCraft/textures/ui/background_with_border.png')"));
+    46→  if (!rule) {
+    47→    fail(selector + ' must use the original Resource Pack panel texture and nine-slice border');
+    48→  } else pass(selector + ' uses the original Resource Pack panel texture and nine-slice border');
+    49→}
+    50→
+    51→if (!source.includes("import './voxelcraft-engine.bundle.js'") ||
+    52→    !source.includes('new window.VoxelCraftEngine') ||
+    53→    !source.includes('new window.VoxelCraftBlockRegistry') ||
+    54→    !source.includes('syncEngineChunk(c)')) {
+    55→  fail('Main minecraft.html must initialize the rebuilt engine and synchronize its world chunks');
+    56→} else pass('Main minecraft.html loads the rebuilt engine and synchronizes the legacy world into engine chunks');
+    57→
+    58→if (!source.includes('voxelEngine.target(') ||
+    59→    !source.includes('voxelEngine.startMining(hit.block)') ||
+    60→    !source.includes('voxelEngine.advanceMining(deltaSeconds, hit.block)') ||
+    61→    !source.includes('voxelEngine.placeSelected(hit)')) {
+    62→  fail('Main gameplay must route targeting, timed mining, and placement through the rebuilt engine');
+    63→} else pass('Main gameplay uses rebuilt voxel targeting, timed mining, and transactional placement');
+    64→
+    65→const tileSource = section(/const TILE = \{([\s\S]*?)\n    \};/, 'TILE');
+    66→const tileEntries = [...tileSource.matchAll(/\b([A-Z][A-Z0-9_]*):\s*(\d+)/g)];
+    67→const tiles = new Map(tileEntries.map(([, name, index]) => [name, Number(index)]));
+    68→const declaredTileIndices = tileEntries.map(([, , index]) => Number(index));
+    69→const textureSource = section(/const TEXTURE_FILES = \[([\s\S]*?)\n    \];/, 'TEXTURE_FILES');
+    70→const textures = [...textureSource.matchAll(/'([^']+)'/g)].map(([, name]) => name);
+    71→const blockSource = section(/const BLOCKS = \{([\s\S]*?)\n    \};/, 'BLOCKS');
+    72→const blockEntries = [...blockSource.matchAll(/^\s*(\d+):\s*(null|\{[^\n]*\})/gm)];
+    73→const blocks = new Map(blockEntries.map(([, id, definition]) => [Number(id), definition]));
+    74→
+    75→if (!source.includes('data-inv-filter="items"') ||
+    76→    !source.includes("fetch('./item-catalog.json')") ||
+    77→    !source.includes("encodeURIComponent(item.file)") ||
+    78→    !source.includes("filter === 'items'")) {
+    79→  fail('Inventory must expose a browsable original item-icon catalog');
+    80→} else pass('Inventory exposes a dedicated item-icon catalog without pretending icons are gameplay mechanics');
+    81→
+    82→const itemCatalogPath = resolve('public/item-catalog.json');
+    83→if (!existsSync(itemCatalogPath)) {
+    84→  fail('Generated item-catalog.json is missing; run scripts/stage-item-catalog.mjs before validation');
+    85→} else {
+    86→  try {
+    87→    const catalog = JSON.parse(readFileSync(itemCatalogPath, 'utf8'));
+    88→    if (catalog.version !== 1 || !Array.isArray(catalog.items) || catalog.count !== catalog.items.length || !catalog.items.length) {
+    89→      fail('Generated item catalog must have a valid version, count, and non-empty item list');
+    90→    } else {
+    91→      let catalogAssetsValid = true;
+    92→      const seenFiles = new Set();
+    93→      for (const item of catalog.items) {
+    94→        if (!item || typeof item.id !== 'string' || typeof item.file !== 'string' ||
+    95→            !item.file.endsWith('.png') || seenFiles.has(item.file)) {
+    96→          fail('Item catalog entries must have unique PNG filenames and stable IDs');
+    97→          catalogAssetsValid = false;
+    98→          break;
+    99→        }
+   100→        seenFiles.add(item.file);
+   101→        const originalPath = resolve('VoxelCraft/textures/items', item.file);
+   102→        const stagedPath = resolve('public/VoxelCraft/textures/items', item.file);
+   103→        if (!existsSync(originalPath) || !existsSync(stagedPath) ||
+   104→            !readFileSync(originalPath).equals(readFileSync(stagedPath))) {
+   105→          fail('Item icon must be staged byte-identically from Resource Pack: ' + item.file);
+   106→          catalogAssetsValid = false;
+   107→          break;
+   108→        }
+   109→      }
+   110→      if (catalogAssetsValid) pass('All ' + catalog.items.length + ' item catalog icons are staged byte-identically from the original Resource Pack');
+   111→    }
+   112→  } catch (error) {
+   113→    fail('Generated item catalog JSON is invalid: ' + error.message);
+   114→  }
+   115→}
+   116→
+   117→const inventoryFilterSource = section(/const inventoryFilterSets = \{([\s\S]*?)\n    \};/, 'inventory category filters');
+   118→const inventoryCategoryIds = {};
+   119→for (const category of ['nature', 'building', 'minerals']) {
+   120→  const match = inventoryFilterSource.match(new RegExp(category + ': new Set\\(\\[([^\\]]*)\\]\\)'));
+   121→  inventoryCategoryIds[category] = match ? match[1].split(',').map((value) => Number(value.trim())).filter(Number.isInteger) : [];
+   122→}
+   123→const listedInventoryIds = Object.values(inventoryCategoryIds).flat();
+   124→// Air (ID 0) is a world-state sentinel, not a placeable inventory block.
+   125→const knownBlockIds = [...blocks.keys()].filter((id) => id !== 0);
+   126→const uncategorizedBlockIds = knownBlockIds.filter((id) => !listedInventoryIds.includes(id));
+   127→const unknownCategoryBlockIds = listedInventoryIds.filter((id) => !blocks.has(id));
+   128→if (new Set(listedInventoryIds).size !== listedInventoryIds.length) {
+   129→  fail('Inventory category filters must not list a block in multiple categories');
+   130→} else if (uncategorizedBlockIds.length || unknownCategoryBlockIds.length) {
+   131→  fail('Every defined block must appear in exactly one inventory category; missing: ' +
+   132→    (uncategorizedBlockIds.join(', ') || 'none') + '; unknown: ' +
+   133→    (unknownCategoryBlockIds.join(', ') || 'none'));
+   134→} else if (![25, 27, 29, 30, 31, 32, 33].every((id) => inventoryCategoryIds.minerals.includes(id)) ||
+   135→           [25, 27, 29, 32, 33].some((id) => inventoryCategoryIds.building.includes(id))) {
+   136→  fail('Mineral blocks must appear only in the minerals inventory category');
+   137→} else pass('Inventory categories are exclusive, complete, and classify mineral blocks consistently');
+   138→
+   139→if (!source.includes('grid-template-columns: repeat(9, minmax(38px, 52px))') ||
+   140→    !source.includes('grid-template-columns: repeat(6, minmax(34px, 1fr))')) {
+   141→  fail('Inventory grid must use nine Bedrock-style columns on desktop and a compact six-column layout on mobile');
+   142→} else pass('Inventory grid matches Bedrock-style desktop and mobile column layouts');
+   143→
+   144→if (source.includes('#vcGuide .vc-actions { display: grid; grid-template-columns: 1fr; gap: 7px; }')) {
+   145→  pass('Browser guide buttons use a single-column action list');
+   146→} else {
+   147→  fail('Browser guide action buttons must use a single-column layout');
+   148→}
+   149→
+   150→if (source.includes('class="hud-brand">VoxelCraft') && source.includes('Overworld') && source.includes('browserStats.coins')) {
+   151→  pass('Browser HUD displays browser-owned dimension, coordinates, time, and session statistics');
+   152→} else {
+   153→  fail('Browser HUD should display browser-owned dimension, coordinates, time, and session statistics');
+   154→}
+   155→if (source.includes('const BROWSER_STATS_KEY') &&
+   156→    source.includes('browserStats.joins++') &&
+   157→    source.includes('browserStats.blocksBroken = browserBlocksBroken') &&
+   158→    source.includes('browserStats.blocksPlaced = browserBlocksPlaced') &&
+   159→    source.includes('localStorage.setItem(BROWSER_STATS_KEY')) {
+   160→  pass('Browser-only player statistics persist safely in browser storage');
+   161→} else {
+   162→  fail('Browser stats should safely persist visits, coins, and block activity');
+   163→}
+   164→if (source.includes('const coinRewards = { 20: 2, 21: 3, 22: 5, 23: 15, 24: 4, 26: 3, 28: 20, 31: 2 }')) {
+   165→  pass("Browser ore coin rewards use the browser game's local reward table");
+   166→} else {
+   167→  fail("Browser ore coin rewards must use the browser game's local reward table");
+   168→}
+   169→
+   170→if (!source.includes("@font-face") ||
+   171→    !source.includes("font-family: 'Minecraft Ten'") ||
+   172→    !source.includes("./VoxelCraft/font/minecraft-ten.ttf")) {
+   173→  fail('Browser UI must use the original Bedrock Minecraft Ten font');
+   174→} else pass('Browser UI references the original Bedrock Minecraft Ten font');
+   175→
+   176→if (source.includes("body { cursor: url('./VoxelCraft/textures/ui/cursor_pc.png') 4 4, auto; }") &&
+   177→    source.includes('#game { cursor: none; }')) {
+   178→  pass('Browser pointer uses the original Bedrock cursor outside the 3D viewport');
+   179→} else {
+   180→  fail('Browser pointer must use the staged original Bedrock cursor');
+   181→}
+   182→
+   183→if (source.includes('#overlay .brand {') &&
+   184→    source.includes('top: 12px;') &&
+   185→    source.includes('left: 50%;') &&
+   186→    source.includes('transform: translateX(-50%);') &&
+   187→    source.includes('#overlay .menu-subtitle { display: none; }')) {
+   188→  pass('Browser title branding follows the original Resource Pack top-middle anchor');
+   189→} else {
+   190→  fail('Browser title branding should follow the original Resource Pack top-middle anchor');
+   191→}
+   192→
+   193→if (!source.includes('const clockMinutes = Math.floor((((worldTime % 1) + 1) % 1) * 1440);') ||
+   194→    !source.includes("padStart(2, '0')")) {
+   195→  fail('Browser HUD must show a live HH:mm clock in the browser runtime');
+   196→} else pass('Browser HUD shows a live HH:mm clock in the browser runtime');
+   197→
+   198→if (source.includes('body[data-ui-screen="inventory"] #overlay') &&
+   199→    source.includes('body[data-ui-screen="inventory"] #pauseOverlay') &&
+   200→    source.includes('body[data-ui-screen="inventory"] #vcGuide') &&
+   201→    source.includes('body[data-ui-screen="inventory"] #inventory') &&
+   202→    source.includes('display: none !important;') &&
+   203→    source.includes('z-index: 1000;')) {
+   204→  pass('Inventory screen cannot be covered by title, pause, or guide overlays');
+   205→} else {
+   206→  fail('Inventory screen must hide competing overlays and remain on top while active');
+   207→}
+   208→
+   209→if (source.includes('id="pauseOverlay"') && source.includes('id="resumeGameButton"') &&
+   210→    source.includes('function syncMenuVisibility()') && source.includes("function getActiveUiScreen()") &&
+   211→    source.includes("document.body.dataset.uiScreen = activeScreen") &&
+   212→    source.includes("const gameplayActive = getActiveUiScreen() === 'playing'")) {
+   213→  pass('One screen state controls title, gameplay, pause, inventory, and guide visibility');
+   214→} else {
+   215→  fail('UI screens and gameplay activation must be derived from one screen state');
+   216→}
+   217→
+   218→if (source.includes('aria-labelledby="inventoryTitle"') &&
+   219→    source.includes("if (e.code === 'Escape' && !e.repeat && !wasDown)") &&
+   220→    source.includes("if (inventoryOpen) { e.preventDefault(); toggleInventory(); return; }") &&
+   221→    source.includes("if (vcGuideOpen) { e.preventDefault(); closeVcGuide(); return; }") &&
+   222→    source.includes("if (gameStarted && !locked) { e.preventDefault(); resumeGame(); return; }")) {
+   223→  pass('Escape closes blocking screens, returns from pause, and inventory is announced as a modal dialog');
+   224→} else {
+   225→  fail('Escape navigation and accessible inventory dialog semantics must be present');
+   226→}
+   227→
+   228→if (!source.includes("inventoryEl.classList.toggle('hidden', !inventoryOpen)") &&
+   229→    !source.includes("vcGuide.classList.remove('hidden')") &&
+   230→    !source.includes("vcGuide.classList.add('hidden')") &&
+   231→    source.includes("if (!inventoryOpen && vcGuideOpen) return;")) {
+   232→  pass('Inventory and guide transitions use the central screen-state controller');
+   233→} else {
+   234→  fail('Inventory and guide visibility must be controlled centrally, with mutually exclusive screens');
+   235→}
+   236→
+   237→if (source.includes("event.key === 'ArrowRight'") && source.includes("event.key === 'ArrowLeft'") &&
+   238→    source.includes("event.key === 'Home'") && source.includes("event.key === 'End'") &&
+   239→    source.includes('tab.tabIndex = selected ? 0 : -1') &&
+   240→    source.includes('role="tabpanel" aria-labelledby="inventoryTabAll"') &&
+   241→    source.includes('aria-controls="invGrid"')) {
+   242→  pass('Inventory category tabs support arrow/Home/End navigation and roving keyboard focus');
+   243→} else {
+   244→  fail('Inventory category tabs must follow accessible keyboard tab-navigation behavior');
+   245→}
+   246→
+   247→if (source.includes('data-inv-filter="all"') && source.includes('data-inv-filter="nature"') &&
+   248→    source.includes('data-inv-filter="building"') && source.includes('data-inv-filter="minerals"') &&
+   249→    source.includes('function buildInventory(filter = activeInventoryFilter)')) {
+   250→  pass('Inventory UI has working category tabs for all blocks, nature, building, and minerals');
+   251→} else {
+   252→  fail('Inventory category tabs must filter the browser block catalog');
+   253→}
+   254→
+   255→const vanillaUiTextures = [
+   256→  'menubackground',
+   257→  'background_panel', 'background_with_border', 'button_borderless_dark',
+   258→  'button_borderless_darkhover', 'button_borderless_darkpressed',
+   259→  'dialog_background_opaque', 'highlight_slot', 'hotbar_start_cap', 'hotbar_end_cap', 'cancel', 'inventory_icon',
+   260→  'hud_tip_text_background', 'item_cell', 'cursor_pc',
+   261→  'TabTopBack', 'TabTopBackHover', 'TabTopFront', 'TabTopFrontHover',
+   262→];
+   263→for (const texture of vanillaUiTextures) {
+   264→  if (!source.includes(`./VoxelCraft/textures/ui/${texture}.png`)) {
+   265→    fail(`Browser UI must use the staged vanilla Bedrock texture: ${texture}.png`);
+   266→  }
+   267→}
+   268→if (vanillaUiTextures.every(texture => source.includes(`./VoxelCraft/textures/ui/${texture}.png`))) {
+   269→  pass(`Browser UI references all ${vanillaUiTextures.length} original Bedrock UI textures`);
+   270→}
+   271→
+   272→// The browser game is an adapter: stage exact original pack assets, never redraw substitutes.
+   273→const stagedAssetGroups = [
+   274→  {
+   275→    label: 'vanilla Bedrock UI sprites',
+   276→    files: [
+   277→      ...['menubackground', 'background_panel', 'background_with_border', 'button_borderless_dark',
+   278→        'button_borderless_darkhover', 'button_borderless_darkpressed', 'dialog_background_opaque',
+   279→        'highlight_slot', 'hotbar_start_cap', 'hotbar_end_cap', 'cancel', 'inventory_icon',
+   280→        'hud_tip_text_background', 'item_cell', 'cursor_pc', 'TabTopBack', 'TabTopBackHover', 'TabTopFront', 'TabTopFrontHover']
+   281→        .map(name => [`VoxelCraft/textures/ui/${name}.png`, `public/VoxelCraft/textures/ui/${name}.png`]),
+   282→    ],
+   283→  },
+   284→  {
+   285→    label: 'vanilla Bedrock newgui button states',
+   286→    files: ['ButtonWithBorder', 'ButtonWithBorderHover', 'ButtonWithBorderPressed'].map(name => [
+   287→      `VoxelCraft/textures/gui/newgui/${name}.png`, `public/VoxelCraft/textures/gui/newgui/${name}.png`,
+   288→    ]),
+   289→  },
+   290→  {
+   291→    label: 'Resource Pack item sprites used by the browser guide',
+   292→    files: ['book_writable', 'apple', 'feather', 'clock_item', 'bed_red', 'compass_item', 'book_normal', 'brick', 'diamond'].map(name => [
+   293→      `VoxelCraft/textures/items/${name}.png`, `public/VoxelCraft/textures/items/${name}.png`,
+   294→    ]),
+   295→  },
+   296→  {
+   297→    label: 'original Bedrock UI font',
+   298→    files: [['VoxelCraft/font/minecraft-ten.ttf', 'public/VoxelCraft/font/minecraft-ten.ttf']],
+   299→  },
+   300→];
+   301→for (const group of stagedAssetGroups) {
+   302→  let groupValid = true;
+   303→  for (const [sourcePath, stagedPath] of group.files) {
+   304→    const sourceFile = resolve(sourcePath);
+   305→    const stagedFile = resolve(stagedPath);
+   306→    if (!existsSync(sourceFile)) {
+   307→      fail(`Missing original asset (${group.label}): ${sourcePath}`);
+   308→      groupValid = false;
+   309→      continue;
+   310→    }
+   311→    if (!existsSync(stagedFile)) {
+   312→      fail(`Missing staged asset (${group.label}): ${stagedPath}; run scripts/setup.sh first`);
+   313→      groupValid = false;
+   314→      continue;
+   315→    }
+   316→    if (!readFileSync(sourceFile).equals(readFileSync(stagedFile))) {
+   317→      fail(`Staged asset differs from original pack (${group.label}): ${stagedPath}`);
+   318→      groupValid = false;
+   319→    }
+   320→  }
+   321→  if (groupValid) pass(`Staged files are byte-identical to source: ${group.label}`);
+   322→}
+   323→
+   324→const vanillaMenuTextures = ['ButtonWithBorder', 'ButtonWithBorderHover', 'ButtonWithBorderPressed'];
+   325→for (const texture of vanillaMenuTextures) {
+   326→  if (!source.includes(`./VoxelCraft/textures/gui/newgui/${texture}.png`)) {
+   327→    fail(`Main-menu buttons must use original Bedrock newgui texture: ${texture}.png`);
+   328→  }
+   329→}
+   330→if (vanillaMenuTextures.every(texture => source.includes(`./VoxelCraft/textures/gui/newgui/${texture}.png`))) {
+   331→  pass('Main-menu button states reference original Bedrock newgui textures');
+   332→}
+   333→
+   334→if (source.includes('width: 40px;\n    height: 44px;') && source.includes('width: min(10vw, 38px); height: min(11vw, 42px);')) {
+   335→  pass('Hotbar slot proportions follow the original Bedrock HUD grid at desktop and mobile scales');
+   336→} else {
+   337→  fail('Hotbar slot proportions must follow the original Bedrock HUD grid at desktop and mobile scales');
+   338→}
+   339→
+   340→if (source.includes('scaleX(1.2) scaleY(1.09)')) {
+   341→  pass('Selected hotbar slot follows the original Bedrock 24x24 highlight proportions');
+   342→} else {
+   343→  fail('Selected hotbar slot must follow the original Bedrock 24x24 highlight proportions');
+   344→}
+   345→
+   346→const inventoryTabIcons = ['apple', 'brick', 'diamond'];
+   347→for (const icon of inventoryTabIcons) {
+   348→  if (!source.includes(`./VoxelCraft/textures/items/${icon}.png`)) {
+   349→    fail(`Inventory category tab must use the original resource-pack icon: ${icon}.png`);
+   350→  }
+   351→}
+   352→if (inventoryTabIcons.every(icon => source.includes(`./VoxelCraft/textures/items/${icon}.png`)) &&
+   353→    source.includes('button[data-inv-filter="all"]::before') &&
+   354→    source.includes("textures/ui/inventory_icon.png")) {
+   355→  pass('Inventory category tabs use original resource-pack icons for all, nature, building, and minerals');
+   356→}
+   357→
+   358→const browserGuideActions = ['kit', 'heal', 'fly', 'day', 'night', 'weather', 'stats', 'close'];
+   359→for (const action of browserGuideActions) {
+   360→  if (!source.includes(`data-vc-action="${action}"`)) {
+   361→    fail(`VoxelCraft guide menu is missing action: ${action}`);
+   362→  }
+   363→}
+   364→if (browserGuideActions.every(action => source.includes(`data-vc-action="${action}"`)) &&
+   365→    source.includes("e.code === 'KeyG'") && source.includes("function openVcGuide()")) {
+   366→  pass('Browser guide actions are present and the G shortcut is retained (browser adaptation, not Behavior Pack commands)');
+   367→}
+   368→
+   369→const browserGuideIcons = ['book_writable', 'apple', 'feather', 'clock_item', 'bed_red', 'compass_item', 'book_normal'];
+   370→for (const icon of browserGuideIcons) {
+   371→  if (!source.includes(`./VoxelCraft/textures/items/${icon}.png`)) {
+   372→    fail(`Browser guide must use the staged original Resource Pack item texture: ${icon}.png`);
+   373→  }
+   374→}
+   375→if (browserGuideIcons.every(icon => source.includes(`./VoxelCraft/textures/items/${icon}.png`))) {
+   376→  pass(`Browser guide references all ${browserGuideIcons.length} original Resource Pack item sprites`);
+   377→}
+   378→
+   379→if (!tiles.size) fail('TILE table is empty');
+   380→else pass(`Parsed ${tiles.size} texture tile definitions`);
+   381→
+   382→const tileIndices = [...tiles.values()];
+   383→if (new Set(tileIndices).size !== tileIndices.length) fail('TILE contains duplicate indices');
+   384→else pass('Texture tile indices are unique');
+   385→const expectedIndices = Array.from({ length: tileIndices.length }, (_, i) => i);
+   386→if ([...tileIndices].sort((a, b) => a - b).some((value, i) => value !== expectedIndices[i])) {
+   387→  fail('TILE indices must be contiguous from 0');
+   388→} else pass('Texture tile indices are contiguous from 0');
+   389→if (declaredTileIndices.some((value, i) => value !== i)) {
+   390→  fail('TILE declaration order must match TEXTURE_FILES array positions');
+   391→} else pass('TILE declaration order matches TEXTURE_FILES array positions');
+   392→
+   393→if (textures.length !== tiles.size) fail(`TILE/TEXTURE_FILES count mismatch: ${tiles.size} vs ${textures.length}`);
+   394→else pass('TILE and TEXTURE_FILES have matching lengths');
+   395→if (new Set(textures).size !== textures.length) fail('TEXTURE_FILES contains duplicate texture names');
+   396→else pass('Texture source names are unique');
+   397→
+   398→for (const [name, index] of tiles) {
+   399→  if (index >= textures.length) fail(`Tile ${name} points outside TEXTURE_FILES (index ${index})`);
+   400→  if (textures[index] === undefined) fail(`Missing texture entry for tile ${name}`);
+   401→}
+   402→if (textures.length <= 16 * 6) pass(`Atlas capacity valid (${textures.length}/96 tiles)`);
+   403→else fail(`Atlas capacity exceeded (${textures.length}/96 tiles)`);
+   404→
+   405→if (blocks.size < 2 || blocks.get(0) !== 'null') fail('Block ID 0 must be null (air)');
+   406→else pass(`Parsed ${blocks.size} block IDs; ID 0 is air`);
+   407→const blockIds = [...blocks.keys()].sort((a, b) => a - b);
+   408→if (blockIds.some((id, i) => id !== i)) fail('Block IDs must be contiguous from 0');
+   409→else pass('Block IDs are contiguous from 0');
+   410→
+   411→for (const [id, definition] of blocks) {
+   412→  if (definition === 'null') continue;
+   413→  for (const [, tileName] of definition.matchAll(/TILE\.([A-Z][A-Z0-9_]*)/g)) {
+   414→    if (!tiles.has(tileName)) fail(`Block ${id} references undefined TILE.${tileName}`);
+   415→  }
+   416→  for (const field of ['name:', 'top:', 'bottom:', 'side:', 'solid:']) {
+   417→    if (!definition.includes(field)) fail(`Block ${id} is missing required ${field.slice(0, -1)} field`);
+   418→  }
+   419→  const referencedTiles = [...definition.matchAll(/TILE\.([A-Z][A-Z0-9_]*)/g)].map(([, name]) => name);
+   420→  const usesOpaqueLeafTexture = referencedTiles.some(name => {
+   421→    const index = tiles.get(name);
+   422→    return index !== undefined && /leaves_.*_opaque/.test(textures[index] || '');
+   423→  });
+   424→  if (usesOpaqueLeafTexture && /transparent:\s*true/.test(definition)) {
+   425→    fail(`Block ${id} uses an opaque leaf texture but is configured as translucent`);
+   426→  }
+   427→}
+   428→if (!failures.some(message => message.startsWith('Block '))) pass('Every block texture reference resolves to a known tile');
+   429→
+   430→if (!source.includes('saved.version === 1')) fail('World save loader must validate the save schema version');
+   431→else pass('World save loader validates schema version');
+   432→if (!source.includes('Number.isFinite')) fail('World coordinate APIs must reject non-finite coordinates');
+   433→else pass('World coordinate APIs guard non-finite coordinates');
+   434→if (!source.includes('!Number.isSafeInteger(x) || !Number.isSafeInteger(z)')) fail('World coordinate APIs must reject unsafe integer coordinates');
+   435→else pass('World coordinate APIs reject unsafe integer coordinates');
+   436→
+   437→if (!source.includes('getBlockIfLoaded(x, y, z)') ||
+   438→    !source.includes('world.getBlockIfLoaded(baseX + nx, ny, baseZ + nz)')) {
+   439→  fail('Chunk meshing must inspect loaded neighbors without implicitly generating chunks outside the render window');
+   440→} else pass('Chunk meshing reads loaded neighbors without generating hidden chunks');
+   441→
+   442→const ensureChunkBody = source.match(/ensureChunk\(cx, cz\)\s*\{([\s\S]*?)\n      getChunk\(/)?.[1] || '';
+   443→if (!ensureChunkBody.includes('this.chunks.set(k, c);') ||
+   444→    !ensureChunkBody.includes('this.invalidateChunk(cx - 1, cz);') ||
+   445→    !ensureChunkBody.includes('this.invalidateChunk(cx + 1, cz);') ||
+   446→    !ensureChunkBody.includes('this.invalidateChunk(cx, cz - 1);') ||
+   447→    !ensureChunkBody.includes('this.invalidateChunk(cx, cz + 1);')) {
+   448→  fail('Loading a chunk must invalidate loaded neighbors so boundary faces are remeshed');
+   449→} else pass('New chunks invalidate loaded neighbors for correct boundary remeshing');
+   450→if (!source.includes('!Object.prototype.hasOwnProperty.call(BLOCKS, v)')) fail('World.setBlock must reject unknown block IDs');
+   451→else pass('World.setBlock rejects unknown block IDs');
+   452→if (!source.includes('invalidateChunk(cx - 1, cz)') ||
+   453→    !source.includes('invalidateChunk(cx + 1, cz)') ||
+   454→    !source.includes('invalidateChunk(cx, cz - 1)') ||
+   455→    !source.includes('invalidateChunk(cx, cz + 1)')) {
+   456→  fail('World.setBlock must invalidate loaded neighbors at all four horizontal chunk boundaries');
+   457→} else pass('Block edits invalidate loaded chunks across all four horizontal boundaries');
+   458→
+   459→if (!source.includes('const epsilon = 1e-7')) fail('Player AABB collision must tolerate exact voxel-face contact');
+   460→else pass('Player collision ignores zero-area contact at voxel faces');
+   461→if (!(source.includes('existing !== 0 && existing !== 19') &&
+   462→      source.includes('if (!world.setBlock(px, py, pz, id)) return;')) &&
+   463→    !(source.includes('voxelEngine.placeSelected(hit)') &&
+   464→      placementSource.includes('if (!currentDefinition.replaceable) return { status: \'occupied\'') &&
+   465→      placementSource.includes('const mutation = world.setBlock(validation.target, blockId);') &&
+   466→      placementSource.includes('if (!mutation.changed) return { status: \'no-change\''))) {
+   467→  fail('Block placement must reject occupied targets and honor the authoritative world mutation result');
+   468→} else pass('Block placement uses authoritative replaceability and transactional world mutation');
+   469→if (!(source.includes('if (!id || !world.setBlock(hit.x, hit.y, hit.z, 0)) return;')) &&
+   470→    !(source.includes('if (!world.setBlock(hit.x, hit.y, hit.z, 0))') &&
+   471→      miningSource.includes('const mutation = world.setBlock(target, 0);') &&
+   472→      miningSource.includes("if (!mutation.changed) return { status: 'target-changed' };"))) {
+   473→  fail('Block breaking must honor the authoritative world mutation result');
+   474→} else pass('Block breaking validates the mutation before awarding drops');
+   475→
+   476→if (!(source.includes('if (!Number.isFinite(maxDist) || maxDist < 0) return null;') &&
+   477→      source.includes('if (!Number.isFinite(nextDist) || nextDist > maxDist) return null;')) &&
+   478→    !(raycastSource.includes('if (!Number.isFinite(maxDistance) || maxDistance < 0)') &&
+   479→      raycastTestSource.includes('returns miss after max distance and validates ray inputs') &&
+   480→      raycastTestSource.includes("0.2, id => id !== 0).status).toBe('miss')"))) {
+   481→  fail('Voxel raycast must reject invalid reach and stop before entering a voxel beyond max distance');
+   482→} else pass('Voxel raycast validates reach and has boundary regression tests');
+   483→
+   484→if (!source.includes("const sprint = keys['ShiftLeft'] && !player.fly;") ||
+   485→    !source.includes('player.speed * (sprint ? 1.5 : 1)')) {
+   486→  fail('Holding left Shift on the ground must enable sprint speed without changing flight controls');
+   487→} else pass('Ground sprint increases movement speed while flight speed remains independent');
+   488→
+   489→if (!source.includes('const maxStep = 0.25;') ||
+   490→    !source.includes('Math.ceil(Math.abs(dy) / maxStep)') ||
+   491→    !source.includes('for (let i = 0; i < ySteps; i++)')) {
+   492→  fail('Player movement must use bounded vertical collision substeps to prevent tunneling');
+   493→} else pass('Player vertical movement uses collision substeps to prevent tunneling through blocks');
+   494→
+   495→if (!source.includes("if (e.code === 'Space' && !e.repeat && !wasDown)")) {
+   496→  fail('Space double-tap flight toggle must ignore key-repeat events');
+   497→} else pass('Holding Space cannot trigger repeated flight-mode toggles from keyboard repeat');
+   498→
+   499→for (const key of ['KeyK', 'KeyE', 'KeyT']) {
+   500→  if (!source.includes(`if (e.code === '${key}' && !e.repeat && !wasDown)`)) {
+   501→    fail(`${key} one-shot action must ignore keyboard repeat events`);
+   502→  }
+   503→}
+   504→if (['KeyK', 'KeyE', 'KeyT'].every(key => source.includes(`if (e.code === '${key}' && !e.repeat && !wasDown)`))) {
+   505→  pass('Save, inventory toggle, and time advance trigger once per key press');
+   506→}
+   507→
+   508→if (!source.includes('function clearPressedKeys()') ||
+   509→    !source.includes('if (!locked) clearPressedKeys();') ||
+   510→    !source.includes("window.addEventListener('blur', clearPressedKeys);") ||
+   511→    !source.includes('lastSpaceTime = 0;')) {
+   512→  fail('Pressed keys and the Space double-tap timer must reset when focus or pointer lock is lost');
+   513→} else pass('Input state resets on focus loss and pointer-lock exit');
+   514→
+   515→// Validate the vanilla chicken assets as a matched source/staged pair.
+   516→// This catches broken deployments before the browser silently falls back to the placeholder model.
+   517→const chickenAssetPairs = [
+   518→  ['VoxelCraft/models/entity/chicken.geo.json', 'public/VoxelCraft/models/entity/chicken.geo.json'],
+   519→  ['VoxelCraft/textures/entity/chicken/chicken.png', 'public/VoxelCraft/textures/entity/chicken/chicken.png'],
+   520→];
+   521→let chickenAssetsMatch = true;
+   522→for (const [sourcePath, stagedPath] of chickenAssetPairs) {
+   523→  if (!existsSync(resolve(sourcePath))) {
+   524→    fail(`Missing original chicken asset: ${sourcePath}`);
+   525→    chickenAssetsMatch = false;
+   526→  } else if (!existsSync(resolve(stagedPath))) {
+   527→    fail(`Missing staged chicken asset: ${stagedPath}; run scripts/setup.sh first`);
+   528→    chickenAssetsMatch = false;
+   529→  } else if (!readFileSync(resolve(sourcePath)).equals(readFileSync(resolve(stagedPath)))) {
+   530→    fail(`Staged chicken asset differs from original Resource Pack: ${stagedPath}`);
+   531→    chickenAssetsMatch = false;
+   532→  }
+   533→}
+   534→if (chickenAssetsMatch) pass('Vanilla chicken geometry and texture are staged byte-identically from the original Resource Pack');
+   535→
+   536→if (!source.includes("./VoxelCraft/models/entity/chicken.geo.json") ||
+   537→    !source.includes("./VoxelCraft/textures/entity/chicken/chicken.png") ||
+   538→    !source.includes('function setBedrockCubeUV(') ||
+   539→    !source.includes('function makeVanillaChickenModel()') ||
+   540→    !source.includes('window.__getChickenState')) {
+   541→  fail('Browser chicken renderer must load the original Bedrock model/texture and expose load diagnostics');
+   542→} else pass('Browser chicken renderer references vanilla assets and exposes diagnostic state');
+   543→
+   544→const chickenGeometryPath = resolve('VoxelCraft/models/entity/chicken.geo.json');
+   545→if (existsSync(chickenGeometryPath)) {
+   546→  try {
+   547→    const chickenData = JSON.parse(readFileSync(chickenGeometryPath, 'utf8'));
+   548→    const geometries = chickenData['minecraft:geometry'];
+   549→    if (!Array.isArray(geometries) || geometries.length === 0) {
+   550→      fail('Vanilla chicken geometry JSON must contain a non-empty minecraft:geometry array');
+   551→    } else {
+   552→      const chickenModel = geometries.find(g => g.description?.identifier === 'geometry.chicken.v1.12') || geometries[0];
+   553→      const description = chickenModel.description || {};
+   554→      if (description.texture_width !== 64 || description.texture_height !== 32) {
+   555→        fail('Vanilla chicken model must declare its expected 64x32 texture atlas');
+   556→      } else pass('Vanilla chicken geometry declares the expected 64x32 texture atlas');
+   557→      const boneNames = new Set((chickenModel.bones || []).map(b => b.name));
+   558→      for (const bone of ['body', 'head', 'leg0', 'leg1', 'wing0', 'wing1']) {
+   559→        if (!boneNames.has(bone)) fail(`Vanilla chicken model is missing required bone: ${bone}`);
+   560→      }
+   561→      if (['body', 'head', 'leg0', 'leg1', 'wing0', 'wing1'].every(bone => boneNames.has(bone))) {
+   562→        pass('Vanilla chicken model includes body, head, both legs, and both wings');
+   563→      }
+   564→      let invalidCube = false;
+   565→      for (const bone of chickenModel.bones || []) {
+   566→        for (const cube of bone.cubes || []) {
+   567→          const size = cube.size;
+   568→          if (!Array.isArray(size) || size.length !== 3 || size.some(n => !Number.isFinite(n) || n <= 0)) {
+   569→            fail(`Chicken bone ${bone.name} contains a cube with invalid dimensions`);
+   570→            invalidCube = true;
+   571→          }
+   572→          if (Array.isArray(cube.uv)) {
+   573→            const [u, v] = cube.uv;
+   574→            if (!Number.isFinite(u) || !Number.isFinite(v) || u < 0 || v < 0 ||
+   575→                u + 2 * size[0] + 2 * size[2] > 64 || v + size[1] + size[2] > 32) {
+   576→              fail(`Chicken bone ${bone.name} has classic cube UV coordinates outside the 64x32 atlas`);
+   577→              invalidCube = true;
+   578→            }
+   579→          }
+   580→        }
+   581→      }
+   582→      if (!invalidCube) pass('Vanilla chicken cubes have positive dimensions and classic UV rectangles fit the atlas');
+   583→    }
+   584→  } catch (error) {
+   585→    fail('Vanilla chicken geometry JSON is invalid: ' + error.message);
+   586→  }
+   587→}
+   588→
+   589→const chickenTexturePath = resolve('VoxelCraft/textures/entity/chicken/chicken.png');
+   590→if (existsSync(chickenTexturePath)) {
+   591→  const png = readFileSync(chickenTexturePath);
+   592→  const isPng = png.length >= 24 && png.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
+   593→  if (!isPng) fail('Vanilla chicken texture must be a valid PNG file');
+   594→  else if (png.readUInt32BE(16) !== 64 || png.readUInt32BE(20) !== 32) {
+   595→    fail(`Vanilla chicken texture dimensions must be 64x32 (found ${png.readUInt32BE(16)}x${png.readUInt32BE(20)})`);
+   596→  } else pass('Vanilla chicken texture is a valid 64x32 PNG atlas');
+   597→}
+   598→
+   599→// Tree features must be generated from world coordinates and clipped per chunk.
+   600→// This prevents crowns and trunks from being cut off at 16x16 chunk boundaries.
