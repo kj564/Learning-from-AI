@@ -1,0 +1,1145 @@
+     1→#include "Mob.h"
+     2→
+     3→#include <cmath>
+     4→
+     5→#include "player/Player.h"
+     6→#include "SharedFlags.h"
+     7→#include "../entity/EntityEvent.h"
+     8→#include "../level/Level.h"
+     9→#include "../level/material/Material.h"
+    10→#include "../level/tile/Tile.h"
+    11→#include "../../util/Random.h"
+    12→#include "../../util/PerfTimer.h"
+    13→
+    14→#include "../../nbt/CompoundTag.h"
+    15→
+    16→#include "../../network/RakNetInstance.h"
+    17→#include "../../network/packet/MoveEntityPacket.h"
+    18→#include "ai/control/MoveControl.h"
+    19→#include "ai/control/JumpControl.h"
+    20→#include "ai/PathNavigation.h"
+    21→#include "ai/Sensing.h"
+    22→#include "ai/goal/GoalSelector.h"
+    23→#include "../../network/packet/SetEntityMotionPacket.h"
+    24→#include "../item/ArmorItem.h"
+    25→
+    26→
+    27→Mob::Mob(Level* level)
+    28→:       super(level),
+    29→        invulnerableDuration(20),
+    30→        //hasHair(false),
+    31→        textureName("mob/char.png"),
+    32→        allowAlpha(true),
+    33→        modelName(""),
+    34→        bobStrength(1),
+    35→        deathScore(0),
+    36→        renderOffset(0),
+    37→        //interpolateOnly(false),
+    38→        lookingAtId(0),
+    39→        jumping(false),
+    40→        defaultLookAngle(0.0f),
+    41→        runSpeed(0.7f),
+    42→        walkingSpeed(0.1f),
+    43→        flyingSpeed(0.02f),
+    44→        run(0), oRun(0),
+    45→        animStep(0), animStepO(0),
+    46→        lx(0), ly(0), lz(0), lxr(0), lyr(0),
+    47→        lSteps(0),
+    48→        walkAnimSpeed(0), walkAnimSpeedO(0), walkAnimPos(0),
+    49→        attackAnim(0), oAttackAnim(0),
+    50→
+    51→        autoSendPosRot(true),
+    52→        sentX(0), sentY(0), sentZ(0),
+    53→        sentRotX(0), sentRotY(0),
+    54→        sentXd(0), sentYd(0), sentZd(0),
+    55→        arrowCount(0),
+    56→        removeArrowTime(0),
+    57→        speed(0),
+    58→        moveControl(NULL),
+    59→        jumpControl(NULL),
+    60→        navigation(NULL),
+    61→        goalSelector(NULL),
+    62→        targetSelector(NULL),
+    63→        sensing(NULL),
+    64→        swinging(false),
+    65→        swingTime(0),
+    66→        lastHurt(0),
+    67→        dmgSpill(0),
+    68→        bypassArmor(false)
+    69→{
+    70→        entityData.define(SharedFlagsInformation::DATA_SHARED_FLAGS_ID, (SynchedEntityData::TypeChar) 0);
+    71→        entityData.define(DATA_AIR_SUPPLY_ID, (SynchedEntityData::TypeShort) TOTAL_AIR_SUPPLY);
+    72→
+    73→        _init();
+    74→        health = getMaxHealth();
+    75→
+    76→        blocksBuilding = true;
+    77→        ambientSoundTime = -level->random.nextInt(100);
+    78→
+    79→        rotA = (float) (Mth::random() + 1) * 0.01f;
+    80→        setPos(x, y, z);
+    81→        timeOffs = (float) Mth::random() * 12398;
+    82→        yRot = (float) (Mth::random() * Mth::PI * 2);
+    83→
+    84→        this->footSize = 0.5f;
+    85→}
+    86→
+    87→Mob::~Mob() {
+    88→        //LOGI("destroying an entity! %p\n", this);
+    89→}
+    90→
+    91→float Mob::getWalkingSpeedModifier() {
+    92→        float speed = 0.7f; // is 1.0f in desktop Minecraft
+    93→
+    94→        //if (hasEffect(MobEffect.movementSpeed)) {
+    95→        //      speed *= 1.0f + .2f * (getEffect(MobEffect.movementSpeed).getAmplifier() + 1);
+    96→        //}
+    97→        //if (hasEffect(MobEffect.movementSlowdown)) {
+    98→        //      speed *= 1.0f - .15f * (getEffect(MobEffect.movementSlowdown).getAmplifier() + 1);
+    99→        //}
+   100→        return speed;
+   101→}
+   102→
+   103→bool Mob::canSee( Entity* target )
+   104→{
+   105→        return !level->clip(Vec3(x, y + getHeadHeight(), z), Vec3(target->x, target->y + target->getHeadHeight(), target->z)).isHit();
+   106→}
+   107→
+   108→std::string Mob::getTexture()
+   109→{
+   110→        return textureName;
+   111→}
+   112→
+   113→bool Mob::isPickable()
+   114→{
+   115→        return !removed;
+   116→}
+   117→
+   118→bool Mob::isPushable()
+   119→{
+   120→        return !removed;
+   121→}
+   122→
+   123→float Mob::getHeadHeight()
+   124→{
+   125→        return bbHeight * 0.85f;
+   126→}
+   127→
+   128→float Mob::getVoicePitch() {
+   129→        if (isBaby()) {
+   130→                return (random.nextFloat() - random.nextFloat()) * 0.2f + 1.5f;
+   131→        }
+   132→        return (random.nextFloat() - random.nextFloat()) * 0.2f + 1.0f;
+   133→}
+   134→
+   135→int Mob::getAmbientSoundInterval()
+   136→{
+   137→        return 8 * SharedConstants::TicksPerSecond;
+   138→}
+   139→
+   140→void Mob::playAmbientSound()
+   141→{
+   142→        const char* ambient = getAmbientSound();
+   143→        if (ambient != NULL) {
+   144→                level->playSound(this, ambient, getSoundVolume(), getVoicePitch());
+   145→        }
+   146→}
+   147→
+   148→void Mob::baseTick()
+   149→{
+   150→        oAttackAnim = attackAnim;
+   151→        super::baseTick();
+   152→
+   153→        TIMER_PUSH("mobBaseTick");
+   154→
+   155→        if (((ambientSoundTime++ & 15) == 0) && random.nextInt(2000) < ambientSoundTime) {
+   156→            ambientSoundTime = -getAmbientSoundInterval();
+   157→            playAmbientSound();
+   158→        }
+   159→
+   160→        if (isAlive() && isInWall()) {
+   161→                hurt(NULL, 1);
+   162→        }
+   163→
+   164→        //if (fireImmune || level.isOnline) onFire = 0;
+   165→
+   166→        if (isAlive() && isUnderLiquid(Material::water) && !isWaterMob()) {
+   167→                airSupply--;
+   168→                if (airSupply == -20) {
+   169→                        airSupply = 0;
+   170→                        for (int i = 0; i < 8; i++) {
+   171→                                float xo = random.nextFloat() - random.nextFloat();
+   172→                                float yo = random.nextFloat() - random.nextFloat();
+   173→                                float zo = random.nextFloat() - random.nextFloat();
+   174→                                level->addParticle(PARTICLETYPE(bubble), x + xo, y + yo, z + zo, xd, yd, zd);
+   175→                        }
+   176→                        hurt(NULL, 2);
+   177→                }
+   178→                //onFire = 0;
+   179→        } else {
+   180→                airSupply = airCapacity;
+   181→        }
+   182→
+   183→        oTilt = tilt;
+   184→        if (attackTime > 0) attackTime--;
+   185→        if (hurtTime > 0) hurtTime--;
+   186→        if (invulnerableTime > 0) invulnerableTime--;
+   187→
+   188→        if (health <= 0) {
+   189→            deathTime++;
+   190→            if (deathTime > SharedConstants::TicksPerSecond) {
+   191→                beforeRemove();
+   192→                remove();
+   193→                for (int i = 0; i < 20; i++) {
+   194→                    float xa = (2.0f * random.nextFloat() - 1.0f) * (2.0f * random.nextFloat() - 1.0f) * 0.02f;
+   195→                                float ya = (2.0f * random.nextFloat() - 1.0f) * (2.0f * random.nextFloat() - 1.0f) * 0.02f;
+   196→                                float za = (2.0f * random.nextFloat() - 1.0f) * (2.0f * random.nextFloat() - 1.0f) * 0.02f;
+   197→                    level->addParticle(PARTICLETYPE(explode), x + random.nextFloat() * bbWidth * 2 - bbWidth, y + random.nextFloat() * bbHeight, z + random.nextFloat() * bbWidth * 2 - bbWidth, xa, ya, za);
+   198→                }
+   199→            }
+   200→        }
+   201→
+   202→        animStepO = animStep;
+   203→
+   204→        yBodyRotO = yBodyRot;
+   205→        yRotO = yRot;
+   206→        xRotO = xRot;
+   207→
+   208→        TIMER_POP();
+   209→
+   210→        if (!level->isClientSide) {
+   211→                if (autoSendPosRot) {
+   212→                        if (autoSendPosRot && (std::abs(x - sentX) > .1f || std::abs(y - sentY) > .05f || std::abs(z - sentZ) > .1f || std::abs(sentRotX - xRot) > 1 || std::abs(sentRotY - yRot) > 1)) {
+   213→                                MoveEntityPacket_PosRot packet(this);
+   214→                                level->raknetInstance->send(packet);
+   215→                                sentX = x;
+   216→                                sentY = y;
+   217→                                sentZ = z;
+   218→                                sentRotX = xRot;
+   219→                                sentRotY = yRot;
+   220→                        }
+   221→                }
+   222→
+   223→                float ddx = std::abs(xd - sentXd);
+   224→                float ddy = std::abs(yd - sentYd);
+   225→                float ddz = std::abs(zd - sentZd);
+   226→                const float max = 0.02f;
+   227→                const float diff = ddx*ddx + ddy*ddy + ddz*ddz;
+   228→                if (diff > max*max || (diff > 0 && xd == 0 && yd == 0 && zd == 0)) {
+   229→                        sentXd = xd;
+   230→                        sentYd = yd;
+   231→                        sentZd = zd;
+   232→                        SetEntityMotionPacket packet(this);
+   233→                        level->raknetInstance->send(packet);
+   234→                        //LOGI("Motion-packet: %d\n", entityId);
+   235→                }
+   236→        }
+   237→}
+   238→
+   239→void Mob::spawnAnim()
+   240→{
+   241→        /*
+   242→        for (int i = 0; i < 20; i++) {
+   243→        float xa = random.nextGaussian() * 0.02;
+   244→        float ya = random.nextGaussian() * 0.02;
+   245→        float za = random.nextGaussian() * 0.02;
+   246→        float dd = 10;
+   247→        level.addParticle(PARTICLETYPE(explode), x + random.nextFloat() * bbWidth * 2 - bbWidth - xa * dd, y + random.nextFloat() * bbHeight - ya * dd, z + random.nextFloat() * bbWidth * 2 - bbWidth - za
+   248→        * dd, xa, ya, za);
+   249→        }
+   250→        */
+   251→}
+   252→
+   253→void Mob::lerpTo( float x, float y, float z, float yRot, float xRot, int steps )
+   254→{
+   255→        //heightOffset = 0;
+   256→        lx = x;
+   257→        ly = y + heightOffset;
+   258→        lz = z;
+   259→        lyr = yRot;
+   260→        lxr = xRot;
+   261→
+   262→        lSteps = steps;
+   263→}
+   264→
+   265→void Mob::superTick()
+   266→{
+   267→        super::tick();
+   268→}
+   269→
+   270→void Mob::tick()
+   271→{
+   272→        super::tick();
+   273→
+   274→        if (arrowCount > 0) {
+   275→                if (removeArrowTime <= 0) {
+   276→                        removeArrowTime = 20 * 3;
+   277→                }
+   278→                removeArrowTime--;
+   279→                if (removeArrowTime <= 0) {
+   280→                        arrowCount--;
+   281→                }
+   282→        }
+   283→
+   284→        if (lSteps > 0) {
+   285→                float xt = x + (lx - x) / lSteps;
+   286→                float yt = y + (ly - y) / lSteps;
+   287→                float zt = z + (lz - z) / lSteps;
+   288→
+   289→                float yrd = lyr - yRot;
+   290→                while (yrd < -180)
+   291→                        yrd += 360;
+   292→                while (yrd >= 180)
+   293→                        yrd -= 360;
+   294→
+   295→                yRot += (yrd) / lSteps;
+   296→                xRot += (lxr - xRot) / lSteps;
+   297→
+   298→                lSteps--;
+   299→                this->setPos(xt, yt, zt);
+   300→                this->setRot(yRot, xRot);
+   301→        }
+   302→
+   303→        aiStep();
+   304→
+   305→        updateWalkAnim();
+   306→
+   307→        float xd = x - xo;
+   308→        float zd = z - zo;
+   309→
+   310→        float sideDist = (float) Mth::sqrt(xd * xd + zd * zd);
+   311→
+   312→        float yBodyRotT = yBodyRot;
+   313→
+   314→        float walkSpeed = 0;
+   315→        oRun = run;
+   316→        float tRun = 0;
+   317→        if (sideDist <= 0.05f) {
+   318→                // animStep = 0;
+   319→        } else {
+   320→                tRun = 1;
+   321→                walkSpeed = sideDist * 3;
+   322→                yBodyRotT = Mth::atan2(zd, xd) * Mth::RADDEG - 90;
+   323→        }
+   324→        if (attackAnim > 0) {
+   325→                yBodyRotT = yRot;
+   326→        }
+   327→        if (!onGround) {
+   328→                tRun = 0;
+   329→        }
+   330→        run = run + (tRun - run) * 0.3f;
+   331→
+   332→        /*
+   333→        * float yBodyRotD = yRot-yBodyRot; while (yBodyRotD < -180) yBodyRotD
+   334→        * += 360; while (yBodyRotD >= 180) yBodyRotD -= 360; yBodyRot +=
+   335→        * yBodyRotD * 0.1f;
+   336→        */
+   337→
+   338→        float yBodyRotD = yBodyRotT - yBodyRot;
+   339→        while (yBodyRotD < -180)
+   340→                yBodyRotD += 360;
+   341→        while (yBodyRotD >= 180)
+   342→                yBodyRotD -= 360;
+   343→        yBodyRot += yBodyRotD * 0.3f;
+   344→
+   345→        float headDiff = yRot - yBodyRot;
+   346→        while (headDiff < -180)
+   347→                headDiff += 360;
+   348→        while (headDiff >= 180)
+   349→                headDiff -= 360;
+   350→        bool behind = headDiff < -90 || headDiff >= 90;
+   351→        if (headDiff < -75) headDiff = -75;
+   352→        if (headDiff >= 75) headDiff = +75;
+   353→        yBodyRot = yRot - headDiff;
+   354→        if (headDiff * headDiff > 50 * 50) {
+   355→                yBodyRot += headDiff * 0.2f;
+   356→        }
+   357→
+   358→        if (behind) {
+   359→                walkSpeed *= -1;
+   360→        }
+   361→        while (yRot - yRotO < -180)
+   362→                yRotO -= 360;
+   363→        while (yRot - yRotO >= 180)
+   364→                yRotO += 360;
+   365→
+   366→        while (yBodyRot - yBodyRotO < -180)
+   367→                yBodyRotO -= 360;
+   368→        while (yBodyRot - yBodyRotO >= 180)
+   369→                yBodyRotO += 360;
+   370→
+   371→        while (xRot - xRotO < -180)
+   372→                xRotO -= 360;
+   373→        while (xRot - xRotO >= 180)
+   374→                xRotO += 360;
+   375→        animStep += walkSpeed;
+   376→}
+   377→
+   378→void Mob::setSize( float w, float h )
+   379→{
+   380→        super::setSize(w, h);
+   381→}
+   382→
+   383→void Mob::heal( int heal )
+   384→{
+   385→        if (health <= 0) return;
+   386→        health += heal;
+   387→        if (health > 20) health = 20;
+   388→        invulnerableTime = invulnerableDuration / 2;
+   389→}
+   390→
+   391→bool Mob::hurt( Entity* source, int dmg )
+   392→{
+   393→        if (level->isClientSide) return false;
+   394→        noActionTime = 0;
+   395→        if (health <= 0) return false;
+   396→
+   397→        this->walkAnimSpeed = 1.5f;
+   398→
+   399→        bool sound = true;
+   400→        if (invulnerableTime > invulnerableDuration / 2.0f) {
+   401→                if (dmg <= lastHurt) return false;
+   402→                actuallyHurt(dmg - lastHurt);
+   403→                lastHurt = dmg;
+   404→                sound = false;
+   405→        } else {
+   406→                lastHurt = dmg;
+   407→                lastHealth = health;
+   408→                invulnerableTime = invulnerableDuration;
+   409→                actuallyHurt(dmg);
+   410→                hurtTime = hurtDuration = 10;
+   411→                hurtDuration = 10;
+   412→        }
+   413→
+   414→        hurtDir = 0;
+   415→
+   416→        if (sound) {
+   417→                level->broadcastEntityEvent(this, EntityEvent::HURT);
+   418→                markHurt();
+   419→                if (source != NULL) {
+   420→                        float xd = source->x - x;
+   421→                        float zd = source->z - z;
+   422→                        while (xd * xd + zd * zd < 0.0001) {
+   423→                                xd = (Mth::random() - Mth::random()) * 0.01f;
+   424→                                zd = (Mth::random() - Mth::random()) * 0.01f;
+   425→                        }
+   426→                        hurtDir = (float) (std::atan2(zd, xd) * Mth::RADDEG) - yRot;
+   427→                        knockback(source, dmg, xd, zd);
+   428→                } else {
+   429→                        hurtDir = (int) (Mth::random() * 2.0f) * 180.0f;
+   430→                }
+   431→        }
+   432→
+   433→        if (health <= 0) {
+   434→                if (sound) level->playSound(this, getDeathSound(), getSoundVolume(), getVoicePitch());
+   435→                die(source);
+   436→        } else {
+   437→                if (sound) level->playSound(this, getHurtSound(), getSoundVolume(), getVoicePitch());
+   438→        }
+   439→
+   440→        return true;
+   441→}
+   442→
+   443→void Mob::actuallyHurt( int dmg )
+   444→{
+   445→    if (!bypassArmor) {
+   446→            dmg = getDamageAfterArmorAbsorb(dmg);
+   447→    }
+   448→        health -= dmg;
+   449→}
+   450→
+   451→float Mob::getSoundVolume()
+   452→{
+   453→        return 1;
+   454→}
+   455→
+   456→const char* Mob::getAmbientSound()
+   457→{
+   458→        return NULL;
+   459→}
+   460→
+   461→std::string Mob::getHurtSound()
+   462→{
+   463→        return "random.hurt";
+   464→}
+   465→
+   466→std::string Mob::getDeathSound()
+   467→{
+   468→        return "random.hurt";
+   469→}
+   470→
+   471→void Mob::knockback( Entity* source, int dmg, float xd, float zd )
+   472→{
+   473→        float dd = Mth::invSqrt(xd * xd + zd * zd);
+   474→        float pow = 0.4f;
+   475→
+   476→        this->xd *= 0.5f;
+   477→        this->yd *= 0.5f;
+   478→        this->zd *= 0.5f;
+   479→
+   480→        this->xd -= xd * dd * pow;
+   481→        this->yd += 0.4f;
+   482→        this->zd -= zd * dd * pow;
+   483→
+   484→        if (this->yd > 0.4f) this->yd = 0.4f;
+   485→}
+   486→
+   487→void Mob::die( Entity* source )
+   488→{
+   489→        if (deathScore > 0 && source != NULL) source->awardKillScore(this, deathScore);
+   490→
+   491→        if (!level->isClientSide) {
+   492→                if (!isBaby()) {
+   493→                        dropDeathLoot();
+   494→                }
+   495→                level->broadcastEntityEvent(this, EntityEvent::DEATH);
+   496→        }
+   497→}
+   498→
+   499→void Mob::dropDeathLoot()
+   500→{
+   501→        int loot = getDeathLoot();
+   502→        if (loot > 0) {
+   503→                int count = random.nextInt(3);
+   504→                for (int i = 0; i < count; i++)
+   505→                        spawnAtLocation(loot, 1);
+   506→        }
+   507→}
+   508→
+   509→int Mob::getDeathLoot()
+   510→{
+   511→        return 0;
+   512→}
+   513→
+   514→void Mob::reset() {
+   515→        super::reset();
+   516→        this->_init();
+   517→}
+   518→
+   519→void Mob::_init() {
+   520→        yBodyRot = 0;
+   521→        yBodyRotO = 0;
+   522→        rotOffs = 0;
+   523→        fallTime = 0;
+   524→        lastHurt = 0;
+   525→        deathTime = 0;
+   526→        attackTime = 0;
+   527→        tilt = 0;
+   528→        oTilt = 0;
+   529→        hurtDuration = 0;
+   530→        hurtTime = 0;
+   531→        hurtDir = 0;
+   532→        lookTime = 0;
+   533→        noActionTime = 0;
+   534→        xxa = 0; yya = 0;
+   535→        yRotA = 0;
+   536→
+   537→        health = 10;
+   538→        lastHealth = 20;
+   539→}
+   540→
+   541→void Mob::causeFallDamage( float distance )
+   542→{
+   543→        int dmg = (int) ceil((distance - 3));
+   544→
+   545→        if (dmg > 0) {
+   546→                level->playSound(this, (dmg > 4)?"damage.fallbig":"damage.fallsmall", 0.75f, 1);
+   547→
+   548→                hurt(NULL, dmg);
+   549→
+   550→                int t = level->getTile(Mth::floor(x), Mth::floor(y - 0.2f - this->heightOffset), Mth::floor(z));
+   551→                if (t > 0) {
+   552→                        const Tile::SoundType* soundType = Tile::tiles[t]->soundType;
+   553→                        level->playSound(this, soundType->getStepSound(), soundType->getVolume() * 0.5f, soundType->getPitch() * 0.75f);
+   554→                }
+   555→        }
+   556→}
+   557→
+   558→void Mob::travel( float xa, float ya )
+   559→{
+   560→        if (isInWater()) {
+   561→                float yo = y;
+   562→                moveRelative(xa, ya, 0.02f);
+   563→                move(xd, yd, zd);
+   564→
+   565→                xd *= 0.80f;
+   566→                yd *= 0.80f;
+   567→                zd *= 0.80f;
+   568→                yd -= 0.02f;
+   569→
+   570→                if (horizontalCollision && isFree(xd, yd + 0.6f - y + yo, zd)) {
+   571→                        yd = 0.3f;
+   572→                }
+   573→        } else if (isInLava()) {
+   574→                float yo = y;
+   575→                moveRelative(xa, ya, 0.02f);
+   576→                move(xd, yd, zd);
+   577→                xd *= 0.50f;
+   578→                yd *= 0.50f;
+   579→                zd *= 0.50f;
+   580→                yd -= 0.02f;
+   581→
+   582→                if (horizontalCollision && isFree(xd, yd + 0.6f - y + yo, zd)) {
+   583→                        yd = 0.3f;
+   584→                }
+   585→        } else {
+   586→                float friction = 0.91f;
+   587→                if (onGround) {
+   588→                        friction = 0.6f * 0.91f;
+   589→                        int t = level->getTile(Mth::floor(x), Mth::floor(bb.y0 - 0.5f), Mth::floor(z));
+   590→                        if (t > 0) {
+   591→                                friction = Tile::tiles[t]->friction * 0.91f;
+   592→                        }
+   593→                }
+   594→
+   595→                float friction2 = (0.6f * 0.6f * 0.91f * 0.91f * 0.6f * 0.91f) / (friction * friction * friction);
+   596→                moveRelative(xa, ya, (onGround ? walkingSpeed * friction2 : flyingSpeed));
+   597→
+   598→                friction = 0.91f;
+   599→                if (onGround) {
+   600→                        friction = 0.6f * 0.91f;
+   601→                        int t = level->getTile(Mth::floor(x), Mth::floor(bb.y0 - 0.5f), Mth::floor(z));
+   602→                        if (t > 0) {
+   603→                                friction = Tile::tiles[t]->friction * 0.91f;
+   604→                        }
+   605→                }
+   606→                //@todo: make it easier to climb ladders
+   607→                if (onLadder()) {
+   608→                        this->fallDistance = 0;
+   609→                        if (yd < -0.15) yd = -0.15f;
+   610→                        if (isSneaking() && yd < 0) yd = 0;
+   611→                }
+   612→
+   613→                move(xd, yd, zd);
+   614→
+   615→                //@todo: make it easier to climb ladders
+   616→                if (horizontalCollision && onLadder()) {
+   617→                        yd = 0.2f;
+   618→                }
+   619→
+   620→                yd -= 0.08f;
+   621→                yd *= 0.98f;
+   622→                xd *= friction;
+   623→                zd *= friction;
+   624→        }
+   625→
+   626→}
+   627→
+   628→void Mob::updateWalkAnim()
+   629→{
+   630→        walkAnimSpeedO = walkAnimSpeed;
+   631→        float xxd = x - xo;
+   632→        float zzd = z - zo;
+   633→        float wst = Mth::sqrt(xxd * xxd + zzd * zzd) * 4;
+   634→        if (wst > 1) wst = 1;
+   635→        walkAnimSpeed += (wst - walkAnimSpeed) * 0.4f;
+   636→        walkAnimPos += walkAnimSpeed;
+   637→}
+   638→
+   639→bool Mob::onLadder()
+   640→{
+   641→        int xt = Mth::floor(x);
+   642→        int yt = Mth::floor(bb.y0);
+   643→        int zt = Mth::floor(z);
+   644→        return level->getTile(xt, yt, zt) == Tile::ladder->id || level->getTile(xt, yt + 1, zt) == Tile::ladder->id;
+   645→}
+   646→
+   647→bool Mob::isShootable()
+   648→{
+   649→        return true;
+   650→}
+   651→
+   652→void Mob::addAdditonalSaveData( CompoundTag* entityTag )
+   653→{
+   654→        entityTag->putShort("Health", (short) health);
+   655→        entityTag->putShort("HurtTime", (short) hurtTime);
+   656→        entityTag->putShort("DeathTime", (short) deathTime);
+   657→        entityTag->putShort("AttackTime", (short) attackTime);
+   658→
+   659→        //if (isPlayer()) LOGI("Saving %d, %d, %d, %d\n", health, hurtTime, deathTime, attackTime);
+   660→}
+   661→
+   662→void Mob::readAdditionalSaveData( CompoundTag* tag )
+   663→{
+   664→        health = tag->getShort("Health");
+   665→        hurtTime = tag->getShort("HurtTime");
+   666→        deathTime = tag->getShort("DeathTime");
+   667→        attackTime = tag->getShort("AttackTime");
+   668→
+   669→        //if (isPlayer()) LOGI("Reading %d, %d, %d, %d\n", health, hurtTime, deathTime, attackTime);
+   670→}
+   671→
+   672→void Mob::animateHurt()
+   673→{
+   674→        hurtTime = hurtDuration = 10;
+   675→        hurtDir = 0;
+   676→}
+   677→
+   678→bool Mob::isAlive()
+   679→{
+   680→        return !removed && health > 0;
+   681→}
+   682→
+   683→bool Mob::isWaterMob()
+   684→{
+   685→        return false;
+   686→}
+   687→
+   688→void Mob::aiStep()
+   689→{
+   690→        //@todo? 30 lines of code here in java version
+   691→
+   692→        TIMER_PUSH("ai");
+   693→        if (isImmobile()) {
+   694→                jumping = false;
+   695→                xxa = 0;
+   696→                yya = 0;
+   697→                yRotA = 0;
+   698→        } else {
+   699→                if (!interpolateOnly()) {
+   700→                        if (useNewAi()) {
+   701→                                TIMER_PUSH("newAi");
+   702→                                newServerAiStep();
+   703→                                TIMER_POP();
+   704→                        }
+   705→                        else {
+   706→                                TIMER_PUSH("oldAi");
+   707→                                updateAi();
+   708→                                TIMER_POP();
+   709→                        }
+   710→                }
+   711→        }
+   712→        TIMER_POP_PUSH("move");
+   713→
+   714→        bool inWater = isInWater();
+   715→        bool inLava = isInLava();
+   716→
+   717→        if (jumping) {
+   718→                if (inWater) {
+   719→                        yd += 0.04f;
+   720→                } else if (inLava) {
+   721→                        yd += 0.04f;
+   722→                } else if (onGround) {
+   723→                        jumpFromGround();
+   724→                }
+   725→        }
+   726→
+   727→        xxa *= 0.98f;
+   728→        yya *= 0.98f;
+   729→        yRotA *= 0.9f;
+   730→
+   731→        float normalSpeed = walkingSpeed;
+   732→        float normalAirControllSpeed = flyingSpeed;
+   733→        walkingSpeed *= getWalkingSpeedModifier();
+   734→        flyingSpeed  *= getWalkingSpeedModifier();
+   735→        travel(xxa, yya);
+   736→        walkingSpeed = normalSpeed;
+   737→        flyingSpeed = normalAirControllSpeed;
+   738→
+   739→        TIMER_POP_PUSH("push");
+   740→        Player* player = NULL;
+   741→        if(isPlayer()) {
+   742→                player = (Player*)this;
+   743→        }
+   744→        if(player == NULL || !player->isSleeping())  {
+   745→                EntityList& entities = level->getEntities(this, this->bb.grow(0.2f, 0, 0.2f));
+   746→                for (unsigned int i = 0; i < entities.size(); i++) {
+   747→                        Entity* e = entities[i];
+   748→                        if(e->isPlayer()) {
+   749→                                Player* p = (Player*)e;
+   750→                                if(p->isSleeping())
+   751→                                        continue;
+   752→                        }
+   753→                        if (e->isPushable()) e->push(this);
+   754→                }
+   755→        }
+   756→        TIMER_POP();
+   757→}
+   758→
+   759→/*protected*/
+   760→void Mob::updateAi() {
+   761→    noActionTime++;
+   762→
+   763→        Player* player = level->getNearestPlayer(this, -1);
+   764→        checkDespawn(player);
+   765→
+   766→    xxa = 0;
+   767→    yya = 0;
+   768→
+   769→    float lookDistance = 8;
+   770→    if (random.nextFloat() < 0.02f) {
+   771→        player = level->getNearestPlayer(this, lookDistance);
+   772→        if (player != NULL) {
+   773→            lookingAtId = player->entityId;
+   774→            lookTime = 10 + random.nextInt(20);
+   775→        } else {
+   776→            yRotA = (random.nextFloat() - 0.5f) * 20;
+   777→        }
+   778→    }
+   779→
+   780→    if (lookingAtId != 0) {
+   781→                Entity* lookingAt = level->getEntity(lookingAtId);
+   782→                lookingAtId = 0;
+   783→                if (lookingAt != NULL) {
+   784→                        lookAt(lookingAt, 10, (float)getMaxHeadXRot());
+   785→                        if (lookTime-- <= 0 || lookingAt->removed || lookingAt->distanceToSqr(this) > lookDistance * lookDistance) {
+   786→                    lookingAtId = 0;
+   787→                    } else {
+   788→                                lookingAtId = lookingAt->entityId;
+   789→                        }
+   790→                }
+   791→    } else {
+   792→        if (random.nextFloat() < 0.05f) {
+   793→            yRotA = (random.nextFloat() - 0.5f) * 20;
+   794→        }
+   795→        yRot += yRotA;
+   796→        xRot = defaultLookAngle;
+   797→    }
+   798→
+   799→    bool inWater = isInWater();
+   800→    bool inLava = isInLava();
+   801→    if (inWater || inLava) jumping = random.nextFloat() < 0.8f;
+   802→}
+   803→
+   804→void Mob::newServerAiStep() {
+   805→        noActionTime++;
+   806→
+   807→        TIMER_PUSH("checkDespawn");
+   808→        checkDespawn();
+   809→        jumping = false;
+   810→
+   811→        TIMER_POP_PUSH("sensing");
+   812→        if (sensing) sensing->tick();
+   813→
+   814→        if (random.nextInt(5) == 0) {
+   815→                TIMER_POP_PUSH("targetSelector");
+   816→                //LOGI("tg1\n");
+   817→                if (targetSelector) targetSelector->tick();
+   818→                //LOGI("tg2\n");
+   819→
+   820→                TIMER_POP_PUSH("goalSelector");
+   821→                //LOGI("gs1\n");
+   822→                if (goalSelector) goalSelector->tick();
+   823→                //LOGI("gs2\n");
+   824→        }
+   825→
+   826→        TIMER_POP_PUSH("navigation");
+   827→        if (navigation) navigation->tick();
+   828→
+   829→        //TIMER_POP_PUSH("mob tick");
+   830→        //serverAiMobStep();
+   831→
+   832→        TIMER_POP_PUSH("controls");
+   833→        if (moveControl) moveControl->tick(); //@todo; we shouldn't be here if not
+   834→        if (jumpControl) jumpControl->tick();
+   835→
+   836→        TIMER_POP();
+   837→}
+   838→
+   839→bool Mob::isImmobile()
+   840→{
+   841→        return health <= 0;
+   842→}
+   843→
+   844→void Mob::jumpFromGround()
+   845→{
+   846→        yd = 0.42f;
+   847→}
+   848→
+   849→bool Mob::removeWhenFarAway()
+   850→{
+   851→        return true;
+   852→}
+   853→
+   854→int Mob::getMaxHeadXRot()
+   855→{
+   856→        return 10;
+   857→}
+   858→
+   859→void Mob::lookAt( Entity* e, float yMax, float xMax )
+   860→{
+   861→        float xd = e->x - x;
+   862→        float yd;
+   863→        float zd = e->z - z;
+   864→
+   865→        if (false) { //if (e->isMob()) { //@todo?
+   866→                Mob* mob = (Mob*) e;
+   867→                yd = (y + getHeadHeight()) - (mob->y + mob->getHeadHeight());
+   868→        } else {
+   869→                yd = (e->bb.y0 + e->bb.y1) / 2 - (y + getHeadHeight());
+   870→        }
+   871→
+   872→        float sd = Mth::sqrt(xd * xd + zd * zd);
+   873→
+   874→        float yRotD = (float) (atan2(zd, xd) * 180 / Mth::PI) - 90;
+   875→        float xRotD = (float) (atan2(yd, sd) * 180 / Mth::PI);
+   876→        xRot = -rotlerp(xRot, xRotD, xMax);
+   877→        yRot = rotlerp(yRot, yRotD, yMax);
+   878→}
+   879→
+   880→bool Mob::isLookingAtAnEntity()
+   881→{
+   882→        return lookingAtId != 0;
+   883→}
+   884→
+   885→//Entity* Mob::getLookingAt()
+   886→//{
+   887→//      return lookingAt;
+   888→//}
+   889→
+   890→float Mob::rotlerp( float a, float b, float max )
+   891→{
+   892→        float diff = b - a;
+   893→        while (diff < -180)
+   894→                diff += 360;
+   895→        while (diff >= 180)
+   896→                diff -= 360;
+   897→        if (diff > max) {
+   898→                diff = max;
+   899→        }
+   900→        if (diff < -max) {
+   901→                diff = -max;
+   902→        }
+   903→        return a + diff;
+   904→}
+   905→
+   906→void Mob::beforeRemove()
+   907→{
+   908→}
+   909→
+   910→bool Mob::canSpawn()
+   911→{
+   912→        return level->isUnobstructed(bb) && level->getCubes(this, bb).size() == 0 && !level->containsAnyLiquid(bb);
+   913→}
+   914→
+   915→void Mob::outOfWorld()
+   916→{
+   917→        int oldHealth = health;
+   918→        hurt(NULL, 4);
+   919→        if (health >= oldHealth)
+   920→                actuallyHurt(4);
+   921→}
+   922→
+   923→float Mob::getAttackAnim( float a )
+   924→{
+   925→        float diff = attackAnim - oAttackAnim;
+   926→        if (diff < 0) diff += 1;
+   927→        return oAttackAnim + diff * a;
+   928→}
+   929→
+   930→Vec3 Mob::getPos( float a )
+   931→{
+   932→        if (a == 1) {
+   933→                return Vec3(x, y, z);
+   934→        }
+   935→        float x = xo + (this->x - xo) * a;
+   936→        float y = yo + (this->y - yo) * a;
+   937→        float z = zo + (this->z - zo) * a;
+   938→
+   939→        return Vec3(x, y, z);
+   940→}
+   941→
+   942→Vec3 Mob::getLookAngle()
+   943→{
+   944→        return getViewVector(1);
+   945→}
+   946→
+   947→Vec3 Mob::getViewVector( float a )
+   948→{
+   949→        if (a == 1) {
+   950→                float yCos = (float) Mth::cos(-yRot * Mth::DEGRAD - Mth::PI);
+   951→                float ySin = (float) Mth::sin(-yRot * Mth::DEGRAD - Mth::PI);
+   952→                float xCos = (float) -Mth::cos(-xRot * Mth::DEGRAD);
+   953→                float xSin = (float) Mth::sin(-xRot * Mth::DEGRAD);
+   954→
+   955→                return Vec3(ySin * xCos, xSin, yCos * xCos); // newTemp
+   956→        }
+   957→        float xRot = xRotO + (this->xRot - xRotO) * a;
+   958→        float yRot = yRotO + (this->yRot - yRotO) * a;
+   959→
+   960→        float yCos = (float) Mth::cos(-yRot * Mth::DEGRAD - Mth::PI);
+   961→        float ySin = (float) Mth::sin(-yRot * Mth::DEGRAD - Mth::PI);
+   962→        float xCos = (float) -Mth::cos(-xRot * Mth::DEGRAD);
+   963→        float xSin = (float) Mth::sin(-xRot * Mth::DEGRAD);
+   964→
+   965→        return Vec3(ySin * xCos, xSin, yCos * xCos); // newTemp
+   966→}
+   967→
+   968→HitResult Mob::pick( float range, float a )
+   969→{
+   970→        Vec3 from = getPos(a);
+   971→        return level->clip(from, from + getViewVector(a) * range);
+   972→}
+   973→
+   974→int Mob::getMaxSpawnClusterSize()
+   975→{
+   976→        return 4;
+   977→}
+   978→
+   979→bool Mob::interpolateOnly()
+   980→{
+   981→        return level->isClientSide;
+   982→}
+   983→
+   984→//ItemInstance getCarriedItem() {
+   985→//    return NULL;
+   986→//}
+   987→
+   988→void Mob::handleEntityEvent(char id) {
+   989→    if (id == EntityEvent::HURT) {
+   990→        this->walkAnimSpeed = 1.5f;
+   991→
+   992→        invulnerableTime = invulnerableDuration;
+   993→        hurtTime = hurtDuration = 10;
+   994→        hurtDir = 0;
+   995→
+   996→        level->playSound(this, getHurtSound(), getSoundVolume(), getVoicePitch());
+   997→        hurt(NULL, 0);
+   998→    } else if (id == EntityEvent::DEATH) {
+   999→        level->playSound(this, getDeathSound(), getSoundVolume(), getVoicePitch());
+  1000→        health = 0;
+  1001→        die(NULL);
+  1002→    } else {
+  1003→        super::handleEntityEvent(id);
+  1004→    }
+  1005→}
+  1006→
+  1007→SynchedEntityData* Mob::getEntityData() {
+  1008→        return &entityData;
+  1009→}
+  1010→
+  1011→const SynchedEntityData* Mob::getEntityData() const {
+  1012→        return &entityData;
+  1013→}
+  1014→
+  1015→MoveControl* Mob::getMoveControl() {
+  1016→        return moveControl;
+  1017→}
+  1018→
+  1019→JumpControl* Mob::getJumpControl() {
+  1020→        return jumpControl;
+  1021→}
+  1022→
+  1023→void Mob::setYya( float yya )
+  1024→{
+  1025→        this->yya = yya;
+  1026→}
+  1027→
+  1028→float Mob::getSpeed() {
+  1029→        return speed;
+  1030→}
+  1031→
+  1032→void Mob::setSpeed( float speed ) {
+  1033→        this->speed = speed;
+  1034→        this->yya = speed;
+  1035→}
+  1036→
+  1037→void Mob::setJumping(bool jump) {
+  1038→        jumping = jump;
+  1039→}
+  1040→
+  1041→bool Mob::useNewAi() {
+  1042→        return false;
+  1043→}
+  1044→
+  1045→void Mob::checkDespawn() {
+  1046→        checkDespawn(level->getNearestPlayer(this, -1));
+  1047→}
+  1048→
+  1049→void Mob::checkDespawn(Mob* nearestBlocking) {
+  1050→        if (nearestBlocking != NULL) {
+  1051→                const bool removeIfFar = removeWhenFarAway();
+  1052→                float xd = nearestBlocking->x - x;
+  1053→                float yd = nearestBlocking->y - y;
+  1054→                float zd = nearestBlocking->z - z;
+  1055→                float sd = xd * xd + yd * yd + zd * zd;
+  1056→
+  1057→                if (removeIfFar && sd > 96 * 96) {
+  1058→                        //LOGI("removed some angry mob more than 10 meters away!\n");
+  1059→                        remove();
+  1060→                }
+  1061→
+  1062→                if (noActionTime > 30 * SharedConstants::TicksPerSecond && random.nextInt(800) == 0 && removeIfFar && sd > 32 * 32)
+  1063→                        remove();
+  1064→                else
+  1065→                        noActionTime = 0;
+  1066→        }
+  1067→}
+  1068→bool Mob::getSharedFlag(int flag) {
+  1069→        return entityData.getFlag<SharedFlagsInformation::SharedFlagsInformationType> (SharedFlagsInformation::DATA_SHARED_FLAGS_ID, flag);
+  1070→}
+  1071→void Mob::setSharedFlag(int flag, bool value) {
+  1072→        if(value) {
+  1073→                entityData.setFlag<SharedFlagsInformation::SharedFlagsInformationType>(SharedFlagsInformation::DATA_SHARED_FLAGS_ID, flag);
+  1074→        }
+  1075→        else {
+  1076→                entityData.clearFlag<SharedFlagsInformation::SharedFlagsInformationType>(SharedFlagsInformation::DATA_SHARED_FLAGS_ID, flag);
+  1077→        }
+  1078→}
+  1079→
+  1080→void Mob::updateAttackAnim() {
+  1081→        if (swinging) {
+  1082→                if (++swingTime >= SWING_DURATION) {
+  1083→                        swingTime = 0;
+  1084→                        swinging = false;
+  1085→                        //LOGI("Swinging! %d/%d (%f)\n", swingTime, SWING_DURATION, attackAnim);
+  1086→                }
+  1087→        } else {
+  1088→                swingTime = 0;
+  1089→        }
+  1090→
+  1091→        attackAnim = swingTime / (float) SWING_DURATION;
+  1092→}
+  1093→
+  1094→void Mob::swing() {
+  1095→        if (!swinging || swingTime >= 3 || swingTime < 0) {
+  1096→                swingTime = -1;
+  1097→                swinging = true;
+  1098→        }
+  1099→}
+  1100→
+  1101→bool Mob::isSneaking() {
+  1102→    return getSharedFlag(SharedFlagsInformation::FLAG_SNEAKING);
+  1103→}
+  1104→
+  1105→bool Mob::isSleeping() {
+  1106→    return false;
+  1107→}
+  1108→
+  1109→void Mob::setSneaking(bool value) {
+  1110→    setSharedFlag(SharedFlagsInformation::FLAG_SNEAKING, value);
+  1111→}
+  1112→
+  1113→//
+  1114→// Armor
+  1115→//
+  1116→int Mob::getDamageAfterArmorAbsorb(int damage) {
+  1117→    int absorb = 25 - getArmorValue();
+  1118→    int v = (damage) * absorb + dmgSpill;
+  1119→    hurtArmor(damage);
+  1120→    damage = v / 25;
+  1121→    dmgSpill = v % 25;
+  1122→    return damage;
+  1123→}
+  1124→
+  1125→static std::vector<ItemInstance*> getEquipmentSlots() {
+  1126→        return std::vector<ItemInstance*>();
+  1127→}
+  1128→
+  1129→int Mob::getArmorValue() {
+  1130→        int val = 0;
+  1131→    /*
+  1132→        const std::vector<ItemInstance*> items = getEquipmentSlots();
+  1133→        for (unsigned int i = 0; i < items.size(); ++i) {
+  1134→                ItemInstance* item = items[i];
+  1135→        if (item != NULL && ItemInstance::isArmorItem(item)) {
+  1136→            int baseProtection = ((ArmorItem*) item->getItem())->defense;
+  1137→            val += baseProtection;
+  1138→        }
+  1139→    }
+  1140→    */
+  1141→    return val;
+  1142→}
+  1143→
+  1144→void Mob::hurtArmor(int damage) {}
+  1145→

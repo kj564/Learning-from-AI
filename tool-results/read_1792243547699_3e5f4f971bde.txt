@@ -1,0 +1,953 @@
+  8377→## Entry 16: Chicken.cpp / Animal.cpp / PathfinderMob.cpp / Mob.cpp / AgableMob.cpp — animal AI
+  8378→
+  8379→### 16.1 — Chicken.h — VERIFIED (Chicken.h:1-49)
+  8380→
+  8381→```cpp
+  8382→class Chicken: public Animal
+  8383→{
+  8384→    typedef Animal super;
+  8385→public:
+  8386→    Chicken(Level* level);
+  8387→
+  8388→    int getEntityTypeId() const;
+  8389→    int getMaxHealth();
+  8390→    void aiStep();   // <-- the only AI override (noChicken::tick — uses Mob::tick → aiStep)
+  8391→
+  8392→    void addAdditonalSaveData(CompoundTag* tag);
+  8393→    void readAdditionalSaveData(CompoundTag* tag);
+  8394→protected:
+  8395→    void causeFallDamage(float distance);
+  8396→
+  8397→    const char* getAmbientSound();
+  8398→    std::string getHurtSound();
+  8399→    std::string getDeathSound();
+  8400→
+  8401→    void dropDeathLoot();
+  8402→    Animal* getBreedOffspring(Animal* target);
+  8403→public:
+  8404→    bool sheared;        // (declared but unused in MCPE 2013 chicken)
+  8405→    float flap;          // current wing flap phase
+  8406→    float flapSpeed;     // current wing-flap speed (drives bob)
+  8407→    float oFlapSpeed, oFlap;     // previous-tick values (for lerp)
+  8408→    float flapping;     // exponential decay (1.0 = full flap, 0.0 = settled)
+  8409→    int eggTime;         // ticks until next egg drop (UNUSED — egg-laying is commented out in this version)
+  8410→};
+  8411→```
+  8412→
+  8413→### 16.2 — Chicken constructor — VERIFIED (Chicken.cpp:5-20)
+  8414→
+  8415→```cpp
+  8416→Chicken::Chicken( Level* level )
+  8417→:   super(level),
+  8418→    sheared(false),
+  8419→    flap(0),
+  8420→    oFlap(0),
+  8421→    flapSpeed(0),
+  8422→    oFlapSpeed(0),
+  8423→    flapping(1),
+  8424→    eggTime(0)
+  8425→{
+  8426→    entityRendererId = ER_CHICKEN_RENDERER;
+  8427→    textureName = "mob/chicken.png";
+  8428→    setSize(0.3f, 0.7f);    // 0.3 wide × 0.7 tall
+  8429→    eggTime = random.nextInt(SharedConstants::TicksPerSecond * 60 * 5) + SharedConstants::TicksPerSecond * 60 * 5;
+  8430→    // = random(6000) + 6000 ticks (5..10 minutes at 20 TPS)
+  8431→}
+  8432→```
+  8433→**Chicken size:** 0.3 × 0.7 (much smaller than a sheep/cow).
+  8434→**Egg timer:** `random(6000) + 6000` ticks = 5–10 minutes (at 20 TPS, `TicksPerSecond * 60 * 5 = 6000`).
+  8435→**Initial flapping:** 1.0 (wings fully active on spawn).
+  8436→
+  8437→### 16.3 — Chicken::getMaxHealth — VERIFIED (Chicken.cpp:28-31)
+  8438→
+  8439→```cpp
+  8440→int Chicken::getMaxHealth()
+  8441→{
+  8442→    return 4;     // chickens have 4 HP (2 hearts)
+  8443→}
+  8444→```
+  8445→
+  8446→### 16.4 — Chicken::aiStep — VERIFIED (Chicken.cpp:33-61) — the wing-flap & fall-slowly logic
+  8447→
+  8448→```cpp
+  8449→void Chicken::aiStep()
+  8450→{
+  8451→    super::aiStep();   // calls Animal::aiStep → AgableMob::aiStep → Mob::aiStep → (updateAi/wander) + travel + push
+  8452→
+  8453→    oFlap = flap;
+  8454→    oFlapSpeed = flapSpeed;
+  8455→
+  8456→    // flapSpeed increases faster when in air (4*0.3 = 1.2 per tick) than on ground (-1*0.3 = -0.3 per tick)
+  8457→    flapSpeed += (onGround ? -1 : 4) * 0.3f;
+  8458→    if (flapSpeed < 0) flapSpeed = 0;
+  8459→    if (flapSpeed > 1) flapSpeed = 1;
+  8460→
+  8461→    // Reset flapping to 1 whenever we leave the ground (start flapping on falling)
+  8462→    if (!onGround && flapping < 1) flapping = 1;
+  8463→    flapping *= 0.9f;     // exponential decay each tick
+  8464→
+  8465→    // Slow fall: if descending, multiply y velocity by 0.6 (chicken glides)
+  8466→    if (!onGround && yd < 0) {
+  8467→        yd *= 0.6f;
+  8468→    }
+  8469→
+  8470→    // Wing flap phase advances by flapping * 2 per tick
+  8471→    flap += flapping * 2;
+  8472→
+  8473→    // @note: egg-laying is COMMENTED OUT in MCPE 2013. Original code (now disabled):
+  8474→    // if (!isBaby()) {
+  8475→    //     if (!level->isClientSide && --eggTime <= 0) {
+  8476→    //         level->playSound(this, "mob.chickenplop", 1.0f, (random.nextFloat() - random.nextFloat()) * 0.2f + 1.0f);
+  8477→    //         spawnAtLocation(Item::egg->id, 1);
+  8478→    //         eggTime = random.nextInt(SharedConstants::TicksPerSecond * 60 * 5) + SharedConstants::TicksPerSecond * 60 * 5;
+  8479→    //     }
+  8480→    // }
+  8481→}
+  8482→```
+  8483→
+  8484→**Wing flap dynamics:**
+  8485→- `flapSpeed` lerps by ±0.3 per tick toward [0, 1]: increases when airborne, decreases when grounded.
+  8486→- `flapping` is a multiplicative decay (`× 0.9` per tick); reset to 1 on leaving ground.
+  8487→- `flap` advances by `flapping * 2` per tick (this is the phase angle used by `ChickenRenderer::getBob`).
+  8488→- `oFlap`/`oFlapSpeed` save the previous-tick values for rendering interpolation.
+  8489→
+  8490→**Slow-fall:** when descending (`yd < 0`), multiply `yd *= 0.6` — this is the chicken "glide" behaviour. Chickens cannot take fall damage (causeFallDamage is empty).
+  8491→
+  8492→**Egg timer:** initialised to 5–10 minutes but the egg-laying logic is **commented out** in MCPE 2013. UNVERIFIED whether it's enabled in some build flag. The `eggTime` field is also never decremented in the active code path (only in the commented block).
+  8493→
+  8494→### 16.5 — Chicken sounds & loot — VERIFIED (Chicken.cpp:77-108)
+  8495→
+  8496→```cpp
+  8497→const char* Chicken::getAmbientSound()     { return "mob.chicken"; }      // ambient
+  8498→std::string Chicken::getHurtSound()        { return "mob.chickenhurt"; }  // hurt
+  8499→std::string Chicken::getDeathSound()       { return "mob.chickenhurt"; }  // death (same as hurt)
+  8500→
+  8501→void Chicken::causeFallDamage( float distance ) { /* no fall damage */ }
+  8502→
+  8503→void Chicken::dropDeathLoot()
+  8504→{
+  8505→    int count = random.nextInt(3);    // 0..2 feathers
+  8506→    for (int i = 0; i < count; i++) {
+  8507→        spawnAtLocation(Item::feather->id, 1);
+  8508→    }
+  8509→    // (cooked chicken when on fire is commented out — only raw chicken drops)
+  8510→    spawnAtLocation(Item::chicken_raw->id, 1);   // always 1 raw chicken
+  8511→}
+  8512→
+  8513→Animal* Chicken::getBreedOffspring( Animal* target )
+  8514→{
+  8515→    return new Chicken(level);
+  8516→}
+  8517→```
+  8518→**Drops:** 0–2 feathers (`random(3)`), plus 1 raw chicken. Cooked-on-fire is commented out.
+  8519→
+  8520→### 16.6 — Animal.h — VERIFIED (Animal.h:1-39)
+  8521→
+  8522→```cpp
+  8523→class Animal:   public AgableMob,
+  8524→                public Creature      // Creature is an EMPTY marker class
+  8525→{
+  8526→    typedef AgableMob super;
+  8527→public:
+  8528→    Animal(Level* level);
+  8529→    bool hurt(Entity* source, int dmg);
+  8530→    bool canSpawn();
+  8531→    int getAmbientSoundInterval();
+  8532→    int getCreatureBaseType() const;
+  8533→    bool removeWhenFarAway();
+  8534→protected:
+  8535→    float getWalkTargetValue(int x, int y, int z);
+  8536→    Entity* findAttackTarget();
+  8537→private:
+  8538→    int inLove;
+  8539→};
+  8540→```
+  8541→
+  8542→### 16.7 — Animal.cpp — VERIFIED (Animal.cpp:1-93)
+  8543→
+  8544→```cpp
+  8545→Animal::Animal( Level* level )
+  8546→:       super(level),
+  8547→        inLove(0)
+  8548→{
+  8549→    //entityData.define(DATA_AGE_ID, (SynchedEntityData::TypeInt)0);
+  8550→}
+  8551→
+  8552→bool Animal::hurt( Entity* source, int dmg )
+  8553→{
+  8554→    fleeTime = 3 * SharedConstants::TicksPerSecond;   // flee for 3 seconds when hurt
+  8555→    attackTargetId = 0;
+  8556→    inLove = 0;
+  8557→    return super::hurt(source, dmg);
+  8558→}
+  8559→
+  8560→bool Animal::canSpawn()
+  8561→{
+  8562→    int xt = Mth::floor(x);
+  8563→    int yt = Mth::floor(bb.y0);
+  8564→    int zt = Mth::floor(z);
+  8565→    // Animal spawns only on grass blocks, with sky light > 8
+  8566→    return level->getTile(xt, yt - 1, zt) == ((Tile*)Tile::grass)->id
+  8567→        && level->getRawBrightness(xt, yt, zt) > 8
+  8568→        && super::canSpawn();
+  8569→}
+  8570→
+  8571→int Animal::getAmbientSoundInterval()
+  8572→{
+  8573→    return 12 * SharedConstants::TicksPerSecond;   // ambient sound every 12 seconds (240 ticks)
+  8574→}
+  8575→
+  8576→float Animal::getWalkTargetValue( int x, int y, int z )
+  8577→{
+  8578→    if (level->getTile(x, y - 1, z) == ((Tile*)Tile::grass)->id) return 10;
+  8579→    return level->getBrightness(x, y, z) - 0.5f;
+  8580→}
+  8581→
+  8582→Entity* Animal::findAttackTarget()
+  8583→{
+  8584→    return NULL;    // Animals don't seek attack targets in MCPE 2013 (breeding/AI disabled)
+  8585→}
+  8586→
+  8587→bool Animal::removeWhenFarAway()
+  8588→{
+  8589→    return false;    // Animals persist regardless of distance from player
+  8590→}
+  8591→
+  8592→int Animal::getCreatureBaseType() const {
+  8593→    return MobTypes::BaseCreature;
+  8594→}
+  8595→```
+  8596→**Animal spawn rules:** block below must be `grass`, raw brightness at the spawn position must be > 8.
+  8597→**Walk target scoring:** +10 for grass floor, else `brightness - 0.5` (lighter areas preferred). Used by `PathfinderMob::findRandomStrollLocation`.
+  8598→**Ambient sound:** every 12 sec (240 ticks).
+  8599→**Persistence:** Animals don't despawn.
+  8600→**Flee on hurt:** 3 seconds of flee time (`fleeTime = 60 ticks`).
+  8601→
+  8602→### 16.8 — AgableMob.h / .cpp — VERIFIED (AgableMob.h, AgableMob.cpp)
+  8603→
+  8604→```cpp
+  8605→class AgableMob: public PathfinderMob
+  8606→{
+  8607→    typedef PathfinderMob super;
+  8608→public:
+  8609→    AgableMob(Level* level);
+  8610→    int getAge();
+  8611→    void setAge(int age);
+  8612→    bool isBaby();
+  8613→    void addAdditonalSaveData(CompoundTag* tag);
+  8614→    void readAdditionalSaveData(CompoundTag* tag);
+  8615→    void aiStep();
+  8616→private:
+  8617→    int age;
+  8618→    static const int DATA_FLAGS_ID = 14;
+  8619→    static const int DATAFLAG_ISBABY = 0;
+  8620→};
+  8621→```
+  8622→
+  8623→```cpp
+  8624→AgableMob::AgableMob( Level* level )
+  8625→:   super(level),
+  8626→    age(-1)
+  8627→{
+  8628→    entityData.define(DATA_FLAGS_ID, (SynchedEntityData::TypeChar)0);
+  8629→    setAge(0);
+  8630→}
+  8631→
+  8632→int AgableMob::getAge() { return age; }
+  8633→
+  8634→void AgableMob::setAge( int age ) {
+  8635→    if (this->age < 0 && age >= 0) {
+  8636→        entityData.clearFlag<SynchedEntityData::TypeChar>(DATA_FLAGS_ID, DATAFLAG_ISBABY);
+  8637→    }
+  8638→    else if (this->age >= 0 && age < 0) {
+  8639→        entityData.setFlag<SynchedEntityData::TypeChar>(DATA_FLAGS_ID, DATAFLAG_ISBABY);
+  8640→    }
+  8641→    this->age = age;
+  8642→}
+  8643→
+  8644→void AgableMob::addAdditonalSaveData( CompoundTag* tag ) {
+  8645→    super::addAdditonalSaveData(tag);
+  8646→    tag->putInt("Age", getAge());
+  8647→}
+  8648→void AgableMob::readAdditionalSaveData( CompoundTag* tag ) {
+  8649→    super::readAdditionalSaveData(tag);
+  8650→    setAge(tag->getInt("Age"));
+  8651→}
+  8652→
+  8653→void AgableMob::aiStep() {
+  8654→    super::aiStep();    // calls PathfinderMob::aiStep (via Mob::aiStep -> updateAi)
+  8655→    // Age progression: negative ages count UP toward 0 (baby growing up), positive count DOWN to 0.
+  8656→    if (age < 0)
+  8657→        setAge(age + 1);
+  8658→    else if (age > 0)
+  8659→        setAge(age - 1);
+  8660→}
+  8661→
+  8662→bool AgableMob::isBaby() {
+  8663→    if (!level->isClientSide) {
+  8664→        return age < 0;
+  8665→    } else {
+  8666→        return entityData.getFlag<SynchedEntityData::TypeChar>(DATA_FLAGS_ID, DATAFLAG_ISBABY);
+  8667→    }
+  8668→}
+  8669→```
+  8670→**Age progression:** baby (age < 0) counts up toward 0; adult breeding cooldown (age > 0) counts down to 0. Default age = -1 then setAge(0) (i.e. adult). Babies (set by MobSpawner with age = -24000) grow up at 1 tick/iter → 1200 seconds (20 min) to grow up.
+  8671→
+  8672→### 16.9 — PathfinderMob.h — VERIFIED (PathfinderMob.h:1-66)
+  8673→
+  8674→```cpp
+  8675→class PathfinderMob: public Mob
+  8676→{
+  8677→    typedef Mob super;
+  8678→    static const int MAX_TURN = 30;        // max y rotation per tick (degrees)
+  8679→public:
+  8680→    PathfinderMob(Level* level);
+  8681→    ~PathfinderMob();
+  8682→
+  8683→    bool canSpawn();
+  8684→    bool isPathFinding();
+  8685→    void setPath(Path& path);
+  8686→
+  8687→    virtual Entity* getAttackTarget();
+  8688→    virtual void    setAttackTarget(Entity* attacker);
+  8689→    virtual float   getWalkTargetValue(int x, int y, int z);
+  8690→    int getNoActionTime();
+  8691→    PathNavigation* getNavigation();
+  8692→protected:
+  8693→    virtual Entity* findAttackTarget();
+  8694→    virtual void checkHurtTarget(Entity* target, float d);
+  8695→    virtual void checkCantSeeTarget(Entity* target, float d);
+  8696→    virtual float getWalkingSpeedModifier();
+  8697→    virtual bool shouldHoldGround();
+  8698→    void updateAi();    // <-- the "wander AI" routine
+  8699→    virtual void findRandomStrollLocation();
+  8700→    int attackTargetId;
+  8701→    bool holdGround;
+  8702→    int fleeTime;
+  8703→public:
+  8704→    static const int CAN_OPEN_DOORS = 1;
+  8705→    static const int AVOID_WATER    = 2;
+  8706→private:
+  8707→    Path path;
+  8708→};
+  8709→```
+  8710→
+  8711→### 16.10 — PathfinderMob constructor / canSpawn — VERIFIED (PathfinderMob.cpp:11-31)
+  8712→
+  8713→```cpp
+  8714→PathfinderMob::PathfinderMob( Level* level )
+  8715→:   super(level),
+  8716→    attackTargetId(0),
+  8717→    holdGround(false),
+  8718→    fleeTime(0)
+  8719→{
+  8720→    sensing = new Sensing(this);
+  8721→    navigation = new PathNavigation(this, level, 16);   // path-find range = 16 blocks
+  8722→}
+  8723→
+  8724→PathfinderMob::~PathfinderMob() {
+  8725→    delete navigation;
+  8726→    delete sensing;
+  8727→}
+  8728→
+  8729→bool PathfinderMob::canSpawn()
+  8730→{
+  8731→    return super::canSpawn() && getWalkTargetValue(Mth::floor(x), Mth::floor(bb.y0), Mth::floor(z)) >= 0;
+  8732→}
+  8733→```
+  8734→
+  8735→### 16.11 — PathfinderMob::updateAi — VERIFIED (PathfinderMob.cpp:59-185) — the wandering-AI routine
+  8736→
+  8737→```cpp
+  8738→void PathfinderMob::updateAi()
+  8739→{
+  8740→    TIMER_PUSH("ai");
+  8741→
+  8742→    if (fleeTime > 0) fleeTime--;
+  8743→    holdGround = shouldHoldGround();
+  8744→    float maxDist = 16;
+  8745→
+  8746→    Entity* attackTarget = NULL;
+  8747→    if (attackTargetId == 0) {
+  8748→        attackTarget = findAttackTarget();    // Animal::findAttackTarget returns NULL (no breeding AI)
+  8749→        if (attackTarget != NULL) {
+  8750→            level->findPath(&path, this, attackTarget, maxDist, false, false);
+  8751→            attackTargetId = attackTarget->entityId;
+  8752→        }
+  8753→    } else {
+  8754→        attackTarget = level->getEntity(attackTargetId);
+  8755→        if (!attackTarget || !attackTarget->isAlive()) {
+  8756→            attackTargetId = 0;
+  8757→            attackTarget = NULL;
+  8758→        } else {
+  8759→            attackTargetId = attackTarget->entityId;
+  8760→            float d = attackTarget->distanceTo(this);
+  8761→            if (canSee(attackTarget)) {
+  8762→                checkHurtTarget(attackTarget, d);
+  8763→            } else {
+  8764→                checkCantSeeTarget(attackTarget, d);
+  8765→            }
+  8766→        }
+  8767→    }
+  8768→    TIMER_POP();
+  8769→
+  8770→    bool doStroll = false;
+  8771→    if (!holdGround && (attackTarget != NULL && (path.isEmpty() || random.nextInt(20) == 0))) {
+  8772→        level->findPath(&path, this, attackTarget, maxDist, false, false);
+  8773→    } else if (!holdGround) {
+  8774→        if (path.isEmpty() && (random.nextInt(180) == 0)) {
+  8775→            doStroll = true;       // 1/180 chance per tick to pick a new stroll destination when idle
+  8776→        } else {
+  8777→            if (random.nextInt(120) == 0) doStroll = true;       // 1/120 chance
+  8778→            else if (fleeTime > 0 && (fleeTime&7) == 1) doStroll = true;   // fleeing: every 8th tick of fleeTime
+  8779→        }
+  8780→    }
+  8781→    if (doStroll) {
+  8782→        if (noActionTime < SharedConstants::TicksPerSecond * 5) {   // only stroll if player nearby (5s no-action)
+  8783→            findRandomStrollLocation();
+  8784→        }
+  8785→    }
+  8786→
+  8787→    int yFloor = Mth::floor(bb.y0 + .5f);
+  8788→
+  8789→    bool inWater = isInWater();
+  8790→    bool inLava = isInLava();
+  8791→    xRot = 0;
+  8792→    if (path.isEmpty() || random.nextInt(100) == 0) {
+  8793→        super::updateAi();    // Mob::updateAi (look-around / random turn) — see 16.13
+  8794→        return;
+  8795→    }
+  8796→
+  8797→    TIMER_PUSH("followpath");
+  8798→    Vec3 target = path.currentPos(this);
+  8799→    float r = bbWidth * 2;
+  8800→    bool looping = true;
+  8801→    while (looping && target.distanceToSqr(x, target.y, z) < r * r) {
+  8802→        path.next();
+  8803→        if (path.isDone()) {
+  8804→            looping = false;
+  8805→            path.destroy();
+  8806→        } else target = path.currentPos(this);
+  8807→    }
+  8808→
+  8809→    jumping = false;
+  8810→    if (looping) {
+  8811→        float xd = target.x - x;
+  8812→        float zd = target.z - z;
+  8813→        float yd = target.y - yFloor;
+  8814→        float yRotD = (float) (Mth::atan2(zd, xd) * 180 / Mth::PI) - 90;
+  8815→        float rotDiff = yRotD - yRot;
+  8816→        yya = runSpeed;
+  8817→        while (rotDiff < -180) rotDiff += 360;
+  8818→        while (rotDiff >= 180)  rotDiff -= 360;
+  8819→        if (rotDiff >  MAX_TURN) rotDiff =  MAX_TURN;     // 30°/tick max
+  8820→        if (rotDiff < -MAX_TURN) rotDiff = -MAX_TURN;
+  8821→        yRot += rotDiff;
+  8822→
+  8823→        if (holdGround) {
+  8824→            if (attackTarget != NULL) {
+  8825→                float xd2 = attackTarget->x - x;
+  8826→                float zd2 = attackTarget->z - z;
+  8827→                float oldyRot = yRot;
+  8828→                yRot = (float) (Mth::atan2(zd2, xd2) * 180 / Mth::PI) - 90;
+  8829→                rotDiff = ((oldyRot - yRot) + 90) * Mth::PI / 180;
+  8830→                xxa = -Mth::sin(rotDiff) * yya * 1.0f;
+  8831→                yya =  Mth::cos(rotDiff) * yya * 1.0f;
+  8832→            }
+  8833→        }
+  8834→        if (yd > 0) {
+  8835→            jumping = true;     // jump if path target is higher than current floor
+  8836→        }
+  8837→    }
+  8838→
+  8839→    if (attackTarget != NULL) {
+  8840→        lookAt(attackTarget, 30, 30);
+  8841→    }
+  8842→
+  8843→    if (this->horizontalCollision && !isPathFinding()) jumping = true;
+  8844→    if (random.nextFloat() < 0.8f && (inWater || inLava)) jumping = true;   // 80% chance/tick to swim
+  8845→
+  8846→    TIMER_POP();
+  8847→}
+  8848→```
+  8849→
+  8850→**Wander-AI summary (PathfinderMob::updateAi):**
+  8851→- `fleeTime` decrements toward 0 (set to 60 ticks when hurt).
+  8852→- No target: 1/180 chance/tick to `findRandomStrollLocation` when idle (path empty); 1/120 chance when path is non-empty (occasional re-stroll).
+  8853→- During flee (fleeTime > 0): every 8th tick (`fleeTime & 7 == 1`) re-strolls.
+  8854→- `noActionTime` (set by `Mob::updateAi`) must be < 5 sec (`SharedConstants::TicksPerSecond * 5 = 100` ticks) or no stroll — this prevents idle animals far from players from wandering.
+  8855→- When path is empty OR 1/100 chance: just call `super::updateAi` (look around).
+  8856→- Otherwise, follow the path: turn toward the next node (max 30°/tick), set `yya = runSpeed`, jump if target is above current.
+  8857→- Hold-ground: rotate toward attack target and strafe (`xxa`/`yya` re-projected).
+  8858→- Swimming: 80% chance/tick to jump while in water/lava.
+  8859→- Hit a wall while not path-finding: jump.
+  8860→
+  8861→### 16.12 — PathfinderMob::findRandomStrollLocation — VERIFIED (PathfinderMob.cpp:187-214)
+  8862→
+  8863→```cpp
+  8864→void PathfinderMob::findRandomStrollLocation()
+  8865→{
+  8866→    TIMER_PUSH("stroll");
+  8867→    bool hasBest = false;
+  8868→    int xBest = -1, yBest = -1, zBest = -1;
+  8869→    float best = -99999;
+  8870→    for (int i = 0; i < 10; i++) {
+  8871→        int xt = Mth::floor(x + random.nextInt(13) - 6);   // ±6 blocks in x
+  8872→        int yt = Mth::floor(y + random.nextInt(7)  - 3);   // ±3 blocks in y
+  8873→        int zt = Mth::floor(z + random.nextInt(13) - 6);   // ±6 blocks in z
+  8874→        float value = getWalkTargetValue(xt, yt, zt);
+  8875→        if (value > best) {
+  8876→            best = value;
+  8877→            xBest = xt; yBest = yt; zBest = zt;
+  8878→            hasBest = true;
+  8879→        }
+  8880→    }
+  8881→    if (hasBest) {
+  8882→        level->findPath(&path, this, xBest, yBest, zBest, 10, false, false);   // pathfind with range 10
+  8883→    }
+  8884→    TIMER_POP();
+  8885→}
+  8886→```
+  8887→**Stroll sampling:** 10 random points within ±6(x)/±3(y)/±6(z) of the mob; pick the one with the highest `getWalkTargetValue` (for animals: +10 for grass floor, else brightness - 0.5). Then path-find to it with a range of 10 blocks.
+  8888→
+  8889→### 16.13 — PathfinderMob::checkHurtTarget / checkCantSeeTarget / getWalkTargetValue / findAttackTarget — VERIFIED (PathfinderMob.cpp:216-249)
+  8890→
+  8891→```cpp
+  8892→void PathfinderMob::checkHurtTarget( Entity* target, float d )
+  8893→{
+  8894→}
+  8895→
+  8896→void PathfinderMob::checkCantSeeTarget( Entity* target, float d )
+  8897→{
+  8898→    if (d > 32)
+  8899→        attackTargetId = 0;     // give up if target is > 32 blocks away and unseen
+  8900→}
+  8901→
+  8902→float PathfinderMob::getWalkTargetValue( int x, int y, int z )
+  8903→{
+  8904→    return 0;     // base class returns 0 — Animal overrides to grass-preferring
+  8905→}
+  8906→
+  8907→Entity* PathfinderMob::findAttackTarget()
+  8908→{
+  8909→    return NULL;
+  8910→}
+  8911→
+  8912→float PathfinderMob::getWalkingSpeedModifier() {
+  8913→    float speed = super::getWalkingSpeedModifier();
+  8914→    if (fleeTime > 0) speed *= 2;   // fleeing = 2× walking speed
+  8915→    return speed;
+  8916→}
+  8917→```
+  8918→
+  8919→### 16.14 — Mob.h (relevant fields) — VERIFIED (Mob.h:1-249) — only key fields reproduced
+  8920→
+  8921→```cpp
+  8922→class Mob: public Entity {
+  8923→    typedef Entity super;
+  8924→public:
+  8925→    static const int ATTACK_DURATION = 5;
+  8926→    static const int SWING_DURATION = 8;
+  8927→
+  8928→    Mob(Level* level);
+  8929→    virtual ~Mob();
+  8930→
+  8931→    virtual void tick();        // tick driver (calls baseTick + aiStep + superTick)
+  8932→    virtual void baseTick();
+  8933→    virtual void superTick();
+  8934→
+  8935→    virtual void aiStep();       // <-- the main AI step (new AI or old AI, then travel)
+  8936→    virtual void updateAi();    // <-- legacy AI (look around + random turn)
+  8937→    virtual void newServerAiStep();   // <-- new AI (sensing + goalSelector + navigation + controls)
+  8938→
+  8939→    virtual void jumpFromGround();   // yd = 0.42
+  8940→    virtual void lookAt(Entity* e, float yMax, float xMax);
+  8941→    float rotlerp(float a, float b, float max);
+  8942→
+  8943→    virtual float getWalkingSpeedModifier();
+  8944→
+  8945→protected:
+  8946→    float xxa, yya, yRotA;        // xxa = strafe input; yya = forward input; yRotA = rotation input
+  8947→    float runSpeed;
+  8948→    float walkingSpeed;
+  8949→    float flyingSpeed;
+  8950→    bool jumping;
+  8951→    int noActionTime;             // incremented when no player nearby
+  8952→    float defaultLookAngle;
+  8953→    int ambientSoundTime;
+  8954→    int lookTime;
+  8955→    int lookingAtId;
+  8956→    // ... and many more
+  8957→};
+  8958→```
+  8959→
+  8960→### 16.15 — Mob::aiStep — VERIFIED (Mob.cpp:688-757) — drives AI + movement
+  8961→
+  8962→```cpp
+  8963→void Mob::aiStep()
+  8964→{
+  8965→    TIMER_PUSH("ai");
+  8966→    if (isImmobile()) {     // health <= 0
+  8967→        jumping = false;
+  8968→        xxa = 0; yya = 0; yRotA = 0;
+  8969→    } else {
+  8970→        if (!interpolateOnly()) {
+  8971→            if (useNewAi()) {
+  8972→                TIMER_PUSH("newAi");
+  8973→                newServerAiStep();
+  8974→                TIMER_POP();
+  8975→            }
+  8976→            else {
+  8977→                TIMER_PUSH("oldAi");
+  8978→                updateAi();      // <-- PathfinderMob::updateAi (wander AI) for animals
+  8979→                TIMER_POP();
+  8980→            }
+  8981→        }
+  8982→    }
+  8983→    TIMER_POP_PUSH("move");
+  8984→
+  8985→    bool inWater = isInWater();
+  8986→    bool inLava = isInLava();
+  8987→
+  8988→    if (jumping) {
+  8989→        if (inWater)      yd += 0.04f;       // swim up
+  8990→        else if (inLava)  yd += 0.04f;
+  8991→        else if (onGround) jumpFromGround();  // yd = 0.42
+  8992→    }
+  8993→
+  8994→    xxa *= 0.98f;
+  8995→    yya *= 0.98f;
+  8996→    yRotA *= 0.9f;
+  8997→
+  8998→    float normalSpeed = walkingSpeed;
+  8999→    float normalAirControllSpeed = flyingSpeed;
+  9000→    walkingSpeed *= getWalkingSpeedModifier();
+  9001→    flyingSpeed  *= getWalkingSpeedModifier();
+  9002→    travel(xxa, yya);
+  9003→    walkingSpeed = normalSpeed;
+  9004→    flyingSpeed = normalAirControllSpeed;
+  9005→
+  9006→    TIMER_POP_PUSH("push");
+  9007→    Player* player = NULL;
+  9008→    if(isPlayer()) player = (Player*)this;
+  9009→    if(player == NULL || !player->isSleeping())  {
+  9010→        EntityList& entities = level->getEntities(this, this->bb.grow(0.2f, 0, 0.2f));
+  9011→        for (unsigned int i = 0; i < entities.size(); i++) {
+  9012→            Entity* e = entities[i];
+  9013→            if(e->isPlayer()) {
+  9014→                Player* p = (Player*)e;
+  9015→                if(p->isSleeping()) continue;
+  9016→            }
+  9017→            if (e->isPushable()) e->push(this);
+  9018→        }
+  9019→    }
+  9020→    TIMER_POP();
+  9021→}
+  9022→```
+  9023→
+  9024→**Tick order in Mob::aiStep:**
+  9025→1. If immobile (dead) → zero inputs.
+  9026→2. If new AI (`useNewAi()`) → `newServerAiStep` (sensing + goalSelector + navigation + controls).
+  9027→3. Else (legacy AI used by PathfinderMob/Animal) → `updateAi` (see 16.11 & 16.16).
+  9028→4. Process jumping: water/lava adds 0.04 to yd; onGround → jumpFromGround (yd = 0.42).
+  9029→5. Decay inputs: `xxa *= 0.98`, `yya *= 0.98`, `yRotA *= 0.9`.
+  9030→6. Apply walking-speed modifier (e.g. fleeTime × 2), call `travel(xxa, yya)` (physics integration — uses walkingSpeed/flyingSpeed).
+  9031→7. Push nearby entities (bb grown by 0.2 in x and z).
+  9032→
+  9033→### 16.16 — Mob::updateAi — VERIFIED (Mob.cpp:760-802) — the look-around AI
+  9034→
+  9035→```cpp
+  9036→void Mob::updateAi() {
+  9037→    noActionTime++;
+  9038→
+  9039→    Player* player = level->getNearestPlayer(this, -1);
+  9040→    checkDespawn(player);
+  9041→
+  9042→    xxa = 0;
+  9043→    yya = 0;
+  9044→
+  9045→    float lookDistance = 8;
+  9046→    if (random.nextFloat() < 0.02f) {     // 2% chance/tick to look at a player
+  9047→        player = level->getNearestPlayer(this, lookDistance);
+  9048→        if (player != NULL) {
+  9049→            lookingAtId = player->entityId;
+  9050→            lookTime = 10 + random.nextInt(20);   // 10..30 ticks of looking
+  9051→        } else {
+  9052→            yRotA = (random.nextFloat() - 0.5f) * 20;   // ±10° random turn
+  9053→        }
+  9054→    }
+  9055→
+  9056→    if (lookingAtId != 0) {
+  9057→        Entity* lookingAt = level->getEntity(lookingAtId);
+  9058→        lookingAtId = 0;
+  9059→        if (lookingAt != NULL) {
+  9060→            lookAt(lookingAt, 10, (float)getMaxHeadXRot());
+  9061→            if (lookTime-- <= 0 || lookingAt->removed || lookingAt->distanceToSqr(this) > lookDistance * lookDistance) {
+  9062→                lookingAtId = 0;
+  9063→            } else {
+  9064→                lookingAtId = lookingAt->entityId;
+  9065→            }
+  9066→        }
+  9067→    } else {
+  9068→        if (random.nextFloat() < 0.05f) {     // 5% chance/tick for random turn when not looking at anyone
+  9069→            yRotA = (random.nextFloat() - 0.5f) * 20;
+  9070→        }
+  9071→        yRot += yRotA;
+  9072→        xRot = defaultLookAngle;
+  9073→    }
+  9074→
+  9075→    bool inWater = isInWater();
+  9076→    bool inLava = isInLava();
+  9077→    if (inWater || inLava) jumping = random.nextFloat() < 0.8f;   // 80% chance/tick to swim
+  9078→}
+  9079→```
+  9080→
+  9081→**Mob::updateAi (look-around AI):**
+  9082→- `noActionTime++` (reset to 0 when player comes near — UNVERIFIED in Mob.cpp but used by `PathfinderMob::updateAi` to gate strolls).
+  9083→- 2% chance/tick to look at nearest player within 8 blocks (for 10–30 ticks).
+  9084→- 5% chance/tick to randomly turn ±10° when not looking at anyone.
+  9085→- `yRotA` drives `yRot` (smooth rotation); `xRot = defaultLookAngle`.
+  9086→- In water/lava: 80% chance/tick to set `jumping = true`.
+  9087→
+  9088→### 16.17 — Mob::newServerAiStep — VERIFIED (Mob.cpp:804-837) — the new AI (not used for animals)
+  9089→
+  9090→```cpp
+  9091→void Mob::newServerAiStep() {
+  9092→    noActionTime++;
+  9093→
+  9094→    TIMER_PUSH("checkDespawn");
+  9095→    checkDespawn();
+  9096→    jumping = false;
+  9097→
+  9098→    TIMER_POP_PUSH("sensing");
+  9099→    if (sensing) sensing->tick();
+  9100→
+  9101→    if (random.nextInt(5) == 0) {       // 1/5 chance/tick to tick goal selectors
+  9102→        TIMER_POP_PUSH("targetSelector");
+  9103→        if (targetSelector) targetSelector->tick();
+  9104→
+  9105→        TIMER_POP_PUSH("goalSelector");
+  9106→        if (goalSelector) goalSelector->tick();
+  9107→    }
+  9108→
+  9109→    TIMER_POP_PUSH("navigation");
+  9110→    if (navigation) navigation->tick();
+  9111→
+  9112→    TIMER_POP_PUSH("controls");
+  9113→    if (moveControl) moveControl->tick();
+  9114→    if (jumpControl) jumpControl->tick();
+  9115→
+  9116→    TIMER_POP();
+  9117→}
+  9118→```
+  9119→**Note:** This new-AI path uses goal selectors and controls. For Animal (which inherits PathfinderMob, and PathfinderMob does NOT override `useNewAi()` to return true), the legacy `updateAi` is used. `useNewAi()` is false by default in MCPE 2013 for animals (UNVERIFIED the exact override condition).
+  9120→
+  9121→### 16.18 — Mob::jumpFromGround / isImmobile / getMaxHeadXRot / lookAt / rotlerp — VERIFIED (Mob.cpp:839-904)
+  9122→
+  9123→```cpp
+  9124→bool Mob::isImmobile() { return health <= 0; }
+  9125→
+  9126→void Mob::jumpFromGround() { yd = 0.42f; }   // jump velocity
+  9127→
+  9128→bool Mob::removeWhenFarAway() { return true; }   // (overridden by Animal to false)
+  9129→
+  9130→int Mob::getMaxHeadXRot() { return 10; }     // max head tilt per lookAt call (10°)
+  9131→
+  9132→void Mob::lookAt( Entity* e, float yMax, float xMax )
+  9133→{
+  9134→    float xd = e->x - x;
+  9135→    float yd;
+  9136→    float zd = e->z - z;
+  9137→
+  9138→    if (false) {     // (e->isMob()) -- disabled, treats target as point
+  9139→        Mob* mob = (Mob*) e;
+  9140→        yd = (y + getHeadHeight()) - (mob->y + mob->getHeadHeight());
+  9141→    } else {
+  9142→        yd = (e->bb.y0 + e->bb.y1) / 2 - (y + getHeadHeight());
+  9143→    }
+  9144→
+  9145→    float sd = Mth::sqrt(xd * xd + zd * zd);
+  9146→
+  9147→    float yRotD = (float) (atan2(zd, xd) * 180 / Mth::PI) - 90;
+  9148→    float xRotD = (float) (atan2(yd, sd) * 180 / Mth::PI);
+  9149→    xRot = -rotlerp(xRot, xRotD, xMax);
+  9150→    yRot =  rotlerp(yRot, yRotD, yMax);
+  9151→}
+  9152→
+  9153→bool Mob::isLookingAtAnEntity() { return lookingAtId != 0; }
+  9154→
+  9155→float Mob::rotlerp( float a, float b, float max )
+  9156→{
+  9157→    float diff = b - a;
+  9158→    while (diff < -180) diff += 360;
+  9159→    while (diff >= 180)  diff -= 360;
+  9160→    if (diff >  max) diff =  max;
+  9161→    if (diff < -max) diff = -max;
+  9162→    return a + diff;
+  9163→}
+  9164→```
+  9165→**Jump velocity:** 0.42 blocks/tick (~1.45 m/s upward). This is the same value as Java Minecraft.
+  9166→**Look-at:** lerps `yRot` and `xRot` toward target by `yMax`/`xMax` degrees per tick (typically 10°/tick for animals).
+  9167→
+  9168→### 16.19 — ChickenRenderer::getBob — VERIFIED (ChickenRenderer.cpp:16-23)
+  9169→
+  9170→```cpp
+  9171→float ChickenRenderer::getBob( Mob* mob_, float a )
+  9172→{
+  9173→    Chicken* mob = (Chicken*) mob_;
+  9174→    float flap = mob->oFlap+(mob->flap-mob->oFlap)*a;
+  9175→    float flapSpeed = mob->oFlapSpeed+(mob->flapSpeed-mob->oFlapSpeed)*a;
+  9176→
+  9177→    return (Mth::sin(flap)+1)*flapSpeed;     // bob = (sin(phase) + 1) * speed; always non-negative
+  9178→}
+  9179→```
+  9180→**Wing bob value:** `(sin(flap_phase) + 1) * flap_speed` — this is passed to `ChickenModel::setupAnim` as the `bob` argument, which sets `wing0.zRot = bob`, `wing1.zRot = -bob` (wings flap up/down inversely).
+  9181→
+  9182→### 16.20 — ChickenModel::setupAnim / render — VERIFIED (ChickenModel.cpp:49-101)
+  9183→
+  9184→```cpp
+  9185→void ChickenModel::render( Entity* entity, float time, float r, float bob, float yRot, float xRot, float scale )
+  9186→{
+  9187→    setupAnim(time, r, bob, yRot, xRot, scale);
+  9188→
+  9189→    if (young) {
+  9190→        float ss = 2;     // baby scale = 1/2 (rendered at half size)
+  9191→        glPushMatrix();
+  9192→        glTranslatef(0, 5 * scale, 2 * scale);
+  9193→        head.render(scale);
+  9194→        beak.render(scale);
+  9195→        redThing.render(scale);
+  9196→        glPopMatrix();
+  9197→        glPushMatrix();
+  9198→        glScalef(1 / ss, 1 / ss, 1 / ss);
+  9199→        glTranslatef(0, 24 * scale, 0);
+  9200→        body.render(scale);
+  9201→        leg0.render(scale);
+  9202→        leg1.render(scale);
+  9203→        wing0.render(scale);
+  9204→        wing1.render(scale);
+  9205→        glPopMatrix();
+  9206→    } else {
+  9207→        head.render(scale);
+  9208→        beak.render(scale);
+  9209→        redThing.render(scale);
+  9210→        body.render(scale);
+  9211→        leg0.render(scale);
+  9212→        leg1.render(scale);
+  9213→        wing0.render(scale);
+  9214→        wing1.render(scale);
+  9215→    }
+  9216→}
+  9217→
+  9218→void ChickenModel::setupAnim( float time, float r, float bob, float yRot, float xRot, float scale )
+  9219→{
+  9220→    head.xRot = -((xRot / (float) (180 / Mth::PI)));
+  9221→    head.yRot = yRot / (float) (180 / Mth::PI);
+  9222→
+  9223→    beak.xRot = head.xRot;
+  9224→    beak.yRot = head.yRot;
+  9225→
+  9226→    redThing.xRot = head.xRot;
+  9227→    redThing.yRot = head.yRot;
+  9228→
+  9229→    body.xRot = 90 / (float) (180 / Mth::PI);     // body tilted 90° (chicken's body is horizontal)
+  9230→
+  9231→    const float pend = Mth::cos(time * 0.6662f) * 1.4f * r;   // leg swing, same as Java
+  9232→    leg0.xRot =  pend;
+  9233→    leg1.xRot = -pend;
+  9234→
+  9235→    wing0.zRot = bob;     // wing flap
+  9236→    wing1.zRot = -bob;
+  9237→}
+  9238→```
+  9239→
+  9240→**Chicken model parts:**
+  9241→- `head`   addBox(-2, -6, -2, 4, 6, 3)   at (0, 15, -4) — 4×6×3 box
+  9242→- `beak`   addBox(-2, -4, -4, 4, 2, 2)   at (0, 15, -4)
+  9243→- `redThing` addBox(-1, -2, -3, 2, 2, 2) at (0, 15, -4) — the wattle
+  9244→- `body`   addBox(-3, -4, -3, 6, 8, 6)   at (0, 16, 0) — 6×8×6 box
+  9245→- `leg0`   addBox(-1, 0, -3, 3, 5, 3)   at (-2, 19, 1)
+  9246→- `leg1`   addBox(-1, 0, -3, 3, 5, 3)   at (1, 19, 1)
+  9247→- `wing0`  addBox(0, 0, -3, 1, 4, 6)    at (-4, 13, 0)
+  9248→- `wing1`  addBox(-1, 0, -3, 1, 4, 6)   at (4, 13, 0)
+  9249→
+  9250→**Animation params:**
+  9251→- `time` = `partialTick` (for leg swing), `r` = `walkAnimSpeed` (limb-swing amount)
+  9252→- `bob` = `ChickenRenderer::getBob` = `(sin(flap) + 1) * flapSpeed` (drives wing0.zRot = bob, wing1.zRot = -bob)
+  9253→- `yRot`, `xRot` = entity rotation, applied to head/beak/wattle
+  9254→- `body.xRot = PI/2` (body is horizontal)
+  9255→- Leg swing: `pend = cos(time * 0.6662) * 1.4 * r`, applied as `leg0 = +pend`, `leg1 = -pend` (alternating)
+  9256→- Baby: rendered at half scale (1/2), with head/beak translated +5/+2 in y/z to keep proportions, and body translated +24 in y inside the scale.
+  9257→
+  9258→### Constants table (Entry 16)
+  9259→
+  9260→| Constant | Value | Source |
+  9261→|---|---|---|
+  9262→| Chicken size (width × height) | 0.3 × 0.7 | Chicken.cpp:18 |
+  9263→| Chicken max health | 4 HP (2 hearts) | Chicken.cpp:30 |
+  9264→| Chicken initial flapping | 1.0 | Chicken.cpp:12 |
+  9265→| Chicken eggTime | random(6000) + 6000 ticks (5–10 min) | Chicken.cpp:19 |
+  9266→| SharedConstants::TicksPerSecond | 20 (verified Entry 1) | — |
+  9267→| Wing-flap increment | `flapping * 2` per tick | Chicken.cpp:51 |
+  9268→| Wing-flap decay | `flapping *= 0.9` per tick | Chicken.cpp:45 |
+  9269→| flapSpeed increment | ±0.3 per tick (−1 on ground, +4 in air) | Chicken.cpp:40 |
+  9270→| flapSpeed clamp | [0, 1] | Chicken.cpp:41-42 |
+  9271→| Chicken slow-fall | `yd *= 0.6` when `yd < 0` and !onGround | Chicken.cpp:47-49 |
+  9272→| Chicken feather drop | random(3) → 0..2 feathers | Chicken.cpp:100 |
+  9273→| Chicken raw meat drop | 1 (always) | Chicken.cpp:107 |
+  9274→| Animal spawn floor | `Tile::grass` | Animal.cpp:28 |
+  9275→| Animal spawn brightness | `getRawBrightness > 8` | Animal.cpp:28 |
+  9276→| Animal ambient sound interval | 12 sec = 240 ticks | Animal.cpp:33 |
+  9277→| Animal fleeTime on hurt | 3 sec = 60 ticks | Animal.cpp:17 |
+  9278→| Animal walk-target for grass floor | +10 | Animal.cpp:38 |
+  9279→| Animal walk-target base | `brightness - 0.5` | Animal.cpp:39 |
+  9280→| Animal despawn | never (`removeWhenFarAway = false`) | Animal.cpp:87 |
+  9281→| AgableMob initial age | -1, then setAge(0) → adult | AgableMob.cpp:5-8 |
+  9282→| Baby age count-up | age < 0 → age + 1 per tick | AgableMob.cpp:42 |
+  9283→| Adult breed cooldown | age > 0 → age - 1 per tick | AgableMob.cpp:44 |
+  9284→| PathfinderMob::MAX_TURN | 30°/tick | PathfinderMob.h:24 |
+  9285→| PathfinderMob path-find range | 16 blocks | PathfinderMob.cpp:20 |
+  9286→| PathfinderMob stroll range (x/z) | ±6 blocks | PathfinderMob.cpp:196, 198 |
+  9287→| PathfinderMob stroll range (y)   | ±3 blocks | PathfinderMob.cpp:197 |
+  9288→| PathfinderMob stroll samples | 10 random points | PathfinderMob.cpp:195 |
+  9289→| PathfinderMob stroll path range | 10 blocks | PathfinderMob.cpp:211 |
+  9290→| Idle stroll chance (path empty) | 1/180 per tick | PathfinderMob.cpp:100 |
+  9291→| Idle stroll chance (path non-empty) | 1/120 per tick | PathfinderPathfinder.cpp:103 |
+  9292→| Flee stroll chance | 1/8 per tick (when `(fleeTime & 7) == 1`) | PathfinderMob.cpp:104 |
+  9293→| No-action gate | noActionTime < 100 ticks | PathfinderMob.cpp:108 |
+  9294→| CheckCantSeeTarget give-up | target > 32 blocks away | PathfinderMob.cpp:222 |
+  9295→| Flee walking-speed modifier | × 2 | PathfinderMob.cpp:238 |
+  9296→| Mob::ATTACK_DURATION | 5 | Mob.h:27 |
+  9297→| Mob::SWING_DURATION | 8 | Mob.h:28 |
+  9298→| Mob::jumpFromGround yd | 0.42 | Mob.cpp:846 |
+  9299→| Mob::getMaxHeadXRot | 10° | Mob.cpp:856 |
+  9300→| Mob input decay | `xxa *= 0.98`, `yya *= 0.98`, `yRotA *= 0.9` | Mob.cpp:727-729 |
+  9301→| Mob swim-up yd increment | +0.04/tick in water or lava | Mob.cpp:719-721 |
+  9302→| Mob::updateAi look chance | 2% per tick | Mob.cpp:770 |
+  9303→| Mob::updateAi look duration | 10 + random(20) ticks (10..30) | Mob.cpp:774 |
+  9304→| Mob::updateAi random-turn chance | 5% per tick | Mob.cpp:792 |
+  9305→| Mob::updateAi random-turn amount | ±10° ((rand-0.5)*20) | Mob.cpp:776, 793 |
+  9306→| Mob::updateAi swim chance | 80% per tick in water/lava | Mob.cpp:801 |
+  9307→| Mob push-box grow | 0.2 in x and z | Mob.cpp:745 |
+  9308→| New-AI goal-selector tick chance | 1/5 per tick | Mob.cpp:814 |
+  9309→| ChickenRenderer::getBob formula | `(sin(flap) + 1) * flapSpeed` | ChickenRenderer.cpp:22 |
+  9310→| ChickenModel leg swing | `cos(time * 0.6662) * 1.4 * r` | ChickenModel.cpp:95 |
+  9311→| ChickenModel body tilt | 90° (PI/2) | ChickenModel.cpp:93 |
+  9312→| ChickenModel baby scale | 1/2 | ChickenModel.cpp:54-55 |
+  9313→
+  9314→### UNVERIFIED items (Entry 16)
+  9315→1. **`Mob::useNewAi()`** — virtual bool. UNVERIFIED the exact override logic — likely returns false for animals (legacy AI). Need Mob.cpp full check or animal-specific subclass.
+  9316→2. **`Mob::travel(xxa, yya)`** — physics integration (similar to Player::travel, verified in Entry 5). UNVERIFIED for non-player mobs — may have a different walking-speed formula.
+  9317→3. **`Mob::tick()`** and **`Mob::baseTick()`** — top-level entity tick. UNVERIFIED (would be in Mob.cpp lines 148-265).
+  9318→4. **`Mob::checkDespawn`** — despawn logic. UNVERIFIED.
+  9319→5. **`Sensing::tick`** — sensing component. UNVERIFIED.
+  9320→6. **`PathNavigation::tick`** and **`level->findPath`** — pathfinder A* implementation. UNVERIFIED the exact algorithm.
+  9321→7. **`Path::currentPos`, `next`, `isDone`, `destroy`** — Path API. UNVERIFIED.
+  9322→8. **`Mob::getWalkingSpeedModifier`** base — likely 1.0. UNVERIFIED.
+  9323→9. **`Mob::isInWater()` / `isInLava()`** — material check at the entity's position. UNVERIFIED the exact predicate.
+  9324→10. **Egg laying** — commented out in MCPE 2013 chicken; the `eggTime` field is set but never decremented in active code. UNVERIFIED if any build flag enables it.
+  9325→11. **Chicken cooked-meat drop on fire** — also commented out. UNVERIFIED.
+  9326→12. **`SharedConstants::TicksPerSecond * 60 * 5`** — verified to be 6000 ticks (5 minutes at 20 TPS) assuming `TicksPerSecond = 20`, which was verified in Entry 1.
+  9327→
+
+[showing lines 8377-9327 of 11990; use offset=9328 with limit to continue reading]
