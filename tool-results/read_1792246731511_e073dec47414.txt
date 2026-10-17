@@ -1,0 +1,358 @@
+ 15000→
+ 15001→                  if currentMobType is None:
+ 15002→                      currentMobType = level->getRandomMobSpawnAt(cat, x, y, z)     # biome-specific
+ 15003→                      if !currentMobType: break
+ 15004→                      if cat == monster:
+ 15005→                          typeMax = (1.5 * weight * 20) / defaultTotalEnemyWeight
+ 15006→                          if countInstanceOfType(type.id) >= typeMax: break
+ 15007→                      maxCreatureCount = currentMobType.minCount + rand(1 + maxCount - minCount)
+ 15008→
+ 15009→                  testMob = MobFactory::getStaticTestMob(type.id, level)
+ 15010→                  testMob.moveTo(xx, yy, zz, 0, 0)
+ 15011→                  if !testMob.canSpawn(): continue        # Animal: grass floor + brightness > 8
+ 15012→
+ 15013→                  mob = MobFactory::CreateMob(type.id, level)
+ 15014→                  if !mob: continue
+ 15015→                  if addMob(level, mob, xx, yy, zz, random*360, 0, false):
+ 15016→                      currentCreatureCount++
+ 15017→                      clusterSize++
+ 15018→                      if clusterSize >= mob.getMaxSpawnClusterSize():  # base = 4
+ 15019→                          goto next_chunk
+ 15020→                  else:
+ 15021→                      delete mob
+ 15022→
+ 15023→                  count += clusterSize
+ 15024→
+ 15025→MobSpawner::postProcessSpawnMobs(level, biome, xo, zo, cellWidth, cellHeight, random):
+ 15026→  mobs = biome->getMobs(MobCategory::creature)
+ 15027→  if mobs.empty: return
+ 15028→  while random.nextFloat() < biome->getCreatureProbability():   # 0.08 default
+ 15029→      type = WeighedRandom::getRandomItem(level.random, mobs)
+ 15030→      count = type.minCount + random.nextInt(1 + type.maxCount - type.minCount)
+ 15031→      x = xo + random.nextInt(cellWidth); z = zo + random.nextInt(cellHeight)
+ 15032→      startX = x; startZ = z
+ 15033→      for c in 0..count:
+ 15034→          success = false
+ 15035→          for attempts in 0..4:
+ 15036→              y = level->getTopSolidBlock(x, z)
+ 15037→              if isSpawnPositionOk(creature, level, x, y, z):
+ 15038→                  mob = MobFactory::CreateMob(type.id, level)
+ 15039→                  mob.moveTo(x+0.5, y, z+0.5, random*360, 0)
+ 15040→                  level->addEntity(mob)
+ 15041→                  finalizeMobSettings(mob, level, x+0.5, y, z+0.5)    # sheep color + 50% baby
+ 15042→                  success = true
+ 15043→              x += random(5)-random(5); z += random(5)-random(5)
+ 15044→              # wrap back into cell
+ 15045→          # next attempt
+ 15046→
+ 15047→MobSpawner::finalizeMobSettings(mob, level, x, y, z):
+ 15048→  if mob.id == Sheep: sheep.setColor(Sheep::getSheepColor(level.random))
+ 15049→  makeBabyMob(mob, 0.5)
+ 15050→
+ 15051→MobSpawner::makeBabyMob(mob, probability):
+ 15052→  static babyRandom = Random(98495119L)     # ⚠️ deterministic
+ 15053→  if mob->getCreatureBaseType() == BaseCreature:
+ 15054→      if babyRandom.nextFloat() < probability:       # 50%
+ 15055→          mob->setAge(-20 * 60 * TicksPerSecond)     # -24000 ticks = -20 minutes
+ 15056→
+ 15057→Animal::canSpawn:
+ 15058→  return getTile(x, y-1, z) == Tile::grass && getRawBrightness(x, y, z) > 8 && Mob::canSpawn
+ 15059→
+ 15060→PathfinderMob::canSpawn:
+ 15061→  return Mob::canSpawn && getWalkTargetValue(x, y, z) >= 0   # Animal: +10 grass / (brightness - 0.5)
+ 15062→
+ 15063→Mob::canSpawn:
+ 15064→  return level->isUnobstructed(bb) && level->getCubes(this, bb).size() == 0 && !level->containsAnyLiquid(bb)
+ 15065→```
+ 15066→
+ 15067→### 25.14 — UNVERIFIED items in Entry 25
+ 15068→1. **`level->getRandomMobSpawnAt(category, x, y, z)`** — Level.cpp:1100. Returns a `Biome::MobSpawnerData` based on the biome at (x, z). UNVERIFIED the exact biome lookup + weighed random selection. **NOTE:** This is `Biome::MobSpawnerData` with fields `mobClassId`, `minCount`, `maxCount`, `randomWeight` (per Biome.h:33-45).
+ 15069→2. **`Biome::getMobs(MobCategory)`** — returns the biome's mob list for that category (`_enemies`, `_friendlies`, `_waterFriendlies`). UNVERIFIED the dispatch logic.
+ 15070→3. **`Biome::defaultTotalEnemyWeight`** — sum of all enemy weights across biomes (calculated in `Biome::recalc()` per Biome.cpp:55-57). UNVERIFIED the actual value (depends on registered biome weights).
+ 15071→4. **`Biome::defaultTotalFriendlyWeight`** — same for friendlies. UNVERIFIED.
+ 15072→5. **`MobFactory::getStaticTestMob(typeId, level)`** — returns a cached test mob instance for `canSpawn` check. UNVERIFIED.
+ 15073→6. **`MobFactory::CreateMob(typeId, level)`** — creates a new mob by type ID. UNVERIFIED the factory table.
+ 15074→7. **`WeighedRandom::getRandomItem(random, mobList)`** — weighed random selection. UNVERIFIED.
+ 15075→8. **`level->getTopSolidBlock(x, z)`** — topmost non-air block at (x, z). UNVERIFIED.
+ 15076→9. **`level->getSharedSpawnPos()`** — the world spawn point. UNVERIFIED.
+ 15077→10. **`level->countInstanceOfBaseType(baseClassId)`** — count of mobs with the given base type. UNVERIFIED.
+ 15078→11. **`level->countInstanceOfType(mobClassId)`** — count of mobs of a specific type. UNVERIFIED.
+ 15079→12. **`level->isSolidBlockingTile(x, y, z)`** — UNVERIFIED.
+ 15080→13. **`level->getMaterial(x, y, z)`** — UNVERIFIED.
+ 15081→14. **`level->getRawBrightness(x, y, z)`** vs `level->getBrightness(x, y, z)` — UNVERIFIED the difference (likely: rawBrightness = sky-only, brightness = max of sky+block light).
+ 15082→15. **`Mob::getMaxSpawnClusterSize()`** — base 4 (Mob.cpp:976); subclass overrides? UNVERIFIED (probably Zombie/Creeper etc. override).
+ 15083→16. **`MobFactory::getStaticTestMob`** is described in MobFactory.h — UNVERIFIED the actual factory list (which mobs are registered).
+ 15084→17. **`bedEnemies` list** — declared but never used. Bed-enemy spawn logic was a planned feature in MCPE 2013 (wake up enemies when player sleeps) but was never implemented. UNVERIFIED if any other code references it.
+ 15085→
+ 15086→---
+ 15087→
+ 15088→## RE-Mob Stage Summary
+ 15089→
+ 15090→### A. Files read in full (line-by-line, EXHAUSTIVE)
+ 15091→
+ 15092→| # | File | Lines | Status |
+ 15093→|---|---|---|---|
+ 15094→| 1 | `Mob.cpp` | 1-1145 | ✅ VERIFIED |
+ 15095→| 2 | `Mob.h` | 1-249 | ✅ VERIFIED |
+ 15096→| 3 | `PathfinderMob.cpp` | 1-249 | ✅ VERIFIED |
+ 15097→| 4 | `PathfinderMob.h` | 1-66 | ✅ VERIFIED |
+ 15098→| 5 | `Animal.cpp` | 1-93 | ✅ VERIFIED |
+ 15099→| 6 | `Animal.h` | 1-39 | ✅ VERIFIED |
+ 15100→| 7 | `Chicken.cpp` | 1-114 | ✅ VERIFIED |
+ 15101→| 8 | `Chicken.h` | 1-50 | ✅ VERIFIED |
+ 15102→| 9 | `MobSpawner.cpp` | 1-285 | ✅ VERIFIED |
+ 15103→| 10 | `MobSpawner.h` | 1-42 | ✅ VERIFIED |
+ 15104→| 11 | `ChickenRenderer.cpp` | 1-23 | ✅ VERIFIED |
+ 15105→| 12 | `ChickenRenderer.h` | 1-22 | ✅ VERIFIED |
+ 15106→| 13 | `ChickenModel.cpp` | 1-101 | ✅ VERIFIED |
+ 15107→| 14 | `ChickenModel.h` | 1-23 | ✅ VERIFIED |
+ 15108→| 15 | `MobRenderer.cpp` | 1-242 | ✅ VERIFIED (cross-ref) |
+ 15109→| 16 | `MobCategory.cpp` | 1-51 | ✅ VERIFIED |
+ 15110→| 17 | `MobCategory.h` | 1-61 | ✅ VERIFIED |
+ 15111→| 18 | `EntityTypes.h` | 1-130 | ✅ VERIFIED |
+ 15112→| 19 | `AgableMob.cpp` | 1-54 | ✅ VERIFIED |
+ 15113→| 20 | `AgableMob.h` | 1-31 | ✅ VERIFIED |
+ 15114→| 21 | `Creature.h` | 1-10 | ✅ VERIFIED (empty marker) |
+ 15115→| 22 | `Biome.h` | 1-96 | ✅ VERIFIED |
+ 15116→| 23 | `Biome.cpp` (cross-refs) | 22-228 | ✅ VERIFIED (spawn probability = 0.08) |
+ 15117→| 24 | `EntityRendererId.h` | 1-30 | ✅ VERIFIED (ER_CHICKEN_RENDERER = enum value 6) |
+ 15118→| 25 | `LevelConstants.h` | 1-15 | ✅ VERIFIED (LEVEL_HEIGHT=128) |
+ 15119→| 26 | `Level.h` (cross-ref) | 70, 157 | ✅ VERIFIED (`Level::DEPTH = LEVEL_HEIGHT`) |
+ 15120→| 27 | `Entity.cpp` (cross-ref) | 463-534 | ✅ VERIFIED (Entity::tick, Entity::baseTick) |
+ 15121→
+ 15122→### B. Verified constants — MASTER TABLE for the faithful port
+ 15123→
+ 15124→| Constant | Value | Where | Faithful-port impact |
+ 15125→|---|---|---|---|
+ 15126→| `TicksPerSecond` | 20 | SharedConstants (Entry 1) | All tick→sec conversions |
+ 15127→| `Mob::ATTACK_DURATION` | 5 | Mob.h:27 | swing anim length |
+ 15128→| `Mob::SWING_DURATION` | 8 | Mob.h:28 | full swing cycle |
+ 15129→| `Mob::invulnerableDuration` | 20 ticks (1 sec) | Mob.cpp:29 | i-frames after hit |
+ 15130→| `Mob::runSpeed` | 0.7 | Mob.cpp:41 | forward input while path-following |
+ 15131→| `Mob::walkingSpeed` | 0.1 | Mob.cpp:42 | ground accel factor in `travel` |
+ 15132→| `Mob::flyingSpeed` | 0.02 | Mob.cpp:43 | air/swim accel factor in `travel` |
+ 15133→| `Mob::getWalkingSpeedModifier` (base) | **0.7** (NOT 1.0 — MCPE tweak) | Mob.cpp:92 | multiply all mob speeds by 0.7 |
+ 15134→| `Mob::getMaxHeadXRot` | 10° | Mob.cpp:856 | head-tilt speed in lookAt |
+ 15135→| `Mob::jumpFromGround` yd | **0.42** | Mob.cpp:846 | jump velocity (~1.25 blocks height) |
+ 15136→| `Mob::getMaxHealth` (base) | 10 | Mob.h:81 | 5 hearts (overridable) |
+ 15137→| `Mob::getMaxSpawnClusterSize` (base) | 4 | Mob.cpp:976 | max mobs per spawn cluster |
+ 15138→| `Mob::removeWhenFarAway` (base) | true | Mob.cpp:851 | monsters despawn, animals override false |
+ 15139→| `Mob::useNewAi` (base) | **false** | Mob.cpp:1042 | legacy AI used (good!) |
+ 15140→| `Mob::travel` water friction | 0.80 (x,y,z) | Mob.cpp:565-567 | swim drag |
+ 15141→| `Mob::travel` water swim accel | 0.02 | Mob.cpp:562 | moveRelative accel |
+ 15142→| `Mob::travel` water gravity | yd -= 0.02 | Mob.cpp:568 | buoyancy |
+ 15143→| `Mob::travel` water auto-jump yd | 0.3 | Mob.cpp:571 | exit-water hop |
+ 15144→| `Mob::travel` lava friction | 0.50 | Mob.cpp:577-579 | lava drag (denser) |
+ 15145→| `Mob::travel` land base friction (air) | 0.91 | Mob.cpp:586 | air drag horizontal |
+ 15146→| `Mob::travel` land base friction (ground) | 0.6 * 0.91 = 0.5466 | Mob.cpp:588 | ground drag (default block) |
+ 15147→| `Mob::travel` land gravity | yd -= 0.08 | Mob.cpp:620 | per-tick gravity |
+ 15148→| `Mob::travel` land air drag (y) | × 0.98 | Mob.cpp:621 | terminal velocity |
+ 15149→| `Mob::travel` ladder max-down | -0.15 | Mob.cpp:609 | ladder climb speed |
+ 15150→| `Mob::travel` ladder jump yd | 0.2 | Mob.cpp:617 | ladder-hop |
+ 15151→| `Mob::aiStep` swim-up yd/tick | +0.04 | Mob.cpp:719,721 | swim upward |
+ 15152→| `Mob::aiStep` input decay xxa/yya | × 0.98 | Mob.cpp:727-728 | input smoothing |
+ 15153→| `Mob::aiStep` input decay yRotA | × 0.9 | Mob.cpp:729 | rotation input smoothing |
+ 15154→| `Mob::aiStep` push-box grow (x, z) | 0.2 | Mob.cpp:745 | entity push radius |
+ 15155→| `Mob::aiStep` push-box grow (y) | 0 | Mob.cpp:745 | no y-push |
+ 15156→| `Mob::updateAi` look chance | 2%/tick | Mob.cpp:770 | start looking at player |
+ 15157→| `Mob::updateAi` look duration | 10 + rand(20) ticks (10..30) | Mob.cpp:774 | how long to look |
+ 15158→| `Mob::updateAi` look distance | 8 blocks | Mob.cpp:769 | who to look at |
+ 15159→| `Mob::updateAi` lookAt yMax/xMax | 10°/10° | Mob.cpp:784 | look speed |
+ 15160→| `Mob::updateAi` random-turn chance | 5%/tick | Mob.cpp:792 | idle fidget |
+ 15161→| `Mob::updateAi` random-turn amount | ±10° ((rand-0.5)*20) | Mob.cpp:776,793 | fidget size |
+ 15162→| `Mob::updateAi` swim chance | 80%/tick in water/lava | Mob.cpp:801 | swim thrash |
+ 15163→| `Mob::newServerAiStep` goal-tick chance | 1/5/tick | Mob.cpp:814 | new-AI tick rate |
+ 15164→| `Mob::baseTick` ambient-sound gate | every 16 ticks, P(2000) < ambientSoundTime | Mob.cpp:155 | ambient sound timing |
+ 15165→| `Mob::baseTick` suffocation dmg | 1 dmg/tick in wall | Mob.cpp:161 | wall suffocation |
+ 15166→| `Mob::baseTick` drowning threshold | airSupply == -20 → 8 bubbles + 2 dmg | Mob.cpp:168 | drowning |
+ 15167→| `Mob::baseTick` death-remove threshold | deathTime > 20 ticks (1 sec) | Mob.cpp:190 | death anim length |
+ 15168→| `Mob::hurt` i-frame overflow | invulnTime > 10 → only (dmg - lastHurt) | Mob.cpp:400 | i-frame damage |
+ 15169→| `Mob::hurt` walkAnimSpeed bump | 1.5 | Mob.cpp:397 | hit reaction |
+ 15170→| `Mob::hurt` hurtTime / hurtDuration | 10 ticks | Mob.cpp:410 | red flash duration |
+ 15171→| `Mob::hurt` knockback pow | 0.4 | Mob.cpp:474 | knockback strength |
+ 15172→| `Mob::knockback` yd pop | +0.4 (capped at 0.4) | Mob.cpp:481,484 | upward pop |
+ 15173→| `Mob::causeFallDamage` free distance | 3 blocks | Mob.cpp:543 | fall damage threshold |
+ 15174→| `Mob::causeFallDamage` big-sound threshold | dmg > 4 | Mob.cpp:546 | fall sound type |
+ 15175→| `Mob::causeFallDamage` sound vol | 0.75 | Mob.cpp:546 | fall sound |
+ 15176→| `Mob::checkDespawn` hard-despawn distance | 96 blocks | Mob.cpp:1057 | instant despawn |
+ 15177→| `Mob::checkDespawn` soft-despawn distance | 32 blocks | Mob.cpp:1062 | idle despawn |
+ 15178→| `Mob::checkDespawn` soft-despawn idle threshold | 30 sec = 600 ticks | Mob.cpp:1062 | idle time |
+ 15179→| `Mob::checkDespawn` soft-despawn chance | 1/800 per tick | Mob.cpp:1062 | despawn probability |
+ 15180→| `Mob::network` pos threshold | 0.1 (x,z), 0.05 (y), 1° (rot) | Mob.cpp:212 | net sync |
+ 15181→| `Mob::network` motion threshold | diff² > 0.02² | Mob.cpp:226-228 | motion sync |
+ 15182→| `Mob::arrow` removal timer | 60 ticks (20*3) | Mob.cpp:276 | arrow stuck duration |
+ 15183→| `Mob::outOfWorld` dmg | 4 | Mob.cpp:918 | void damage |
+ 15184→| `Mob::getArmorValue` (base) | 0 (armor disabled) | Mob.cpp:1130 | no armor in MCPE 2013 |
+ 15185→| `Mob::getAmbientSoundInterval` (base) | 8 sec = 160 ticks | Mob.cpp:137 | base ambient |
+ 15186→| `PathfinderMob::MAX_TURN` | 30°/tick | PathfinderMob.h:24 | path-follow turn speed |
+ 15187→| `PathfinderMob` path-find range (chase) | 16 blocks | PathfinderMob.cpp:65 | chase distance |
+ 15188→| `PathfinderMob` path-find range (stroll) | 10 blocks | PathfinderMob.cpp:211 | stroll distance |
+ 15189→| `PathfinderMob` PathNavigation range | 16 blocks | PathfinderMob.cpp:20 | nav range |
+ 15190→| `PathfinderMob` stroll sample count | 10 | PathfinderMob.cpp:195 | samples per stroll |
+ 15191→| `PathfinderMob` stroll x/z range | ±6 blocks | PathfinderMob.cpp:196,198 | stroll spread |
+ 15192→| `PathfinderMob` stroll y range | ±3 blocks | PathfinderMob.cpp:197 | stroll vertical spread |
+ 15193→| `PathfinderMob` re-path chance (target, path empty) | 1/20/tick | PathfinderMob.cpp:97 | re-path rate |
+ 15194→| `PathfinderMob` idle stroll chance (path empty) | 1/180/tick | PathfinderMob.cpp:100 | idle wander |
+ 15195→| `PathfinderMob` idle stroll chance (path non-empty) | 1/120/tick | PathfinderMob.cpp:103 | mid-path re-stroll |
+ 15196→| `PathfinderMob` flee stroll chance | 1/8/tick (`fleeTime & 7 == 1`) | PathfinderMob.cpp:104 | flee re-stroll |
+ 15197→| `PathfinderMob` stroll no-action gate | `noActionTime < 100` (5 sec) | PathfinderMob.cpp:108 | require player nearby |
+ 15198→| `PathfinderMob` path node reach | `2 * bbWidth` blocks | PathfinderMob.cpp:126-128 | node advance |
+ 15199→| `PathfinderMob` path-defer chance | 1/100/tick → `Mob::updateAi` | PathfinderMob.cpp:118 | look-around fallback |
+ 15200→| `PathfinderMob` `lookAt(target)` speed | 30°/tick yaw + 30°/tick pitch | PathfinderMob.cpp:178 | combat look |
+ 15201→| `PathfinderMob` give-up chase | target > 32 blocks unseen | PathfinderMob.cpp:222 | target lose |
+ 15202→| `PathfinderMob` wall-hop | `horizontalCollision && !isPathFinding()` | PathfinderMob.cpp:181 | hop when stuck |
+ 15203→| `PathfinderMob` flee speed mod | × 2 (on top of 0.7 base) | PathfinderMob.cpp:238 | flee speed |
+ 15204→| `Animal` flee time on hurt | 3 sec = 60 ticks | Animal.cpp:17 | flee duration |
+ 15205→| `Animal` ambient sound interval | 12 sec = 240 ticks | Animal.cpp:33 | ambient rate |
+ 15206→| `Animal` walk-target grass | +10 | Animal.cpp:38 | grass preference |
+ 15207→| `Animal` walk-target base | `brightness - 0.5` | Animal.cpp:39 | light preference |
+ 15208→| `Animal` spawn floor | `Tile::grass` | Animal.cpp:28 | spawn rule |
+ 15209→| `Animal` spawn brightness | `getRawBrightness > 8` | Animal.cpp:28 | spawn rule |
+ 15210→| `Animal` despawn | **never** (`removeWhenFarAway = false`) | Animal.cpp:87 | persistence |
+ 15211→| `Animal` `findAttackTarget` | NULL (breeding disabled) | Animal.cpp:44 | no breeding AI |
+ 15212→| `AgableMob` initial age | -1 → setAge(0) = adult | AgableMob.cpp:5-8 | default adult |
+ 15213→| `AgableMob` baby grow-up | age < 0 → +1/tick | AgableMob.cpp:42 | baby aging |
+ 15214→| `AgableMob` breed cooldown | age > 0 → -1/tick | AgableMob.cpp:44 | breed cooldown |
+ 15215→| `AgableMob` `DATA_FLAGS_ID` | 14 | AgableMob.h:25 | synched flag |
+ 15216→| `AgableMob` `DATAFLAG_ISBABY` | bit 0 | AgableMob.h:27 | baby flag |
+ 15217→| `Chicken` entity type | `MobTypes::Chicken` = 10 | Chicken.cpp:24 | type ID |
+ 15218→| `Chicken` renderer ID | `ER_CHICKEN_RENDERER` (enum 6) | Chicken.cpp:15 | renderer |
+ 15219→| `Chicken` texture | `"mob/chicken.png"` | Chicken.cpp:17 | texture |
+ 15220→| `Chicken` size (bbW × bbH) | 0.3 × 0.7 | Chicken.cpp:18 | collision box |
+ 15221→| `Chicken` max health | 4 HP (2 hearts) | Chicken.cpp:30 | health |
+ 15222→| `Chicken` `flapping` initial | 1.0 | Chicken.cpp:12 | wing initial |
+ 15223→| `Chicken` `eggTime` initial | `random(6000) + 6000` ticks (5–10 min) | Chicken.cpp:19 | egg timer (unused) |
+ 15224→| `Chicken` wing-flap ground decay | -0.3/tick | Chicken.cpp:40 | wing slow-down |
+ 15225→| `Chicken` wing-flap air ramp | +1.2/tick | Chicken.cpp:40 | wing speed-up |
+ 15226→| `Chicken` wing-flap clamp | [0, 1] | Chicken.cpp:41-42 | clamp |
+ 15227→| `Chicken` flapping decay | × 0.9/tick | Chicken.cpp:45 | wing amplitude |
+ 15228→| `Chicken` flapping reset | = 1 on leaving ground | Chicken.cpp:44 | takeoff flap |
+ 15229→| `Chicken` flap phase advance | `flap += flapping * 2`/tick | Chicken.cpp:51 | wing phase |
+ 15230→| `Chicken` slow-fall factor | `yd *= 0.6` when descending & airborne | Chicken.cpp:47-49 | glide |
+ 15231→| `Chicken` ambient sound | `"mob.chicken"` | Chicken.cpp:79 | ambient |
+ 15232→| `Chicken` hurt sound | `"mob.chickenhurt"` | Chicken.cpp:84 | hurt |
+ 15233→| `Chicken` death sound | `"mob.chickenhurt"` (same as hurt) | Chicken.cpp:89 | death |
+ 15234→| `Chicken` feather drop | `random(3)` → 0..2 | Chicken.cpp:100 | loot |
+ 15235→| `Chicken` raw chicken drop | 1 (always) | Chicken.cpp:107 | loot |
+ 15236→| `Chicken` cooked-on-fire drop | **DISABLED** (commented) | Chicken.cpp:105 | no cooked drop |
+ 15237→| `Chicken` egg-laying | **DISABLED** (commented) | Chicken.cpp:54-60 | no eggs |
+ 15238→| `Chicken` fall damage | **none** (empty causeFallDamage) | Chicken.cpp:73-75 | immune |
+ 15239→| `ChickenRenderer::getBob` | `(sin(flap) + 1) * flapSpeed` | ChickenRenderer.cpp:22 | wing bob |
+ 15240→| `ChickenModel` vertical offset (`yo`) | 16 (vs 24 for cow/pig) | ChickenModel.cpp:23 | model offset |
+ 15241→| `ChickenModel` body tilt | 90° (PI/2) | ChickenModel.cpp:93 | horizontal body |
+ 15242→| `ChickenModel` leg swing | `cos(time * 0.6662) * 1.4 * r` | ChickenModel.cpp:95 | leg stride |
+ 15243→| `ChickenModel` leg swing amplitude | 1.4 radians | ChickenModel.cpp:95 | leg swing |
+ 15244→| `ChickenModel` wing0.zRot | `bob` | ChickenModel.cpp:98 | left wing |
+ 15245→| `ChickenModel` wing1.zRot | `-bob` | ChickenModel.cpp:99 | right wing |
+ 15246→| `ChickenModel` baby scale | 1/2 | ChickenModel.cpp:54 | baby size |
+ 15247→| `ChickenModel` baby head translate | (0, 5*scale, 2*scale) | ChickenModel.cpp:56 | baby head |
+ 15248→| `ChickenModel` baby body translate | (0, 24*scale, 0) | ChickenModel.cpp:63 | baby body |
+ 15249→| `MobRenderer` render scale | 1/16 | MobRenderer.cpp:56 | model scale |
+ 15250→| `MobRenderer` render flip | `glScalef(-1,-1,1)` | MobRenderer.cpp:57 | flip |
+ 15251→| `MobRenderer` render translate | `glTranslatef(0, -24*scale - 0.125/16, 0)` | MobRenderer.cpp:60 | origin |
+ 15252→| `MobRenderer` baby walkAnimPos | `wp *= 3` | MobRenderer.cpp:65 | baby limb speed |
+ 15253→| `MobRenderer` death flip | `fall * 90°` where `fall = sqrt((deathTime + a - 1) / 20 * 1.6)` clamped [0,1] | MobRenderer.cpp:151-154 | death animation |
+ 15254→| `MobRenderer` flip degrees | 90° (base) | MobRenderer.cpp:179 | death flip amount |
+ 15255→| `MobSpawner::MIN_SPAWN_DISTANCE` | **24 blocks** | MobSpawner.h:36 | player & world-spawn buffer |
+ 15256→| `MobCategory::numValues` | 3 | MobCategory.cpp:48 | category count |
+ 15257→| `monster` max per level | 20 | MobCategory.cpp:12 | monster cap |
+ 15258→| `creature` max per level | 15 | MobCategory.cpp:20 | animal cap |
+ 15259→| `waterCreature` max per level | 10 | MobCategory.cpp:28 | water mob cap |
+ 15260→| `monster` spawn material | air | MobCategory.cpp:42 | monster spawn |
+ 15261→| `creature` spawn material | air | MobCategory.cpp:43 | animal spawn |
+ 15262→| `waterCreature` spawn material | water | MobCategory.cpp:44 | water mob spawn |
+ 15263→| Enemy chunk poll radius | 8 chunks (128 blocks) | MobSpawner.cpp:55 | spawn area |
+ 15264→| Friendly chunk poll set | all 256 chunks | MobSpawner.cpp:44-45 | friendly poll area |
+ 15265→| Spawn outer attempts per chunk | 3 | MobSpawner.cpp:93 | spawn attempts |
+ 15266→| Spawn inner attempts per outer | 4 | MobSpawner.cpp:103 | spawn attempts |
+ 15267→| Spawn jitter x, z | ±6 blocks | MobSpawner.cpp:107,109 | position spread |
+ 15268→| Monster per-type cap formula | `(1.5 * weight * 20) / defaultTotalEnemyWeight` | MobSpawner.cpp:140 | type cap |
+ 15269→| Random yRot on spawn | `random * 360` | MobSpawner.cpp:158 | random facing |
+ 15270→| `postProcessSpawnMobs` probability | 0.08 (8%) per iteration | Biome.cpp:228 | gen spawn rate |
+ 15271→| `postProcessSpawnMobs` attempts per mob | 4 | MobSpawner.cpp:195 | gen attempts |
+ 15272→| `postProcessSpawnMobs` jitter | ±5 blocks | MobSpawner.cpp:215-216 | gen spread |
+ 15273→| `postProcessSpawnMobs` categories | creature only | MobSpawner.cpp:179 | no monsters during gen |
+ 15274→| Baby spawn probability | **0.5** (50%) | MobSpawner.cpp:260 | baby chance |
+ 15275→| Baby RNG seed | **`98495119L`** (deterministic!) | MobSpawner.cpp:279 | baby pattern seed |
+ 15276→| Baby age on spawn | -24000 ticks = -20 minutes | MobSpawner.cpp:282 | baby duration |
+ 15277→| Baby grows-up time | 20 minutes (24000 ticks) | AgableMob.cpp:42 | grow-up |
+ 15278→| `Level::DEPTH` | 128 | Level.h:70 | spawn y range |
+ 15279→| `LEVEL_HEIGHT` | 128 | LevelConstants.h:5 | world height |
+ 15280→| `LEVEL_WIDTH` | 256 | LevelConstants.h:9 | world width |
+ 15281→| `LEVEL_DEPTH` | 256 | LevelConstants.h:10 | world depth (chunk cache) |
+ 15282→| Mob type IDs | Chicken=10, Cow=11, Pig=12, Sheep=13; Zombie=32, Creeper=33, Skeleton=34, Spider=35, PigZombie=36 | EntityTypes.h:44-53 | type registry |
+ 15283→| Base type IDs | BaseEnemy=1, BaseCreature=2, BaseWaterCreature=3 | EntityTypes.h:40-42 | base types |
+ 15284→
+ 15285→### C. DISABILITIES / DISABLED FEATURES (commented-out in MCPE 2013 — port should match)
+ 15286→
+ 15287→| Feature | Status | Where |
+ 15288→|---|---|---|
+ 15289→| Egg laying (chicken) | **COMMENTED OUT** — `eggTime` set but never decremented | Chicken.cpp:54-60 |
+ 15290→| Cooked chicken drop (on fire) | **COMMENTED OUT** — only raw chicken drops | Chicken.cpp:105 |
+ 15291→| Breeding AI (Animal) | **COMMENTED OUT** — `findAttackTarget` returns NULL | Animal.cpp:42-83 |
+ 15292→| Animal breeding/love mode | **COMMENTED OUT** — `inLove` always 0 | Animal.cpp:10,19 |
+ 15293→| Mob-effect speedup/slowdown | **COMMENTED OUT** — no potions in MCPE 2013 | Mob.cpp:94-99 |
+ 15294→| Mob armor | **STUBBED** — `getArmorValue` always 0 | Mob.cpp:1129-1142 |
+ 15295→| Spider jockey (skeleton on spider) | **COMMENTED OUT** | MobSpawner.cpp:247-251 |
+ 15296→| Bed-enemy spawn (wake enemies on sleep) | **UNUSED** — list defined but never referenced | MobSpawner.cpp:18-23 |
+ 15297→| `Mob::spawnAnim` (spawn particle burst) | **COMMENTED OUT** — empty body | Mob.cpp:239-251 |
+ 15298→| `MobRenderer::renderName` | **COMMENTED OUT** — empty body | MobRenderer.cpp:189-194 |
+ 15299→| Pathfinder mask bits (CAN_OPEN_DOORS, AVOID_WATER) | **UNUSED** — `pathfinderMask` commented out | PathfinderMob.h:58-60 |
+ 15300→| Animal `DATA_AGE_ID` synched data | **COMMENTED OUT** | Animal.cpp:12 |
+ 15301→
+ 15302→### D. CRITICAL Faithful-port notes
+ 15303→
+ 15304→1. **`getWalkingSpeedModifier` returns 0.7 in MCPE (not 1.0 like Java)** — this is a deliberate MCPE tweak. Faithful port MUST use 0.7 base or all mob movement will be 1.43× too fast.
+ 15305→2. **`jumpFromGround` = 0.42** — same as Java. Jump height ≈ 1.25 blocks.
+ 15306→3. **`Mob::useNewAi` returns false by default** — all MCPE 2013 mobs use the legacy `updateAi` AI (PathfinderMob::updateAi for animals). New-AI components are constructed but never ticked.
+ 15307→4. **`MIN_SPAWN_DISTANCE = 24`** — mobs won't spawn within 24 blocks of any player OR the world spawn point. Faithful port should use 24 (not 32 like some Java versions).
+ 15308→5. **Baby RNG seed = 98495119L** — the baby/adult pattern is deterministic across all worlds. Faithful port MUST use the same seed.
+ 15309→6. **Baby age = -24000 ticks** — 20 minutes to grow up.
+ 15310→7. **Per-level mob caps: monster 20, creature 15, waterCreature 10** — strict caps (mob spawns nothing more if at/above the cap).
+ 15311→8. **Friendly spawn cycle disables enemy spawn in the same tick** — alternating ticks for friendly vs enemy spawns.
+ 15312→9. **Friendly spawn polls all 256 chunks; enemy spawn polls 8-chunk radius around one player per tick** — round-robin through players.
+ 15313→10. **Chicken wing-flap: `flapSpeed` lerps by ±0.3/tick (×4 in air for +1.2), `flapping` decays ×0.9/tick, `flap` advances by `flapping * 2`/tick** — renderer interpolates via `(sin(flap)+1)*flapSpeed`.
+ 15314→11. **Chicken slow-fall: `yd *= 0.6` when descending & airborne** — chickens glide, no fall damage.
+ 15315→12. **`checkDespawn` has an `else noActionTime = 0` branch that resets the idle counter when not despawning** — this is subtle; faithful port should match the exact branch structure.
+ 15316→13. **Animal flee: 3 sec at 2× speed = 6 sec of normal movement in 3 sec** — animals briefly sprint when hit.
+ 15317→14. **Egg-laying is commented out** — `eggTime` is set but never decremented. Faithful port should leave this disabled OR optionally implement it (with the same `random(6000) + 6000` interval and `mob.chickenplop` sound).
+ 15318→15. **Animal ambient sound every 12 sec (240 ticks)** vs base Mob every 8 sec (160 ticks).
+ 15319→16. **PathfinderMob never overrides `aiStep`** — Animal doesn't either. The chain is `Mob::aiStep` → `PathfinderMob::updateAi` (wander) → `Mob::travel` (physics). `AgableMob::aiStep` only adds age progression before calling super. `Chicken::aiStep` adds wing-flap + slow-fall before calling super.
+ 15320→17. **Mob::tick calls super::tick (=Entity::tick=baseTick) which dispatches to Mob::baseTick (virtual)** — the call chain is `Mob::tick → Entity::tick → Mob::baseTick → Entity::baseTick`. This is critical for the port.
+ 15321→18. **Mob death sequence: 20-tick (1 sec) animation, then `beforeRemove + remove` + 20 explosion particles**.
+ 15322→19. **PathfinderMob wall-hop: `if (horizontalCollision && !isPathFinding()) jumping = true`** — animals hop in place when stuck against a wall and not path-finding.
+ 15323→20. **`finalizeMobSettings` makes 50% of animals babies on spawn** — this applies to ALL animals spawned via `MobSpawner::tick` AND `postProcessSpawnMobs`, but NOT to animals spawned by other means (e.g. breeding — which is disabled anyway).
+ 15324→
+ 15325→### E. UNVERIFIED items for future RE passes
+ 15326→
+ 15327→The following items are referenced by the verified code but their implementations are in files outside the scope of this RE-Mob task. They should be RE'd in a future pass:
+ 15328→
+ 15329→1. **`Path` class** (`world/level/pathfinder/Path.h`) — `isEmpty`, `currentPos(Mob*)`, `next`, `isDone`, `destroy`. The path-following algorithm.
+ 15330→2. **`PathNavigation` class** (`ai/PathNavigation.h`) — `tick`, constructor with range parameter. The A* pathfinder.
+ 15331→3. **`level->findPath(Path*, Mob*, Entity*, float, bool, bool)`** — A* path-find to entity (in Level.cpp).
+ 15332→4. **`level->findPath(Path*, Mob*, int, int, int, float, bool, bool)`** — A* path-find to block (in Level.cpp).
+ 15333→5. **`Sensing::tick`** — sensing component (used by new AI only — verified that it's constructed but never ticked for animals).
+ 15334→6. **`Mob::isInWater`/`isInLava`/`isInWall`/`isUnderLiquid`/`isFree`** — Entity.cpp material/collision queries.
+ 15335→7. **`level->getNearestPlayer`/`getEntities`/`clip`/`broadcastEntityEvent`/`getMaterial`/`isSolidBlockingTile`/`containsAnyLiquid`/`isUnobstructed`/`getCubes`/`getRandomMobSpawnAt`/`getTopSolidBlock`/`getSharedSpawnPos`/`countInstanceOfBaseType`/`countInstanceOfType`** — Level.cpp utility methods.
+ 15336→8. **`MobFactory::CreateMob`/`getStaticTestMob`** — EntityFactory.cpp / MobFactory.h.
+ 15337→9. **`Biome::getMobs`/`defaultTotalEnemyWeight`/`defaultTotalFriendlyWeight`/`getCreatureProbability`** — Biome.cpp (verified `getCreatureProbability = 0.08f` at Biome.cpp:228).
+ 15338→10. **`WeighedRandom::getRandomItem`** — util/WeighedRandom.h.
+ 15339→11. **`Item::feather`/`chicken_raw`/`egg`/`chicken_cooked` IDs** — Item registry.
+ 15340→12. **`Tile::grass`/`ladder` IDs and `Tile::tiles[t]->friction`** — Tile registry (friction values per block: ice=0.98, slime=0.8, default=0.6).
+ 15341→13. **`Material::water`/`air`** — Material enum.
+ 15342→14. **`SharedFlagsInformation` constants** — SynchedEntityData flag indices.
+ 15343→15. **`EntityEvent::HURT`/`DEATH`** — EntityEvent.h enum values.
+ 15344→16. **`Mth::PI`/`DEGRAD`/`RADDEG`/`sqrt`/`atan2`/`cos`/`sin`/`invSqrt`/`floor`/`random`** — Mth.h utility.
+ 15345→17. **`Stopwatch`** — perf timer (MobSpawner.cpp:128 — used in spawn, but not gameplay-relevant).
+ 15346→18. **`MobRenderer` shadow size, `EntityRenderDispatcher` registration** — exact shadow values per renderer.
+ 15347→19. **`Mob::getMaxSpawnClusterSize` overrides** — does Zombie/Creeper override? Need to check each monster's .cpp.
+ 15348→20. **`Player::isSleeping`/`isPlayer`** — Player.cpp.
+ 15349→21. **`ItemInstance::getIcon`** — Item rendering.
+ 15350→22. **`Random::nextFloat`/`nextInt`/`nextLong`** — util/Random.h.
+ 15351→23. **`CompoundTag` save/load API** — nbt/CompoundTag.h.
+ 15352→
+ 15353→### F. Stage summary (one paragraph)
+ 15354→
+ 15355→The MCPE 2013 mob system has a clean 5-class hierarchy: `Entity` → `Mob` (base, AI driver + physics + damage + despawn + network sync) → `PathfinderMob` (wander AI + path-following + flee) → `AgableMob` (baby/adult age progression) → `Animal` (grass/brightness spawn rules + 12-sec ambient sounds + 3-sec flee-on-hurt + no despawn + no breeding AI — all breeding/love/food-following code is commented out). Chicken is a leaf class with wing-flap dynamics (flapSpeed lerps ±0.3/tick, flapping decays ×0.9/tick, flap phase advances by flapping*2/tick), slow-fall (yd *= 0.6 when descending), 4 HP, 0.3×0.7 size, drops 0-2 feathers + 1 raw chicken (no cooked-on-fire), no fall damage, no egg laying (commented out), and a 6-bone ChickenModel (head + beak + wattle + body + 2 legs + 2 wings) with horizontal body (90° tilt) and alternating leg-swing (`cos(time*0.6662)*1.4*r`). MobSpawner has 3 categories (monster cap 20, creature cap 15, waterCreature cap 10), MIN_SPAWN_DISTANCE = 24 blocks from any player AND world spawn, 3 outer × 4 inner spawn attempts per chunk per tick, monster per-type cap of `(1.5*weight*20)/defaultTotalEnemyWeight`, and `postProcessSpawnMobs` (world-gen) which spawns 8% of creatures per iteration with 4 attempts per mob and jitter ±5 blocks. Baby chance is 50% per spawn with a deterministic RNG seed of 98495119L, baby age = -24000 ticks (20 minutes to grow up). Faithful port must replicate the 0.7 walking-speed modifier (NOT 1.0 like Java), the 0.42 jump velocity, the 0.08 / 0.80 / 0.50 friction branches in travel(), the exact wing-flap formula, the 24-block MIN_SPAWN_DISTANCE, the 98495119L baby RNG seed, and all the commented-out features (egg-laying, cooked drops, breeding, spider-jockey, bed-enemies, mob armor) should remain disabled to match the 2013 source.
+
+[showing lines 15000-15355 of 15357; use offset=15356 with limit to continue reading]
