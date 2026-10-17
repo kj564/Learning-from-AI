@@ -3303,11 +3303,16 @@ class Gui extends GuiComponent {
   _paintSlot(canvas) {
     const name = canvas.dataset.tex;
     if (!name) return;
-    const tex = this.minecraft.textures.get(name);
-    if (!tex) return;
+    const entry = this.minecraft.textures.get(name);
+    // textures.get returns {img, tex, ready}; drawImage needs an Image/Canvas.
+    // Use entry.img (the loaded Image element) — only if it has actually
+    // decoded (naturalWidth > 0). Otherwise leave the slot blank rather than
+    // throw "The provided value is not of type ..." inside drawImage.
+    if (!entry || !entry.img) return;
+    if (!entry.ready && !(entry.img.complete && entry.img.naturalWidth > 0)) return;
     const ctx = canvas.getContext('2d');
     ctx.imageSmoothingEnabled = false;
-    ctx.drawImage(tex, 0, 0, 16, 16, 0, 0, 18, 18);
+    ctx.drawImage(entry.img, 0, 0, 16, 16, 0, 0, 18, 18);
   }
   handleClick(button, x, y) {
     // Click on hotbar — handled via DOM .hslot click listeners
