@@ -1,0 +1,812 @@
+  1620→
+  1621→    KeyboardInput(Options* options);
+  1622→    void tick(Player* player);
+  1623→    void setKey(int key, bool state);
+  1624→    void releaseAllKeys();
+  1625→
+  1626→protected:
+  1627→    bool keys[NumKeys];
+  1628→    Options* options;
+  1629→};
+  1630→```
+  1631→
+  1632→### KeyboardInput::KeyboardInput(Options*) — VERIFIED (lines 5–10)
+  1633→```cpp
+  1634→KeyboardInput::KeyboardInput(Options* options) {
+  1635→    for (int i = 0; i < NumKeys; ++i) keys[i] = false;
+  1636→    this->options = options;
+  1637→}
+  1638→```
+  1639→
+  1640→### KeyboardInput::setKey(int key, bool state) — VERIFIED (lines 12–26)
+  1641→```cpp
+  1642→void KeyboardInput::setKey(int key, bool state) {
+  1643→    int id = -1;
+  1644→    if (key == options->keyUp.key)    id = KEY_UP;
+  1645→    if (key == options->keyDown.key)  id = KEY_DOWN;
+  1646→    if (key == options->keyLeft.key)  id = KEY_LEFT;
+  1647→    if (key == options->keyRight.key) id = KEY_RIGHT;
+  1648→    if (key == options->keyJump.key)  id = KEY_JUMP;
+  1649→    if (key == options->keySneak.key) id = KEY_SNEAK;
+  1650→    if (key == options->keyCraft.key) id = KEY_CRAFT;
+  1651→    if (id >= 0) {
+  1652→        keys[id] = state;
+  1653→    }
+  1654→}
+  1655→```
+  1656→**Note**: chain of `if`s (not `else if`) — if two KeyMappings map to the same scancode, both fire. In practice each option key is distinct.
+  1657→
+  1658→### KeyboardInput::releaseAllKeys() — VERIFIED (lines 28–37)
+  1659→```cpp
+  1660→void KeyboardInput::releaseAllKeys() {
+  1661→    xa = 0;
+  1662→    ya = 0;
+  1663→    for (int i = 0; i < NumKeys; i++) {
+  1664→        keys[i] = false;
+  1665→    }
+  1666→    wantUp = wantDown = false;
+  1667→}
+  1668→```
+  1669→
+  1670→### KeyboardInput::tick(Player* player) — VERIFIED (lines 39–64)
+  1671→```cpp
+  1672→void KeyboardInput::tick(Player* player) {
+  1673→    xa = 0;
+  1674→    ya = 0;
+  1675→
+  1676→    if (keys[KEY_UP])    ya++;         // forward = +1
+  1677→    if (keys[KEY_DOWN])  ya--;         // back    = -1
+  1678→    if (keys[KEY_LEFT])  xa++;         // left    = +1
+  1679→    if (keys[KEY_RIGHT]) xa--;         // right   = -1
+  1680→    jumping  = keys[KEY_JUMP];
+  1681→    sneaking = keys[KEY_SNEAK];
+  1682→    if (sneaking) {
+  1683→        xa *= 0.3f;                    // sneak speed multiplier 0.3 (applied at input layer,
+  1684→        ya *= 0.3f;                    //  BEFORE the friction2 in Mob::travel)
+  1685→    }
+  1686→
+  1687→#ifdef RPI
+  1688→    wantUp   = jumping;
+  1689→    wantDown = sneaking;
+  1690→#endif
+  1691→
+  1692→    if (keys[KEY_CRAFT])
+  1693→        player->startCrafting((int)player->x, (int)player->y, (int)player->z, Recipe::SIZE_2X2);
+  1694→}
+  1695→```
+  1696→**Key behaviors — EXACT:**
+  1697→- Forward (`KEY_UP`) → `ya += 1`, Back (`KEY_DOWN`) → `ya -= 1`
+  1698→- Left (`KEY_LEFT`) → `xa += 1`, Right (`KEY_RIGHT`) → `xa -= 1`  *(note: NOT normalized — diagonal is `√2` magnitude)*
+  1699→- Jump = `keys[KEY_JUMP]`; Sneak = `keys[KEY_SNEAK]`
+  1700→- **Sneak multiplier: `0.3f`** applied directly to xa/ya (NOT 0.3 in `Mob::travel` as Entry 2/3 guessed)
+  1701→- `wantUp`/`wantDown` only set on RPI builds — on PC they stay false (the LocalPlayer::calculateFlight reads `KEY_E`/`KEY_Q` directly via `Keyboard::isKeyDown`).
+  1702→- `KEY_CRAFT` opens the 2×2 inventory crafting screen at the player's position.
+  1703→
+  1704→### MouseBuildInput.h — VERIFIED (inline class, lines 1–37)
+  1705→```cpp
+  1706→class MouseBuildInput : public IBuildInput {
+  1707→public:
+  1708→    MouseBuildInput()
+  1709→    :   buildDelayTicks(10),
+  1710→        buildHoldTicks(0)
+  1711→    {}
+  1712→
+  1713→    virtual bool tickBuild(Player* p, BuildActionIntention* bai) {
+  1714→        // LEFT mouse button held: REMOVE (break block) + ATTACK (hit entity)
+  1715→        if (Mouse::getButtonState(MouseAction::ACTION_LEFT) != 0) {
+  1716→            *bai = BuildActionIntention(BuildActionIntention::BAI_REMOVE
+  1717→                                     | BuildActionIntention::BAI_ATTACK);
+  1718→            return true;
+  1719→        }
+  1720→        // RIGHT mouse button held: BUILD + INTERACT, but rate-limited
+  1721→        if (Mouse::getButtonState(MouseAction::ACTION_RIGHT) != 0) {
+  1722→            if (buildHoldTicks >= buildDelayTicks) buildHoldTicks = 0;   // reset after threshold
+  1723→            if (++buildHoldTicks == 1) {                                  // only fire on first tick of hold
+  1724→                *bai = BuildActionIntention(BuildActionIntention::BAI_BUILD
+  1725→                                          | BuildActionIntention::BAI_INTERACT);
+  1726→                return true;
+  1727→            }
+  1728→        } else {
+  1729→            buildHoldTicks = 0;       // reset on release
+  1730→        }
+  1731→        return false;
+  1732→    }
+  1733→private:
+  1734→    int buildHoldTicks;
+  1735→    int buildDelayTicks;     // = 10 (rate-limit; not actually enforced as a cooldown in this code)
+  1736→};
+  1737→```
+  1738→**Key behaviors — EXACT:**
+  1739→- `MouseAction::ACTION_LEFT = 1`, `ACTION_RIGHT = 2`.
+  1740→- Left button (held): returns `BAI_REMOVE | BAI_ATTACK` every tick it's held.
+  1741→- Right button (held): only fires `BAI_BUILD | BAI_INTERACT` on the FIRST tick of hold (when `++buildHoldTicks == 1`); subsequent ticks return false. After release, `buildHoldTicks` resets to 0, so the next press can fire again.
+  1742→- `buildDelayTicks = 10` is set but the `if (buildHoldTicks >= buildDelayTicks) buildHoldTicks = 0` line has no real effect in this code path since the early return on `== 1` prevents reaching it within 10 ticks.
+  1743→
+  1744→### BuildActionIntention bit-flags (IBuildInput.h:7–33) — VERIFIED
+  1745→```cpp
+  1746→class BuildActionIntention {
+  1747→public:
+  1748→    BuildActionIntention() : action(0) {}
+  1749→    BuildActionIntention(int action) : action(action) {}
+  1750→
+  1751→    bool isFirstRemove()     { return (action & BAI_FIRSTREMOVE) != 0; }
+  1752→    bool isRemoveContinue()  { return (action & BAI_REMOVE)     != 0; }
+  1753→    bool isBuild()           { return (action & BAI_BUILD)      != 0; }
+  1754→    bool isRemove()          { return isFirstRemove() || isRemoveContinue(); }
+  1755→    bool isAttack()          { return (action & BAI_ATTACK)     != 0; }
+  1756→    bool isInteract()        { return (action & BAI_INTERACT)    != 0; }
+  1757→
+  1758→    int action;
+  1759→
+  1760→    static const int BAI_BUILD      = 1;
+  1761→    static const int BAI_REMOVE     = 2;
+  1762→    static const int BAI_FIRSTREMOVE = 4;
+  1763→    static const int BAI_ATTACK     = 8;
+  1764→    static const int BAI_INTERACT   = 16;
+  1765→};
+  1766→```
+  1767→
+  1768→### MouseTurnInput.h — VERIFIED (inline class, lines 1–44)
+  1769→```cpp
+  1770→class MouseTurnInput : public ITurnInput {
+  1771→public:
+  1772→    static const int MODE_OFFSET = 1;     // pointer-position mode (centered deadzone)
+  1773→    static const int MODE_DELTA  = 2;     // raw delta mode (grabbed cursor)
+  1774→
+  1775→    MouseTurnInput(int mode_, int centerX, int centerY)
+  1776→    :   mode(mode_),
+  1777→        _centerX((float)centerX),
+  1778→        _centerY((float)centerY)
+  1779→    {}
+  1780→
+  1781→    void onConfigChanged(const Config& config) {
+  1782→        _centerX = ((float) config.width ) * 0.5f;
+  1783→        _centerY = ((float) config.height) * 0.5f;
+  1784→    }
+  1785→
+  1786→    TurnDelta getTurnDelta() {
+  1787→        float dx = 0, dy = 0;
+  1788→        if (MODE_DELTA == mode) {
+  1789→            dx = (float)Mouse::getDX();              // raw per-frame mouse delta
+  1790→            dy = (float)Mouse::getDY();
+  1791→        } else if (MODE_OFFSET == mode) {
+  1792→            float dt = getDeltaTime();
+  1793→            dx = linearTransform((float)Mouse::getX() - _centerX, 40, 0.4f) * dt;
+  1794→            dy = linearTransform((float)Mouse::getY() - _centerY, 30, 0.6f) * dt;
+  1795→        }
+  1796→        return TurnDelta(dx, dy);
+  1797→    }
+  1798→
+  1799→    int mode;
+  1800→private:
+  1801→    float _centerX;
+  1802→    float _centerY;
+  1803→};
+  1804→```
+  1805→**Key constants — EXACT:**
+  1806→- `MODE_OFFSET` (cursor-position mode) uses `linearTransform(offsetFromCenter, deadZone, scale)`:
+  1807→  - X deadzone: **40** pixels, scale **0.4** — multiplied by `dt` (seconds)
+  1808→  - Y deadzone: **30** pixels, scale **0.6** — multiplied by `dt` (seconds)
+  1809→- `MODE_DELTA` (raw delta mode) returns `(Mouse::getDX(), Mouse::getDY())` directly.
+  1810→
+  1811→### ITurnInput::linearTransform (ITurnInput.h:41–47) — VERIFIED
+  1812→```cpp
+  1813→static float linearTransform(float value, float deadZone, float scale = 1.0f, bool limit1 = false) {
+  1814→    float deadSigned = value >= 0 ? deadZone : -deadZone;
+  1815→    if (std::abs(deadSigned) >= std::abs(value)) return 0;     // inside deadzone
+  1816→    float ret = (value - deadSigned) * scale;
+  1817→    if (limit1 && std::abs(ret) > 1) ret /= std::abs(ret);     // optional clamp to ±1
+  1818→    return ret;
+  1819→}
+  1820→```
+  1821→
+  1822→### ITurnInput::getDeltaTime (ITurnInput.h:31–39) — VERIFIED
+  1823→```cpp
+  1824→float getDeltaTime() {
+  1825→    if (_lastTime == -1.0f) {
+  1826→        _lastTime = getTimeS();
+  1827→    }
+  1828→    float now = getTimeS();
+  1829→    float dt = now - _lastTime;
+  1830→    _lastTime = now;
+  1831→    return dt;
+  1832→}
+  1833→```
+  1834→
+  1835→**NOTE on mouse-→ yaw/pitch mapping:** The actual yaw/pitch update happens in the Minecraft main loop / GameRenderer, not in MouseTurnInput — `getTurnDelta()` only returns `(dx, dy)`; the caller (Minecraft::tick or similar) does `yRot += dx * sensitivity` and `xRot += dy * sensitivity` (with invertYMouse logic). UNVERIFIED — need to read Minecraft.cpp/GameRenderer.cpp for exact turn application. The 0.4 / 0.6 scale factors above are only used in OFFSET mode (touch/legacy).
+  1836→
+  1837→---
+  1838→
+  1839→## Entry 8: RE-Player Stage Summary
+  1840→
+  1841→**Task ID:** RE-Player
+  1842→**Scope:** Player + LocalPlayer + KeyboardInput + MouseBuildInput + MouseTurnInput — exact line-by-line read
+  1843→**Source root:** `rujukan/pocket-edition-2013/mcpe-source/handheld/src/`
+  1844→
+  1845→### Verified method bodies (full code copied into Entries 5–7)
+  1846→1. `Player::Player(Level*, bool isCreative)` — constructor (Player.cpp:27–67)
+  1847→2. `Player::_init()` (Player.cpp:483–488)
+  1848→3. `Player::setDefaultHeadHeight()` (Player.cpp:656–659)
+  1849→4. `Player::getHeadHeight()` (Player.cpp:652–654) — returns hardcoded 0.12f
+  1850→5. `Player::resetPos(bool)` (Player.cpp:388–401)
+  1851→6. `Player::getWalkingSpeedModifier()` (Player.cpp:490–492) — returns 1.0f
+  1852→7. `Player::travel(float, float)` (Player.cpp:364–375) — flying override
+  1853→8. `Player::tick()` (Player.cpp:219–255)
+  1854→9. `Player::aiStep()` (Player.cpp:425–450)
+  1855→10. `Player::updateAi()` (Player.cpp:403–406)
+  1856→11. `Player::isImmobile()` (Player.cpp:377–380)
+  1857→12. `Player::die(Entity*)` (Player.cpp:461–476)
+  1858→13. `LocalPlayer::LocalPlayer(...)` (LocalPlayer.cpp:46–63)
+  1859→14. `LocalPlayer::_init()` (LocalPlayer.cpp:404–415)
+  1860→15. `LocalPlayer::calculateFlight(...)` (LocalPlayer.cpp:71–88)
+  1861→16. `LocalPlayer::isSolidTile(...)` (LocalPlayer.cpp:90–93)
+  1862→17. `LocalPlayer::tick()` (LocalPlayer.cpp:95–165)
+  1863→18. `LocalPlayer::aiStep()` (LocalPlayer.cpp:168–217) — CRITICAL
+  1864→19. `LocalPlayer::move(float, float, float)` (LocalPlayer.cpp:230–272)
+  1865→20. `LocalPlayer::updateAi()` (LocalPlayer.cpp:274–279)
+  1866→21. `LocalPlayer::isSneaking()` (LocalPlayer.cpp:329–332)
+  1867→22. `LocalPlayer::getFieldOfViewModifier()` (LocalPlayer.cpp:299–316)
+  1868→23. `LocalPlayer::causeFallDamage(float)` (LocalPlayer.cpp:460–471)
+  1869→24. `LocalPlayer::hurtTo(int)` (LocalPlayer.cpp:334–350)
+  1870→25. File-scope `isJumpable(int)` static helper (LocalPlayer.cpp:36–44)
+  1871→26. `KeyboardInput::KeyboardInput(Options*)` (KeyboardInput.cpp:5–10)
+  1872→27. `KeyboardInput::setKey(int, bool)` (KeyboardInput.cpp:12–26)
+  1873→28. `KeyboardInput::releaseAllKeys()` (KeyboardInput.cpp:28–37)
+  1874→29. `KeyboardInput::tick(Player*)` (KeyboardInput.cpp:39–64)
+  1875→30. `MouseBuildInput::tickBuild(Player*, BuildActionIntention*)` (MouseBuildInput.h:15–30)
+  1876→31. `MouseTurnInput::getTurnDelta()` (MouseTurnInput.h:24–35)
+  1877→32. `ITurnInput::linearTransform(...)` (ITurnInput.h:41–47)
+  1878→33. `SmoothFloat::getNewDeltaValue(...)` (SmoothFloat.h:19–30)
+  1879→34. `Mob::aiStep()` (Mob.cpp:688–757) — referenced (LocalPlayer::aiStep calls it)
+  1880→35. `Mob::travel(float, float)` (Mob.cpp:558–626) — referenced (Player::travel calls it)
+  1881→36. `Mob::jumpFromGround()` (Mob.cpp:844–847) — sets yd = 0.42f only
+  1882→37. `Mob::interpolateOnly()` (Mob.cpp:979–982) — returns level->isClientSide
+  1883→38. `Entity::moveRelative(float, float, float)` (Entity.cpp:575–590)
+  1884→
+  1885→### Corrected values vs. earlier MODLOG entries
+  1886→- **Entry 2 ERRATA — `Mob::jumpFromGround()`:** in this source it's just `yd = 0.42f;` (Mob.cpp:846). There is **NO** `if (isInWater()) yd = 0.2f; else if (isInLava()) yd = 0.4f;` branch — that was Java PC version. In MCPE 2013, the water/lava swim-up is handled in `Mob::aiStep()` via `if (inWater) yd += 0.04f;` (small per-tick buoyancy impulse, not a velocity set).
+  1887→- **Entry 2 ERRATA — `Mob::travel()`:** the actual implementation has a much richer 3-way water/lava/land split with `friction2` formula `(0.6*0.6*0.91*0.91*0.6*0.91)/(friction³)` and ladder logic (`onLadder()` clamps fall to -0.15, sneaking on ladder zeroes downward yd, wall-hit sets yd = 0.2). Entry 2's simplified pseudocode missed this.
+  1888→- **Entry 3 ERRATA — `LocalPlayer::aiStep()` using-item damping:** the actual multiplier is **0.35f** (LocalPlayer.cpp:204 `const float k = 0.35f;`), NOT 0.2 as Entry 3 estimated.
+  1889→- **Entry 3 ERRATA — double-jump fly toggle:** the actual window is **7 ticks** (`jumpTriggerTime = 7`, LocalPlayer.cpp:186), and toggling happens on the SECOND jump keypress while the first one is still within the window. Entry 3's "~7 ticks" was approximately right but didn't capture the exact `wasJumping != input->jumping` rising-edge logic and the `jumpTriggerTime = 0` reset on toggle.
+  1890→- **Entry 3 ERRATA — sneak damping:** sneak is applied at the **input layer** (`KeyboardInput::tick` line 51-53: `xa *= 0.3f; ya *= 0.3f;`), NOT in `Mob::travel`. There's no separate "clamp magnitude to 0.3" in Mob::travel.
+  1891→- **Entry 3 ERRATA — `LocalPlayer::move()` autoJump heuristic:** Entry 3 guessed the autojump was "1 tile ahead, 2 tiles headroom, isJumpable excludes fences/slabs/stairs". The exact rule is: cross-half-tile trigger (`floor(prev*2) != floor(new*2)`), look ahead by `xa/dist` & `za/dist`, block at `y-1` must be solid, blocks at `y` and `y+1` must be NON-solid, AND the tile at `(y-1)` must pass `isJumpable` (excludes fence, fenceGate, stoneSlabHalf, trapdoor, sign, wallSign, stairs).
+  1892→- **Entry 3 ERRATA — `LocalPlayer::updateAi()` interpolation gate:** Entry 3 wrote `if (this->interpolateOnly() == false) { this->updateAi(); }`. The actual code is `if (interpolateOnly()) updateAi();` (LocalPlayer.cpp:215-216) — the OPPOSITE. But it doesn't break behavior because `Mob::aiStep()` already calls `updateAi()` when `!interpolateOnly()` (single-player path), and the LocalPlayer-level call only handles the multiplayer client-side path. So in BOTH cases `LocalPlayer::updateAi()` runs once per tick — just from different call sites.
+  1893→
+  1894→### Confirmed constants for faithful port (PLAYER)
+  1895→| Constant | Value | Source |
+  1896→|---|---|---|
+  1897→| `MAX_HEALTH` | 20 | Player.h:43 |
+  1898→| `DEFAULT_WALK_SPEED` | 0.1f | Player.cpp:20 |
+  1899→| `DEFAULT_FLY_SPEED` | 0.02f | Player.cpp:21 |
+  1900→| `SLEEP_DURATION` | 100 ticks | Player.h:46 |
+  1901→| `WAKE_UP_DURATION` | 10 ticks | Player.h:47 |
+  1902→| `heightOffset` (eye) | 1.62f | Player.cpp:53, 390, 658 |
+  1903→| `getHeadHeight()` | 0.12f | Player.cpp:653 |
+  1904→| `bbWidth` (player) | 0.6f | Player.cpp:391 |
+  1905→| `bbHeight` (player) | 1.8f | Player.cpp:391 |
+  1906→| Peaceful regen period | 12 sec = 240 ticks | Player.cpp:427 |
+  1907→| Bob lerp factor | 0.4 | Player.cpp:438 |
+  1908→| Tilt lerp factor | 0.8 | Player.cpp:439 |
+  1909→| Tilt formula | `atan(-yd * 0.2) * 15°` | Player.cpp:434 |
+  1910→| Bob clamp | 0.1 | Player.cpp:435 |
+  1911→| `TicksPerSecond` | 20 | SharedConstants.h:28 |
+  1912→
+  1913→### Confirmed constants for faithful port (LOCALPLAYER / FLY)
+  1914→| Constant | Value | Source |
+  1915→|---|---|---|
+  1916→| Double-jump fly toggle window | 7 ticks | LocalPlayer.cpp:186 |
+  1917→| Fly vertical impulse (wantUp/wantDown) | ±0.15 per tick | LocalPlayer.cpp:194, 198 |
+  1918→| Fly vertical damping (in Player::travel) | yd *= 0.6 (pre-travel) | Player.cpp:370 |
+  1919→| Flying speed override | flyingSpeed = 0.05 (was 0.02) | Player.cpp:368 |
+  1920→| Using-item input damping | 0.35f | LocalPlayer.cpp:204 |
+  1921→| Sneak input damping | 0.3f (at input layer) | KeyboardInput.cpp:51-53 |
+  1922→| AutoJump trigger | crossing half-tile boundary | LocalPlayer.cpp:256 |
+  1923→| AutoJump look-ahead | `x + xa/dist`, `z + za/dist` | LocalPlayer.cpp:259-260 |
+  1924→| AutoJump headroom check | solid at y-1, air at y and y+1 | LocalPlayer.cpp:262-263 |
+  1925→| `autoJumpTime` after trigger | 1 tick | LocalPlayer.cpp:268 |
+  1926→| Fly FOV multiplier | 1.1 | LocalPlayer.cpp:301 |
+  1927→| Bow draw FOV penalty | up to -15% (squared easing) | LocalPlayer.cpp:313 |
+  1928→| Fall damage threshold | distance - 3 (no damage ≤3) | LocalPlayer.cpp:462, Mob.cpp:543 |
+  1929→| Hurt animation duration | 10 ticks | LocalPlayer.cpp:348 |
+  1930→| Fly smoothing acceleration | `0.35f * sensitivity` | LocalPlayer.cpp:85-87 |
+  1931→| Fly velocity scale | ×10 after smoothing | LocalPlayer.cpp:85-87 |
+  1932→| Vertical fly keys (PC) | `KEY_E` (+), `KEY_Q` (−), scale ×0.2 ×flySpeed | LocalPlayer.cpp:81-82 |
+  1933→
+  1934→### Confirmed constants for faithful port (MOB physics, for completeness)
+  1935→| Constant | Value | Source |
+  1936→|---|---|---|
+  1937→| Land gravity (per tick) | 0.08f | Mob.cpp:620 |
+  1938→| Air vertical drag | 0.98f | Mob.cpp:621 |
+  1939→| Ground horizontal friction base | 0.91f (×0.6 on ground ×Tile::friction) | Mob.cpp:586-592 |
+  1940→| Water acceleration | 0.02f | Mob.cpp:562 |
+  1941→| Water drag (per axis) | 0.80f | Mob.cpp:565-567 |
+  1942→| Water "gravity" | 0.02f | Mob.cpp:568 |
+  1943→| Lava acceleration | 0.02f | Mob.cpp:575 |
+  1944→| Lava drag (per axis) | 0.50f | Mob.cpp:577-579 |
+  1945→| Water/lava wall-climb impulse | 0.3f | Mob.cpp:571, 583 |
+  1946→| Ladder fall cap | -0.15f | Mob.cpp:609 |
+  1947→| Ladder climb impulse (wall-hit) | 0.2f | Mob.cpp:617 |
+  1948→| Mob::jumpFromGround() | yd = 0.42f (no water/lava branch) | Mob.cpp:846 |
+  1949→| Water/lava swim impulse (when jump pressed) | yd += 0.04f per tick | Mob.cpp:719, 721 |
+  1950→| Input damping (xxa, yya) | 0.98f per tick | Mob.cpp:727-728 |
+  1951→| `yRotA` damping | 0.9f per tick | Mob.cpp:729 |
+  1952→| Push hitbox expansion | `bb.grow(0.2, 0, 0.2)` | Mob.cpp:745 |
+  1953→| `walkingSpeed` (Mob default) | 0.1f | Mob.cpp:42 |
+  1954→| `flyingSpeed` (Mob default) | 0.02f | Mob.cpp:43 |
+  1955→
+  1956→### Verified input-layer key → action mapping (KEYBOARD)
+  1957→| Action | Key option | Effect |
+  1958→|---|---|---|
+  1959→| Forward | `options->keyUp` | `ya += 1` |
+  1960→| Back | `options->keyDown` | `ya -= 1` |
+  1961→| Strafe left | `options->keyLeft` | `xa += 1` |
+  1962→| Strafe right | `options->keyRight` | `xa -= 1` |
+  1963→| Jump | `options->keyJump` | `jumping = true`; fly-toggle when double-tapped within 7 ticks (if `mayfly`) |
+  1964→| Sneak | `options->keySneak` | `sneaking = true`; xa/ya ×=0.3; ySlideOffset = max(ySlideOffset, 0.2) |
+  1965→| Craft (open 2×2 inv crafting) | `options->keyCraft` | calls `player->startCrafting(...Recipe::SIZE_2X2)` |
+  1966→
+  1967→### Verified input-layer mouse → action mapping (MOUSE)
+  1968→| Button | Mode | Action |
+  1969→|---|---|---|
+  1970→| Left (held) | any | `BAI_REMOVE \| BAI_ATTACK` (break block / hit entity) every tick |
+  1971→| Right (held, 1st tick) | any | `BAI_BUILD \| BAI_INTERACT` once per press |
+  1972→| Right (held, >1st tick) | any | no action (rate-limited by `buildHoldTicks` counter) |
+  1973→| Mouse delta | `MODE_DELTA` | raw `(Mouse::getDX(), Mouse::getDY())` → caller applies to yRot/xRot |
+  1974→| Mouse offset | `MODE_OFFSET` | `linearTransform(offset, deadZone=40/30, scale=0.4/0.6) * dt` for x/y |
+  1975→
+  1976→### UNVERIFIED items (flagged for follow-up)
+  1977→1. **Exact turn-application** (yaw/pitch update from `TurnDelta`): the actual `yRot += dx * sensitivity; xRot += dy * sensitivity` (and invertYMouse handling) is in the Minecraft main loop or GameRenderer — NOT in MouseTurnInput. Need to read `Minecraft.cpp` / `GameRenderer.cpp` to verify exact formula and sensitivity multiplier.
+  1978→2. **`Player::touch(Entity*)`**: calls `e->playerTouch(this)` — ItemEntity pickup, etc. Need to read ItemEntity::playerTouch for pickup distance/range and stack merge rules.
+  1979→3. **`Mob::updateWalkAnim()`**: animation-only, but exactly determines walkAnimSpeed/walkAnimPos (used for limb swing). Copied into Entry 2 but re-verify if needed for camera bob.
+  1980→4. **`Player::getDestroySpeed`/`canDestroy`**: delegated to `Inventory` — relevant for break-time formula. Need to read Inventory.cpp + Tile::friction/getDestroySpeed for block break timing.
+  1981→5. **`SimpleFoodData::tick(Player*)`**: server-side food exhaustion/heal — read `world/food/SimpleFoodData.cpp` if survival-mode food tick is in scope.
+  1982→6. **`Mob::isInWater()` / `isInLava()` / `isFree()` / `onLadder()`**: geometry checks used by travel — verify exact AABB-vs-block test rules.
+  1983→7. **`AutoJump` `isJumpable` stairs check**: source comment notes "doesn't work completely, since it doesn't care about stairs rotation" — may need corner-case handling in the port for corner stairs.
+  1984→8. **`LocalPlayer::calculateFlight` flySpeed option default**: the value of `minecraft->options.flySpeed` is set by user/Options — need to read `Options::initDefaultValues()` for the default.
+  1985→
+  1986→### Next actions for the port
+  1987→1. Implement `Player::travel()` exactly as in Entry 5 (with `flyingSpeed = 0.05` override + `yd *= 0.6` damping on flying).
+  1988→2. Implement `LocalPlayer::aiStep()` exactly as in Entry 6, including:
+  1989→   - `jumpTriggerTime = 7` window for double-jump fly toggle (rising-edge `!wasJumping && input->jumping`)
+  1990→   - `±0.15f` fly vertical impulse
+  1991→   - `0.35f` using-item damping applied to `input->xa/ya`
+  1992→   - Order: `Mob::aiStep()` first, then `Player::aiStep()`
+  1993→3. Implement `LocalPlayer::move()` with the EXACT autoJump heuristic (half-tile crossing, look-ahead projection, solid/non-solid checks, `isJumpable` blacklist).
+  1994→4. Implement `KeyboardInput::tick()` with the EXACT xa/ya sign convention and `0.3f` sneak multiplier at input layer.
+  1995→5. Implement `MouseBuildInput::tickBuild()` with the EXACT left-hold / right-once behavior.
+  1996→6. Implement `Mob::travel()` 3-way water/lava/land split with the friction2 formula and ladder logic.
+  1997→7. Implement `Entity::moveRelative()` with the deadzone and yRot rotation formula exactly.
+  1998→
+  1999→**RE-Player stage COMPLETE.** All entries 5–8 written with exact code, exact constants, and errata flagged for earlier-Entry corrections.
+  2000→
+  2001→---
+  2002→
+  2003→## Entry 9: Level — world tick (line-by-line read)
+  2004→
+  2005→**Task ID:** RE-Level-Tile
+  2006→**File:** `world/level/Level.cpp`, `world/level/Level.h`, `world/level/LevelConstants.h`, `world/level/dimension/Dimension.cpp`, `world/level/dimension/NormalDayCycleDimension.h`, `world/level/LightLayer.{h,cpp}`, `SharedConstants.h`
+  2007→
+  2008→### LevelConstants.h — VERIFIED (entire file, lines 1–14)
+  2009→```cpp
+  2010→const int LEVEL_HEIGHT = 128;
+  2011→const int CHUNK_CACHE_WIDTH = 16; // in chunks
+  2012→const int CHUNK_WIDTH = 16; // in blocks
+  2013→const int CHUNK_DEPTH = 16;
+  2014→const int LEVEL_WIDTH = CHUNK_CACHE_WIDTH * CHUNK_WIDTH;     // 256
+  2015→const int LEVEL_DEPTH = CHUNK_CACHE_WIDTH * CHUNK_DEPTH;     // 256
+  2016→const int CHUNK_COLUMNS = CHUNK_WIDTH * CHUNK_DEPTH;         // 256
+  2017→const int CHUNK_BLOCK_COUNT = CHUNK_COLUMNS * LEVEL_HEIGHT;  // 32768
+  2018→```
+  2019→
+  2020→### Level.h — key static constants — VERIFIED (Level.h:66–79)
+  2021→```cpp
+  2022→static const int MAX_TICK_TILES_PER_TICK = 100; // was 1000
+  2023→public:
+  2024→    static const int MAX_LEVEL_SIZE = 32000000;
+  2025→    static const short DEPTH = LEVEL_HEIGHT;                       // 128
+  2026→    static const short SEA_LEVEL = DEPTH / 2 - 1;                  // 63
+  2027→    static const int MAX_BRIGHTNESS = 15;
+  2028→    static const int TICKS_PER_DAY = SharedConstants::TicksPerSecond * 60 * 16;
+  2029→                  // = 20 * 60 * 16 = 19200 ticks (16-min in-game day)
+  2030→    static const int MIDDLE_OF_NIGHT_TIME = 12000;
+  2031→    static const int genDepthBits = 7;
+  2032→    static const int genDepthBitsPlusFour = genDepthBits + 4;       // 11
+  2033→    static const int genDepth = 1 << genDepthBits;                 // 128
+  2034→    static const int genDepthMinusOne = genDepth - 1;              // 127
+  2035→```
+  2036→
+  2037→Note: the inline comment on `TICKS_PER_DAY` says `// SharedConstants::TicksPerSecond * 60 * 12; // ORG:20*60*20` — confirming PC is 24000 (20 min), MCPE 2013 shortened it to 19200 (16 min).
+  2038→
+  2039→### Level constructor — VERIFIED (Level.cpp:32–56)
+  2040→```cpp
+  2041→Level::Level(LevelStorage* levelStorage, const std::string& levelName, const LevelSettings& settings, int generatorVersion, Dimension* fixedDimension /* = NULL */)
+  2042→:       levelStorage(levelStorage),
+  2043→        isClientSide(false),
+  2044→        isFindingSpawn(false),
+  2045→        noNeighborUpdate(false),
+  2046→        skyDarken(0),
+  2047→        instaTick(false),
+  2048→        random(1),
+  2049→        _isNew(false),
+  2050→        _chunkSource(NULL),
+  2051→        _randValue(42184323),
+  2052→        _addend(1013904223),
+  2053→        _maxRecurse(0),
+  2054→        _updateLights(true),
+  2055→        _pathFinder(NULL),
+  2056→        _spawnFriendlies(true),
+  2057→        _spawnEnemies(true),
+  2058→        _lastSavedPlayerTime(0),
+  2059→        raknetInstance(0),
+  2060→        updatingTileEntities(false),
+  2061→        allPlayersAreSleeping(false),
+  2062→        _nightMode(false)
+  2063→{
+  2064→    _init(levelName, settings, generatorVersion, fixedDimension);
+  2065→}
+  2066→```
+  2067→
+  2068→Key seed constants: `_randValue` initial = **42184323**, `_addend` = **1013904223** (used by tickTiles LCG, see below). `random(1)` = `Random` seeded with 1.
+  2069→
+  2070→### Level::tick() — VERIFIED (Level.cpp:184–254) — the world tick
+  2071→```cpp
+  2072→void Level::tick() {
+  2073→    if (!isClientSide && levelData.getSpawnMobs()) {
+  2074→        static int _mobSpawnTick = 0;
+  2075→        const int MobSpawnInterval = 2;
+  2076→        if (++_mobSpawnTick >= MobSpawnInterval) {
+  2077→            _mobSpawnTick = 0;
+  2078→            TIMER_PUSH("mobSpawner");
+  2079→            MobSpawner::tick(this,  _spawnEnemies && difficulty > Difficulty::PEACEFUL,
+  2080→                                            _spawnFriendlies && (levelData.getTime() % 400) < MobSpawnInterval);
+  2081→            TIMER_POP();
+  2082→        }
+  2083→    }
+  2084→
+  2085→    TIMER_PUSH("chunkSource");
+  2086→    _chunkSource->tick();
+  2087→
+  2088→    updateSkyDarken();
+  2089→    if(_nightMode) {
+  2090→        long curTime = levelData.getTime();
+  2091→        if(curTime % TICKS_PER_DAY  != MIDDLE_OF_NIGHT_TIME) {
+  2092→            if(curTime % TICKS_PER_DAY < MIDDLE_OF_NIGHT_TIME && (curTime + 20) % TICKS_PER_DAY > MIDDLE_OF_NIGHT_TIME) {
+  2093→                curTime = MIDDLE_OF_NIGHT_TIME;
+  2094→                SetTimePacket packet(curTime);
+  2095→                raknetInstance->send(packet);
+  2096→            }
+  2097→            else {
+  2098→                curTime += 20;
+  2099→                if(curTime % 20  == 0) {
+  2100→                    SetTimePacket packet(curTime);
+  2101→                    raknetInstance->send(packet);
+  2102→                }
+  2103→            }
+  2104→            setTime(curTime%TICKS_PER_DAY);
+  2105→        }
+  2106→    }
+  2107→    else {
+  2108→        long time = levelData.getTime() + 1;
+  2109→        levelData.setTime(time);
+  2110→        if ((time & 255) == 0) {
+  2111→            SetTimePacket packet(time);
+  2112→            raknetInstance->send(packet);
+  2113→        }
+  2114→    }
+  2115→    TIMER_POP_PUSH("tickPending");
+  2116→    tickPendingTicks(false);
+  2117→
+  2118→    TIMER_POP_PUSH("tickTiles");
+  2119→    tickTiles();
+  2120→
+  2121→    TIMER_POP_PUSH("sendEntityData");
+  2122→    for (unsigned int i = 0; i < entities.size(); ++i) {
+  2123→        Entity* e = entities[i];
+  2124→        SynchedEntityData* data = e->getEntityData();
+  2125→        if (data && data->isDirty()) {
+  2126→            SetEntityDataPacket packet(e->entityId, *data);
+  2127→            raknetInstance->send(packet);
+  2128→        }
+  2129→    }
+  2130→    TIMER_POP();
+  2131→}
+  2132→```
+  2133→
+  2134→**Tick order — EXACT:**
+  2135→1. **Mob spawn attempt** (server-side only, when `levelData.getSpawnMobs()` true): every `MobSpawnInterval = 2` ticks call `MobSpawner::tick(level, spawnEnemies, spawnFriendlies)`. Friendly spawn window is only the first 2 ticks of every 400-tick period (`levelData.getTime() % 400 < MobSpawnInterval`). Enemies spawn if `difficulty > PEACEFUL` and `_spawnEnemies` is on.
+  2136→2. **`_chunkSource->tick()`** — chunk cache/generation tick.
+  2137→3. **`updateSkyDarken()`** — recompute `skyDarken` via `getSkyDarken(1)`; if changed, notify listeners (`skyColorChanged`).
+  2138→4. **Time-of-day update:**
+  2139→   - `_nightMode` branch: lock time at `MIDDLE_OF_NIGHT_TIME = 12000` ticks — if curTime%19200 isn't already 12000, and curTime is just before 12000, snap to 12000 and broadcast. Otherwise advance time by 20 ticks per tick (!) and broadcast a SetTime packet every 20 ticks. (This is "always night" creative / demo mode.)
+  2140→   - Normal branch: increment time by 1 every tick (`time = getTime() + 1; levelData.setTime(time)`). Broadcast a `SetTimePacket` every 256 ticks (`(time & 255) == 0`).
+  2141→5. **`tickPendingTicks(false)`** — process scheduled-tick queue (redstone, plants, lava, etc.).
+  2142→6. **`tickTiles()`** — random block tick (see below).
+  2143→7. **Send dirty `SynchedEntityData`** for every entity via `SetEntityPacket` (multiplayer sync).
+  2144→
+  2145→### Level::tickTiles() — VERIFIED (Level.cpp:257–337) — random block tick algorithm
+  2146→```cpp
+  2147→void Level::tickTiles() {
+  2148→    _chunksToPoll.clear();
+  2149→
+  2150→    static const int pollChunkOffsets[] = {
+  2151→        -1,-4,  0,-4,  1,-4,  -2,-3,  -1,-3,  0,-3,  1,-3,  2,-3,  -3,-2,
+  2152→        -2,-2,  -1,-2,  0,-2,  1,-2,  2,-2,  3,-2,  -4,-1,  -3,-1,  -2,-1,
+  2153→        -1,-1,  0,-1,  1,-1,  2,-1,  3,-1,  4,-1,  -4,0,  -3,0,  -2,0,  -1,0,
+  2154→        0,0,  1,0,  2,0,  3,0,  4,0,  -4,1,  -3,1,  -2,1,  -1,1,  0,1,  1,1,
+  2155→        2,1,  3,1,  4,1,  -3,2,  -2,2,  -1,2,  0,2, 1,2,  2,2,  3,2,  -2,3,
+  2156→        -1,3,  0,3,  1,3,  2,3,  -1,4,  0,4,  1,4
+  2157→    };
+  2158→    const int pollChunkOffsetsSize = sizeof(pollChunkOffsets) / sizeof(int);
+  2159→
+  2160→    TIMER_PUSH("buildList");
+  2161→    for (size_t i = 0; i < players.size(); i++) {
+  2162→        Player* player = players[i];
+  2163→        int xx = Mth::floor(player->x / 16);
+  2164→        int zz = Mth::floor(player->z / 16);
+  2165→
+  2166→        for (int i = 0; i < pollChunkOffsetsSize; i += 2) {
+  2167→            const int xp = xx + pollChunkOffsets[i];
+  2168→            const int zp = zz + pollChunkOffsets[i+1];
+  2169→            if (xp >= 0 && xp < CHUNK_CACHE_WIDTH &&
+  2170→                zp >= 0 && zp < CHUNK_CACHE_WIDTH)
+  2171→                _chunksToPoll.insert(ChunkPos(xp, zc));
+  2172→        }
+  2173→    }
+  2174→    TIMER_POP();
+  2175→
+  2176→    TIMER_PUSH("loop");
+  2177→    for (ChunkPosSet::iterator it = _chunksToPoll.begin(); it != _chunksToPoll.end(); ++it) {
+  2178→        const ChunkPos& cp = *it;
+  2179→        int xo = cp.x * 16;
+  2180→        int zo = cp.z * 16;
+  2181→
+  2182→        TIMER_PUSH("getChunk");
+  2183→        LevelChunk* lc = this->getChunk(cp.x, cp.z);
+  2184→        TIMER_POP_PUSH("tickTiles");
+  2185→        for (int i = 0; i < 20; i++) { //@todo: CHUNK_TILE_TICK_COUNT
+  2186→            _randValue = _randValue * 3 + _addend;
+  2187→            int val = (_randValue >> 2);
+  2188→            int x = (val & 15);
+  2189→            int z = ((val >> 8) & 15);
+  2190→            int y = ((val >> 16) & 127);
+  2191→
+  2192→            int id = lc->getTile(x, y, z);
+  2193→            if (Tile::shouldTick[id]) {
+  2194→                Tile::tiles[id]->tick(this, x + xo, y, z + zo, &random);
+  2195→            }
+  2196→        }
+  2197→        TIMER_POP();
+  2198→    }
+  2199→    TIMER_POP();
+  2200→}
+  2201→```
+  2202→
+  2203→**Random tick algorithm — EXACT:**
+  2204→1. Build the set of chunks to poll from each player's chunk position by adding 80 surrounding chunk offsets (a diamond pattern spanning ±4 chunks; total 80 chunk positions per player).
+  2205→2. **Chunk-poll grid bounds**: `xp,zp` clamped to `[0, CHUNK_CACHE_WIDTH)` = `[0, 16)` — the chunk cache is only 16×16 = 256 chunks total. (Pocket Edition world is fixed-size 256×256 columns.)
+  2206→3. For each chunk in the set:
+  2207→   - Run **20** random ticks per chunk per tick (constant hardcoded `20` in the inner `for` loop; comment marks it as `CHUNK_TILE_TICK_COUNT`).
+  2208→4. **LCG**: `_randValue = _randValue * 3 + _addend` (initial seed 42184323, addend 1013904223 — these are the Linear Congruential Generator constants).
+  2209→5. **Index decode from `val = _randValue >> 2`:**
+  2210→   - `x = val & 15`         (chunk-relative X, 0..15)
+  2211→   - `z = (val >> 8) & 15`  (chunk-relative Z, 0..15)
+  2212→   - `y = (val >> 16) & 127` (height, 0..127 — full LEVEL_HEIGHT range)
+  2213→6. Look up tile at `(x,y,z)` in the chunk; if `Tile::shouldTick[id]` is `true`, call `tile->tick(level, x+xo, y, z+zo, &random)` with world coords.
+  2214→
+  2215→**Effectively**: each tick, every loaded chunk within ±4 chunks of any player gets 20 random block picks. With 256 chunks max and a single player, only ~80 chunks are polled per tick.
+  2216→
+  2217→### Level::tickPendingTicks(bool force) — VERIFIED (Level.cpp:339–358)
+  2218→```cpp
+  2219→bool Level::tickPendingTicks(bool force) {
+  2220→    int count = _tickNextTickSet.size();
+  2221→    if (count > MAX_TICK_TILES_PER_TICK) count = MAX_TICK_TILES_PER_TICK;
+  2222→    for (int i = 0; i < count; i++) {
+  2223→        TickDataSet::iterator td = _tickNextTickSet.begin();
+  2224→        if (!force && td->delay > levelData.getTime()) {
+  2225→            break;
+  2226→        }
+  2227→        int r = 8;
+  2228→        if (hasChunksAt(td->x - r, td->y - r, td->z - r, td->x + r, td->y + r, td->z + r)) {
+  2229→            int id = getTile(td->x, td->y, td->z);
+  2230→            if (id == td->tileId && id > 0) {
+  2231→                Tile::tiles[id]->tick(this, td->x, td->y, td->z, &random);
+  2232→            }
+  2233→        }
+  2234→        _tickNextTickSet.erase(td);
+  2235→    }
+  2236→    return _tickNextTickSet.size() != 0;
+  2237→}
+  2238→```
+  2239→
+  2240→**Algorithm:** At most `MAX_TICK_TILES_PER_TICK = 100` scheduled ticks per call. For each entry in `_tickNextTickSet` (a `std::set<TickNextTickData>` ordered by delay), only fire if:
+  2241→- `force` is true, or `td.delay <= levelData.getTime()` (scheduled time has arrived).
+  2242→- The 8-block-radius cube around the position is fully loaded (`hasChunksAt(x-8..x+8, y-8..y+8, z-8..z+8)`).
+  2243→- The current tile at `(x,y,z)` is still the originally scheduled tile id and > 0.
+  2244→Otherwise, the entry is simply erased without firing.
+  2245→
+  2246→### Level::addToTickNextTick — VERIFIED (Level.cpp:1307–1328)
+  2247→```cpp
+  2248→void Level::addToTickNextTick(int x, int y, int z, int tileId, int tickDelay) {
+  2249→    TickNextTickData td(x, y, z, tileId);
+  2250→    int r = 8;
+  2251→    if (instaTick) {
+  2252→        if (hasChunksAt(td.x - r, td.y - r, td.z - r, td.x + r, td.y + r, td.z + r)) {
+  2253→            int id = getTile(td.x, td.y, td.z);
+  2254→            if (id == td.tileId && id > 0) {
+  2255→                Tile::tiles[id]->tick(this, td.x, td.y, td.z, &random);
+  2256→            }
+  2257→        }
+  2258→        return;
+  2259→    }
+  2260→    if (hasChunksAt(x - r, y - r, z - r, x + r, y + r, z + r)) {
+  2261→        if (tileId > 0) {
+  2262→            td.setDelay(tickDelay + levelData.getTime());
+  2263→        }
+  2264→        if (_tickNextTickSet.find(td) == _tickNextTickSet.end()) {
+  2265→            _tickNextTickSet.insert(td);
+  2266→        }
+  2267→    }
+  2268→}
+  2269→```
+  2270→**`instaTick`** flag forces the tick to fire immediately (used during worldgen or some game logic). Otherwise the entry's delay is set to `currentTime + tickDelay` and inserted into the set (deduped).
+  2271→
+  2272→### Level::getTile(x,y,z) — VERIFIED (Level.cpp:515–526)
+  2273→```cpp
+  2274→int Level::getTile(int x, int y, int z) {
+  2275→    if (y < 0) return 0;
+  2276→    if (y >= DEPTH) return 0;
+  2277→    return getChunk(x >> 4, z >> 4)->getTile(x & 15, y, z & 15);
+  2278→}
+  2279→```
+  2280→
+  2281→**Index math — EXACT:**
+  2282→- Chunk coords: `chunkX = x >> 4`, `chunkZ = z >> 4` (div by 16)
+  2283→- In-chunk coords: `lx = x & 15`, `lz = z & 15` (mod 16)
+  2284→- `y` passed through unchanged (no `& 15` — chunks are full-height).
+  2285→- Bounds: `y < 0` or `y >= 128` returns **0 (air)**. No bounds check on x/z — out-of-range chunks resolve to `EmptyLevelChunk` which returns `Tile::invisible_bedrock->id`.
+  2286→
+  2287→### Level::setTile / setTileAndData / setTileNoUpdate — VERIFIED (Level.cpp:643–658, 569–587)
+  2288→```cpp
+  2289→bool Level::setTile(int x, int y, int z, int tile) {
+  2290→    if (setTileNoUpdate(x, y, z, tile)) {
+  2291→        tileUpdated(x, y, z, tile);
+  2292→        return true;
+  2293→    }
+  2294→    return false;
+  2295→}
+  2296→
+  2297→bool Level::setTileAndData(int x, int y, int z, int tile, int data) {
+  2298→    if (setTileAndDataNoUpdate(x, y, z, tile, data)) {
+  2299→        tileUpdated(x, y, z, tile);
+  2300→        return true;
+  2301→    }
+  2302→    return false;
+  2303→}
+  2304→
+  2305→bool Level::setTileNoUpdate(int x, int y, int z, int tile) {
+  2306→    if (y < 0) return false;
+  2307→    if (y >= DEPTH) return false;
+  2308→    LevelChunk* c = getChunk(x >> 4, z >> 4);
+  2309→    return c->setTile(x & 15, y, z & 15, tile);
+  2310→}
+  2311→
+  2312→bool Level::setTileAndDataNoUpdate(int x, int y, int z, int tile, int data) {
+  2313→    if (y < 0) return false;
+  2314→    if (y >= DEPTH) return false;
+  2315→    LevelChunk* c = getChunk(x >> 4, z >> 4);
+  2316→    return c->setTileAndData(x & 15, y, z & 15, tile, data);
+  2317→}
+  2318→```
+  2319→
+  2320→### Level::tileUpdated / updateNeighborsAt / neighborChanged — VERIFIED (Level.cpp:667–719)
+  2321→```cpp
+  2322→/*protected*/ void Level::tileUpdated(int x, int y, int z, int tile) {
+  2323→    sendTileUpdated(x, y, z);
+  2324→    this->updateNeighborsAt(x, y, z, tile);
+  2325→}
+  2326→
+  2327→void Level::sendTileUpdated(int x, int y, int z) {
+  2328→    for (unsigned int i = 0; i < _listeners.size(); i++) {
+  2329→        _listeners[i]->tileChanged(x, y, z);
+  2330→    }
+  2331→}
+  2332→
+  2333→void Level::updateNeighborsAt(int x, int y, int z, int tile) {
+  2334→    neighborChanged(x - 1, y, z, tile);
+  2335→    neighborChanged(x + 1, y, z, tile);
+  2336→    neighborChanged(x, y - 1, z, tile);
+  2337→    neighborChanged(x, y + 1, z, tile);
+  2338→    neighborChanged(x, y, z - 1, tile);
+  2339→    neighborChanged(x, y, z + 1, tile);
+  2340→}
+  2341→
+  2342→/*private*/ void Level::neighborChanged(int x, int y, int z, int type) {
+  2343→    if (noNeighborUpdate || isClientSide) return;
+  2344→    Tile* tile = Tile::tiles[getTile(x, y, z)];
+  2345→    if (tile != NULL) tile->neighborChanged(this, x, y, z, type);
+  2346→}
+  2347→```
+  2348→
+  2349→`noNeighborUpdate` flag suppresses cascading neighbor updates (used during batch operations). Client-side never fires neighborChanged.
+  2350→
+  2351→### Level::getRawBrightness / getBrightness — VERIFIED (Level.cpp:725–761, 812–839)
+  2352→```cpp
+  2353→int Level::getRawBrightness(int x, int y, int z) {
+  2354→    return getRawBrightness(x, y, z, true);
+  2355→}
+  2356→
+  2357→int Level::getRawBrightness(int x, int y, int z, bool propagate) {
+  2358→    if (propagate) {
+  2359→        int id = getTile(x, y, z);
+  2360→        if (id == Tile::stoneSlabHalf->id || id == Tile::farmland->id) {
+  2361→            int br = getRawBrightness(x, y + 1, z, false);
+  2362→            int br1 = getRawBrightness(x + 1, y, z, false);
+  2363→            int br2 = getRawBrightness(x - 1, y, z, false);
+  2364→            int br3 = getRawBrightness(x, y, z + 1, false);
+  2365→            int br4 = getRawBrightness(x, y, z - 1, false);
+  2366→            if (br1 > br) br = br1;
+  2367→            if (br2 > br) br = br2;
+  2368→            if (br3 > br) br = br3;
+  2369→            if (br4 > br) br = br4;
+  2370→            return br;
+  2371→        }
+  2372→    }
+  2373→
+  2374→    if (y < 0) return 0;
+  2375→    if (y >= DEPTH) {
+  2376→        int br = MAX_BRIGHTNESS - skyDarken;
+  2377→        if (br < 0) br = 0;
+  2378→        return br;
+  2379→    }
+  2380→
+  2381→    LevelChunk* c = getChunk(x >> 4, z >> 4);
+  2382→    x &= 15;
+  2383→    z &= 15;
+  2384→    return c->getRawBrightness(x, y, z, skyDarken);
+  2385→}
+  2386→
+  2387→int Level::getBrightness(const LightLayer& layer, int x, int y, int z) {
+  2388→    if (y < 0 || y >= DEPTH) {
+  2389→        return layer.surrounding;
+  2390→    }
+  2391→    int xc = x >> 4;
+  2392→    int zc = z >> 4;
+  2393→    if (!hasChunk(xc, zc)) return 0;
+  2394→    LevelChunk* c = getChunk(xc, zc);
+  2395→    return c->getBrightness(layer, x & 15, y, z & 15);
+  2396→}
+  2397→
+  2398→float Level::getBrightness(int x, int y, int z) {
+  2399→    return dimension->brightnessRamp[getRawBrightness(x, y, z)];
+  2400→}
+  2401→```
+  2402→
+  2403→**Sky/block light formula — EXACT:**
+  2404→- For `stoneSlabHalf` and `farmland` tiles (half-height blocks), the brightness is the **max** of the 4 horizontal neighbours + the top neighbour (so light leaks around half-slabs).
+  2405→- Above the world (`y >= 128`): brightness = `MAX_BRIGHTNESS - skyDarken` = `15 - skyDarken` (clamped ≥0).
+  2406→- Below the world (`y < 0`): brightness = 0.
+  2407→- Otherwise delegate to `LevelChunk::getRawBrightness(lx, y, lz, skyDarken)`:
+  2408→  ```
+  2409→  rawBrightness = max(skyLight - skyDarken, blockLight)
+  2410→  ```
+  2411→  (see Entry 10 — `LevelChunk::getRawBrightness`).
+  2412→
+  2413→`LightLayer::Sky.surrounding = 15`, `LightLayer::Block.surrounding = 0` (verified LightLayer.cpp:3–4). So `getBrightness(layer, *, y<0, *)` returns `15` for sky light and `0` for block light when below the world.
+  2414→
+  2415→**brightnessRamp formula (Dimension::updateLightRamp, Dimension.cpp:66–74) — VERIFIED:**
+  2416→```cpp
+  2417→void Dimension::updateLightRamp() {
+  2418→    float ambientLight = 0.05f;
+  2419→    for (int i = 0; i <= 15; i++) {
+  2420→        float v = (1 - i / (float) (16));
+  2421→        brightnessRamp[i] = ((1 - v) / (v * 3 + 1)) * (1 - ambientLight) + ambientLight * 3;
+  2422→    }
+  2423→}
+  2424→```
+  2425→For brightness `i ∈ [0..15]`: `v = 1 - i/16`. The mapped float = `((1 - v) / (v*3 + 1)) * 0.95 + 0.15`. So at i=0: v=1, ramp = 0/4*0.95 + 0.15 = 0.15 (minimum); at i=15: v=0.0625, ramp ≈ (0.9375/1.1875)*0.95 + 0.15 ≈ 0.9. This is used by `Level::getBrightness(x,y,z)` (the float variant) for shading.
+  2426→
+  2427→### Level::getTimeOfDay / setTime / getTime / isDay / getSkyDarken — VERIFIED (Level.cpp:1232–1243, 2023–2033, 841–843, 1163–1170)
+  2428→```cpp
+  2429→float Level::getTimeOfDay(float a) {
+
+[showing lines 1620-2429 of 11684; use offset=2430 with limit to continue reading]

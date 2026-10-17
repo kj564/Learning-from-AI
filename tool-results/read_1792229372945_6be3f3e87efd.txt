@@ -1,0 +1,452 @@
+  3636→| id  | name                | tile subclass         | tex          | material        | destroySpeed | explodeable(×3) | soundType         | lightBlock | lightEmission | notes |
+  3637→|-----|---------------------|----------------------|--------------|-----------------|--------------|----------------|-------------------|------------|---------------|-------|
+  3638→| 1   | stone               | StoneTile            | 1            | stone           | 1.5          | 10             | SOUND_STONE       | (255 solid)| —             | |
+  3639→| 2   | grass               | GrassTile            | (per-face)   | dirt            | 0.6          | —              | SOUND_GRASS       | (255 solid)| —             | tex set in GrassTile.cpp |
+  3640→| 3   | dirt                | DirtTile             | 2            | dirt            | 0.5          | —              | SOUND_GRAVEL      | (255 solid)| —             | |
+  3641→| 4   | stonebrick (cobble) | Tile                 | 16           | stone           | 2.0          | 10             | SOUND_STONE       | (255 solid)| —             | |
+  3642→| 5   | wood (planks)       | Tile                 | 4            | wood            | 2.0          | 5              | SOUND_WOOD        | (255 solid)| —             | |
+  3643→| 6   | sapling             | Sapling              | 15           | plant?          | 0.0          | —              | SOUND_GRASS       | 0 (non-solid)| —            | |
+  3644→| 7   | bedrock             | Tile                 | 17           | stone           | -1 (indestructible)| 6000000   | SOUND_STONE       | (255 solid)| —             | destroySpeed = -1 → unbreakable |
+  3645→| 8   | water (flowing)     | LiquidTileDynamic    | (liquid)     | water           | 100.0        | —              | SOUND_SILENT      | 3          | —             | |
+  3646→| 9   | water (calm)        | LiquidTileStatic     | (liquid)     | water           | 100.0        | —              | SOUND_SILENT      | 3          | —             | |
+  3647→| 10  | lava (flowing)      | LiquidTileDynamic    | (liquid)     | lava            | 0.0          | —              | SOUND_SILENT      | 255        | 1.0 (15)      | full light emission |
+  3648→| 11  | lava (calm)         | LiquidTileStatic     | (liquid)     | lava            | 100.0        | —              | SOUND_SILENT      | 255        | 1.0 (15)      | |
+  3649→| 12  | sand                | HeavyTile            | 18           | sand            | 0.5          | —              | SOUND_SAND        | (255 solid)| —             | gravity-affected |
+  3650→| 13  | gravel              | GravelTile           | 19           | ?               | 0.6          | —              | SOUND_GRAVEL      | (255 solid)| —             | gravity-affected |
+  3651→| 14  | goldOre             | OreTile              | 32           | stone           | 3.0          | 5              | SOUND_STONE       | (255 solid)| —             | Decorations |
+  3652→| 15  | ironOre             | OreTile              | 33           | stone           | 3.0          | 5              | SOUND_STONE       | (255 solid)| —             | Decorations |
+  3653→| 16  | coalOre             | OreTile              | 34           | stone           | 3.0          | 5              | SOUND_STONE       | (255 solid)| —             | Structures |
+  3654→| 17  | log (treeTrunk)     | TreeTile             | (per-face)   | wood            | 2.0          | —              | SOUND_WOOD        | (255 solid)| —             | |
+  3655→| 18  | leaves              | LeafTile             | 4 + 3*16     | leaves          | 0.2          | —              | SOUND_GRASS       | 1          | —             | |
+  3656→| 20  | glass               | GlassTile            | 49           | glass           | 0.3          | —              | SOUND_GLASS       | (255 solid)| —             | break sound = random.glass |
+  3657→| 21  | lapisOre            | OreTile              | 10*16        | stone           | 3.0          | 5              | SOUND_STONE       | (255 solid)| —             | |
+  3658→| 22  | lapisBlock          | Tile                 | 9*16         | stone           | 3.0          | 5              | SOUND_STONE       | (255 solid)| —             | |
+  3659→| 24  | sandStone           | SandStoneTile        | SANDSTONE_TEX[3]| stone        | 0.8          | —              | SOUND_STONE       | (255 solid)| —             | 3 textures {0+16*12, 5+16*14, 6+16*14} |
+  3660→| 26  | bed                 | BedTile              | (multi)      | ?               | 0.2          | —              | SOUND_SILENT?     | —          | —             | no sound set (default SOUND_NORMAL via constructor? Actually inherited — verify) |
+  3661→| 30  | web                 | WebTile              | 11           | web             | 4.0          | —              | SOUND_SILENT?     | 1          | —             | |
+  3662→| 31  | tallgrass           | TallGrass            | 2*16+7       | ?               | 0.0          | —              | SOUND_GRASS       | —          | —             | cross-texture shape |
+  3663→| 35  | cloth (wool)        | ClothTile            | (per-color)  | cloth           | 0.8          | —              | SOUND_CLOTH       | (255 solid)| —             | |
+  3664→| 37  | flower              | Bush                 | 13           | plant           | 0.0          | —              | SOUND_GRASS       | —          | —             | cross-texture |
+  3665→| 38  | rose                | Bush                 | 12           | plant           | 0.0          | —              | SOUND_GRASS       | —          | —             | cross-texture |
+  3666→| 39  | mushroom1           | Mushroom            | 13+16        | ?               | 0.0          | —              | SOUND_GRASS       | —          | 2/16 (=0.125 → emission 1) | |
+  3667→| 40  | mushroom2           | Mushroom            | 12+16        | ?               | 0.0          | —              | SOUND_GRASS       | —          | —             | |
+  3668→| 41  | goldBlock           | MetalTile            | 39-16=23     | metal           | 3.0          | 10             | SOUND_METAL       | (255 solid)| —             | pitch 1.5 |
+  3669→| 42  | ironBlock           | MetalTile            | 38-16=22     | metal           | 5.0          | 10             | SOUND_METAL       | (255 solid)| —             | |
+  3670→| 43  | stoneSlab (double)  | StoneSlabTile(true)  | (per-type)   | stone           | 2.0          | 10             | SOUND_STONE       | (255 solid)| —             | double slab |
+  3671→| 44  | stoneSlabHalf       | StoneSlabTile(false) | (per-type)   | stone           | 2.0          | 10             | SOUND_STONE       | 0 (non-solid? — see Level::getRawBrightness special-case)| —      | half slab |
+  3672→| 45  | brick (redBrick)    | Tile                 | 7            | stone           | 2.0          | 10             | SOUND_STONE       | (255 solid)| —             | |
+  3673→| 46  | tnt                 | TntTile             | 8            | explosive       | 0.0          | —              | SOUND_GRASS       | (255 solid)| —             | Tools category |
+  3674→| 47  | bookshelf           | BookshelfTile        | 35           | wood            | 1.5          | —              | SOUND_WOOD        | (255 solid)| —             | Decorations |
+  3675→| 48  | mossStone           | Tile                 | 36           | stone           | 2.0          | 10             | SOUND_STONE       | (255 solid)| —             | |
+  3676→| 49  | obsidian            | ObsidianTile(false)  | 37           | stone           | 10.0         | 2000           | SOUND_STONE       | (255 solid)| —             | |
+  3677→| 50  | torch               | TorchTile           | 5*16=80      | wood            | 0.0          | —              | SOUND_WOOD        | 0 (non-solid)| 15/16 (emission 14) | Tools |
+  3678→| 51  | fire                | FireTile            | 1*16+15=31   | fire            | 0.0          | —              | SOUND_WOOD        | 0          | 1.0 (emission 15) | created LAST in initTiles (after other tiles) |
+  3679→| 53  | stairsWood          | StairTile(wood)     | (inherits wood)| wood          | (inherits)   | (inherits)     | SOUND_WOOD        | stair shape| —             | stairs — destroyTime inherited from source tile |
+  3680→| 54  | chest               | ChestTile           | (multi)      | wood            | 2.5          | —              | SOUND_WOOD        | (255 solid)| —             | entity tile |
+  3681→| 56  | emeraldOre (diamond ore)| OreTile         | 16*3+2=50    | stone           | 3.0          | 5              | SOUND_STONE       | (255 solid)| —             | "oreDiamond" desc id (MCPE naming oddity) |
+  3682→| 57  | emeraldBlock (diamond)| MetalTile         | 40-16=24     | metal           | 5.0          | 10             | SOUND_METAL       | (255 solid)| —             | "blockDiamond" |
+  3683→| 58  | workBench (crafting table)| WorkbenchTile | (multi)      | wood            | 2.5          | —              | SOUND_WOOD        | (255 solid)| —             | |
+  3684→| 59  | crops (wheat)       | CropTile            | 8+5*16=88    | ?               | 0.0          | —              | SOUND_GRASS       | 0 (non-solid)| —            | cross-texture, grows |
+  3685→| 60  | farmland            | FarmTile            | (per-moisture)| dirt           | 0.6          | —              | SOUND_GRAVEL      | 0 (non-solid, special-cased in getRawBrightness) | —      | |
+  3686→| 61  | furnace             | FurnaceTile(false)  | (front/side/top)| stone        | 3.5          | —              | SOUND_STONE       | (255 solid)| —             | entity tile |
+  3687→| 62  | furnace_lit         | FurnaceTile(true)   | (front/side/top)| stone        | 3.5          | —              | SOUND_STONE       | (255 solid)| 14/16 (emission 13) | entity tile |
+  3688→| 63  | sign (standing)     | SignTile(Sign,true) | (multi)      | wood            | 1.0          | —              | SOUND_WOOD        | 0 (non-solid)| —            | entity tile |
+  3689→| 64  | doorWood            | DoorTile(wood)      | (top/bottom) | wood            | 3.0          | —              | SOUND_WOOD        | door shape | —             | |
+  3690→| 65  | ladder              | LadderTile          | 3+5*16=83    | ?               | 0.4          | —              | SOUND_WOOD        | 0 (non-solid)| —            | ladder shape |
+  3691→| 67  | stairsStone (cobble stairs)| StairTile(stoneBrick) | (inherits)| stone     | (inherits)   | (inherits)     | SOUND_STONE       | stair shape| —             | |
+  3692→| 68  | wallSign            | SignTile(Sign,false)| (multi)      | wood            | 1.0          | —              | SOUND_WOOD        | 0 (non-solid)| —            | entity tile |
+  3693→| 71  | doorIron           | DoorTile(metal)     | (top/bottom) | metal           | 5.0          | —              | SOUND_METAL       | door shape | —             | pitch 1.5 |
+  3694→| 73  | redStoneOre        | RedStoneOreTile(false)| 16*3+3=51  | stone           | 3.0          | 5              | SOUND_STONE       | (255 solid)| —             | Mechanisms |
+  3695→| 74  | redStoneOre_lit    | RedStoneOreTile(true)| 16*3+3=51   | stone           | 3.0          | 5              | SOUND_STONE       | (255 solid)| 10/16 (emission 9) | |
+  3696→| 78  | topSnow (snow layer)| TopSnowTile        | 16*4+2=66   | topSnow         | 0.1          | —              | SOUND_CLOTH       | (non-solid)| —             | |
+  3697→| 79  | ice                | IceTile             | 16*4+3=67   | ice             | 0.5          | —              | SOUND_GLASS       | 3          | —             | friction = 0.98 (set in IceTile.h:18) |
+  3698→| 80  | snow (snow block)  | SnowTile            | 16*4+2=66   | snow            | 0.2          | —              | SOUND_CLOTH       | (255 solid)| —             | |
+  3699→| 81  | cactus             | CactusTile          | 16*4+6=70   | cactus          | 0.4          | —              | SOUND_CLOTH       | cactus shape| —             | |
+  3700→| 82  | clay               | ClayTile            | 16*4+8=72   | clay            | 0.6          | —              | SOUND_GRAVEL      | (255 solid)| —             | |
+  3701→| 83  | reeds (sugarcane)  | ReedTile           | 16*4+9=73   | ?               | 0.0          | —              | SOUND_GRASS       | 0 (non-solid)| —            | |
+  3702→| 85  | fence              | FenceTile          | 4            | wood            | 2.0          | 5              | SOUND_WOOD        | fence shape| —             | |
+  3703→| 87  | netherrack         | Tile                | 7+6*16=103  | stone           | 0.4          | —              | SOUND_STONE       | (255 solid)| —             | |
+  3704→| 89  | lightGem (glowstone)| LightGemTile      | 9+16*6=105  | glass           | 0.3          | —              | SOUND_GLASS       | (255 solid)| 1.0 (emission 15) | |
+  3705→| 95  | invisible_bedrock  | InvisibleTile       | 0            | stone           | -1 (indestructible)| 6000000   | (default)         | (255 solid)| —             | no soundType set (stays default SOUND_NORMAL) |
+  3706→| 96  | trapdoor           | TrapDoorTile        | (per-face)   | wood            | 3.0          | —              | SOUND_WOOD        | door/trapdoor shape| —         | |
+  3707→| 98  | stoneBrickSmooth (stone bricks)| MultiTextureTile| STONE_BRICK_TEX[3]| stone| 1.5   | 10             | SOUND_STONE       | (255 solid)| —             | textures {6+16*3, 4+16*6, 5+16*6} |
+  3708→| 102 | thinGlass (glass pane)| ThinFenceTile    | 1+3*16=49, 4+9*16=148| glass | 0.3   | —              | SOUND_GLASS       | thin shape | —             | |
+  3709→| 103 | melon              | MelonTile           | (per-face)   | ?               | 1.0          | —              | SOUND_WOOD        | (255 solid)| —             | FoodArmor |
+  3710→| 105 | melonStem          | StemTile(melon)    | (per-stage)  | ?               | 0.0          | —              | SOUND_WOOD        | stem shape | —             | FoodArmor, desc "pumpkinStem" |
+  3711→| 107 | fenceGate          | FenceGateTile      | 4            | wood            | 2.0          | 5              | SOUND_WOOD        | fence-gate shape| —            | |
+  3712→| 108 | stairsBrick        | StairTile(redBrick)| (inherits)   | stone           | (inherits)   | (inherits)     | SOUND_STONE       | stair shape| —             | |
+  3713→| 109 | stairsStoneBrickSmooth| StairTile(stoneBrickSmooth) | (inherits)| stone    | (inherits)   | (inherits)     | SOUND_STONE       | stair shape| —             | |
+  3714→| 112 | netherBrick       | Tile                | 0+14*16=224 | stone           | 2.0          | 10             | SOUND_STONE       | (255 solid)| —             | |
+  3715→| 114 | stairsNetherBrick | StairTile(netherBrick)| (inherits)| stone           | (inherits)   | (inherits)     | SOUND_STONE       | stair shape| —             | |
+  3716→| 128 | stairsSandStone   | StairTile(sandStone)| (inherits) | stone           | (inherits)   | (inherits)     | SOUND_STONE       | stair shape| —             | |
+  3717→| 155 | quartzBlock       | QuartzBlockTile    | (per-face)   | stone           | 0.8          | —              | SOUND_STONE       | (255 solid)| —             | |
+  3718→| 156 | stairsQuartz      | StairTile(quartzBlock)| (inherits)| stone           | (inherits)   | (inherits)     | SOUND_STONE       | stair shape| —             | |
+  3719→| 245 | stonecutter       | StonecutterTile    | (multi)      | stone           | 2.5          | —              | SOUND_STONE       | (255 solid)| —             | |
+  3720→| 246 | glowingObsidian   | ObsidianTile(true) | 10+16*13=218| stone           | 10.0         | 2000           | SOUND_STONE       | (255 solid)| 14/16 (emission 13) | |
+  3721→| 247 | netherReactor     | NetherReactor      | 10+14*16=234| metal           | 3.0          | —              | SOUND_METAL       | (255 solid)| —             | entity tile |
+  3722→| 248 | info_updateGame1  | Tile                | 252          | dirt            | 1.0          | —              | SOUND_GRAVEL      | (255 solid)| —             | substitute block for unknown ids (odd parity) |
+  3723→| 249 | info_updateGame2  | Tile                | 253          | dirt            | 1.0          | —              | SOUND_GRAVEL      | (255 solid)| —             | substitute block for unknown ids (even parity) |
+  3724→| 253 | grass_carried     | CarriedTile         | 3, 12*16+12 (top tex) | ?      | (default)   | —              | (default)         | (solid?)   | —             | inventory item only |
+  3725→| 254 | leaves_carried    | LeafTile           | 11+14*16=235 | leaves          | 0.2          | —              | SOUND_GRASS       | 1          | —             | inventory item only |
+  3726→| 255 | info_reserved6    | Tile                | 1 (default)  | dirt            | (default 0) | —              | (default SOUND_NORMAL)| (255 solid?)| —           | placeholder |
+  3727→
+  3728→**UNVERIFIED entries (tile subclass internals not opened):**
+  3729→- `BedTile` (26) — destroySpeed set (0.2) but no setSoundType called → soundType defaults to `SOUND_NORMAL` per Tile constructor. UNVERIFIED — BedTile.cpp may override in its own constructor.
+  3730→- `WebTile` (30) — same as above.
+  3731→- `TallGrass` (31) — material not visible in initTiles; need to open TallGrass.cpp.
+  3732→- `Bush`/`Mushroom` (37, 38, 39, 40) — material not shown in initTiles; Bush.h/Mushroom.cpp define this.
+  3733→- `CropTile`/`FarmTile`/`ReedTile`/`CactusTile`/etc. — same; only fields explicitly set in initTiles are listed.
+  3734→- StairTile inherits destroySpeed/explodeable from source tile — UNVERIFIED whether StairTile overrides these in its own constructor (StairTile.h).
+  3735→
+  3736→### Tile::getDestroyProgress(player) — VERIFIED (Tile.cpp:391–395)
+  3737→```cpp
+  3738→float Tile::getDestroyProgress(Player* player) {
+  3739→    if (destroySpeed < 0) return 0;                          // indestructible
+  3740→    if (!player->canDestroy(this)) return 1 / destroySpeed / 100.0f;
+  3741→    return (player->getDestroySpeed(this) / destroySpeed) / 30.0f;
+  3742→}
+  3743→```
+  3744→
+  3745→**Break speed formula — EXACT:**
+  3746→- If `destroySpeed < 0` (e.g. bedrock, invisible_bedrock) → return 0 (no progress, can't break).
+  3747→- If player `canDestroy` returns false (material isn't always-destroyable and tool's `canDestroySpecial` returns false) → return `1 / destroySpeed / 100.0f` — extremely slow (penalty).
+  3748→- Otherwise → return `(player->getDestroySpeed(this) / destroySpeed) / 30.0f`.
+  3749→
+  3750→`player->getDestroySpeed(tile)` (Player.cpp:556–561):
+  3751→```cpp
+  3752→float Player::getDestroySpeed(Tile* tile) {
+  3753→    float speed = inventory->getDestroySpeed(tile);
+  3754→    //if (isUnderLiquid(Material.water)) speed /= 5;
+  3755→    //if (!onGround) speed /= 5;
+  3756→    return speed;
+  3757→}
+  3758→```
+  3759→Which delegates to `Inventory::getDestroySpeed` (Inventory.cpp:316–323):
+  3760→```cpp
+  3761→float Inventory::getDestroySpeed(Tile* tile) {
+  3762→    ItemInstance* item = getSelected();
+  3763→    if (item && item->id >= 256) {
+  3764→        return Item::items[item->id]->getDestroySpeed(NULL, tile);
+  3765→    }
+  3766→    return 1.0f;
+  3767→}
+  3768→```
+  3769→And `Item::getDestroySpeed(itemInstance, tile)` default returns `1` (Item.h:267–269). Subclasses (`HatchetItem`, `PickaxeItem`, `ShovelItem`, `ShearsItem`, `WeaponItem`) override to return `speed` (tier-dependent) if the tile matches their material, else fall back to `super::getDestroySpeed` (=1).
+  3770→
+  3771→`player->canDestroy(tile)` (Player.cpp:563–565) → `Inventory::canDestroy(tile)` (Inventory.cpp:307–314):
+  3772→```cpp
+  3773→bool Inventory::canDestroy(Tile* tile) {
+  3774→    if (tile->material->isAlwaysDestroyable()) return true;
+  3775→    ItemInstance* item = getSelected();
+  3776→    if (item != NULL) return item->canDestroySpecial(tile);
+  3777→    return false;
+  3778→}
+  3779→```
+  3780→`Material::isAlwaysDestroyable()` returns `_isAlwaysDestroyable` (default true). Materials flagged `notAlwaysDestroyable()`: `stone`, `metal`, `topSnow`, `snow`. For those, player must have a tool whose `canDestroySpecial(tile)` returns true (e.g. pickaxe for stone/metal, shovel for snow).
+  3781→
+  3782→**Summary:** the per-tick `destroyProgress` increment is `(toolSpeed / tileDestroySpeed) / 30`. When `destroyProgress >= 1` (accumulated by SurvivalMode::continueDestroyBlock — see Entry 12), the block breaks. So time-to-break (in ticks) ≈ `30 * destroySpeed / toolSpeed` for a compatible tool.
+  3783→
+  3784→### Tile::isSolidRender() — VERIFIED (Tile.cpp:567–570)
+  3785→```cpp
+  3786→bool Tile::isSolidRender() {
+  3787→    return true;
+  3788→}
+  3789→```
+  3790→Returns `true` by default. Overridden to `false` by `LiquidTile`, `Bush`, `TallGrass`, `TorchTile`, `LadderTile`, `DoorTile`, `FenceTile`, `StairTile`, `HalfTransparentTile`, `TransparentTile`, `WebTile`, `ReedTile`, `CactusTile`, `FenceGateTile`, `TrapDoorTile`, `SignTile`, etc. — basically anything that isn't a full opaque cube. This drives `solid[id]` and the default `lightBlock[id] = 255`.
+  3791→
+  3792→### Tile::isCubeShaped() — VERIFIED (Tile.cpp:496–499)
+  3793→```cpp
+  3794→bool Tile::isCubeShaped() {
+  3795→    return true;
+  3796→}
+  3797→```
+  3798→Default true. Overridden to false by `StairTile`, `FenceTile`, etc. Used by `Level::isSolidBlockingTile` (the test for mob spawning & pathfinding).
+  3799→
+  3800→### Tile::getRenderShape() — VERIFIED (Tile.cpp:501–504)
+  3801→```cpp
+  3802→int Tile::getRenderShape() {
+  3803→    return SHAPE_BLOCK;
+  3804→}
+  3805→```
+  3806→Default `SHAPE_BLOCK = 0`. Overridden per tile type (e.g. `SHAPE_CROSS_TEXTURE` for flowers, `SHAPE_TORCH` for torch, `SHAPE_STAIRS` for stairs, etc.).
+  3807→
+  3808→### Tile::getTexture(face) / getTexture(face, data) / getTexture(level, x, y, z, face) — VERIFIED (Tile.cpp:533–546)
+  3809→```cpp
+  3810→int Tile::getTexture(LevelSource* level, int x, int y, int z, int face) {
+  3811→    return getTexture(face, level->getData(x, y, z));
+  3812→}
+  3813→
+  3814→int Tile::getTexture(int face, int data) {
+  3815→    return getTexture(face);
+  3816→}
+  3817→
+  3818→int Tile::getTexture(int face) {
+  3819→    return tex;
+  3820→}
+  3821→```
+  3822→Default: every face returns `tex`. Overridden by `GrassTile` (top/bottom/side differ), `TreeTile` (top/bottom rings vs side bark), `LiquidTile` (animated), `StairTile`, `SandStoneTile`, `StoneBrickSmooth`, `MultiTextureTile`, etc.
+  3823→
+  3824→### Tile::isFaceVisible (static) — VERIFIED (Tile.cpp:368–378)
+  3825→```cpp
+  3826→bool Tile::isFaceVisible(Level* level, int x, int y, int z, int f) {
+  3827→    switch (f) {
+  3828→        case Facing::DOWN : y--; break;
+  3829→        case Facing::UP   : y++; break;
+  3830→        case Facing::NORTH: z--; break;
+  3831→        case Facing::SOUTH: z++; break;
+  3832→        case Facing::WEST : x--; break;
+  3833→        case Facing::EAST : x++; break;
+  3834→    }
+  3835→    return !level->isSolidRenderTile(x, y, z);
+  3836→}
+  3837→```
+  3838→
+  3839→### Tile::shouldRenderFace (instance) — VERIFIED (Tile.cpp:511–531)
+  3840→```cpp
+  3841→bool Tile::shouldRenderFace(LevelSource* level, int x, int y, int z, int face) {
+  3842→    if (face == 0 && y == -1) return false;
+  3843→    if (face == 2 && z == -1)  return false;
+  3844→    if (face == 3 && z == 256) return false;
+  3845→    if (face == 4 && x == -1)  return false;
+  3846→    if (face == 5 && x == 256) return false;
+  3847→    if (face == 0 && yy0 > 0) return true;
+  3848→    if (face == 1 && yy1 < 1) return true;
+  3849→    if (face == 2 && zz0 > 0) return true;
+  3850→    if (face == 3 && zz1 < 1) return true;
+  3851→    if (face == 4 && xx0 > 0) return true;
+  3852→    if (face == 5 && xx1 < 1) return true;
+  3853→    Tile* t = Tile::tiles[level->getTile(x, y, z)];
+  3854→    if (!t) return true;
+  3855→    if (face == 1 && t->id == topSnow->id) return false;
+  3856→    return !t->isSolidRender();
+  3857→}
+  3858→```
+  3859→For face that's outside the cube AABB (e.g. a half-slab top face), always render. Otherwise check neighbour — render if neighbour is non-solid-render. Special: snow layer on top is skipped (only the bottom of topSnow renders).
+  3860→
+  3861→### Tile::mayPick / mayPlace — VERIFIED (Tile.cpp:572–580, 735–742)
+  3862→```cpp
+  3863→bool Tile::mayPick(int data, bool liquid) { return mayPick(); }
+  3864→bool Tile::mayPick() { return true; }
+  3865→
+  3866→bool Tile::mayPlace(Level* level, int x, int y, int z, unsigned char face) {
+  3867→    return mayPlace(level, x, y, z);
+  3868→}
+  3869→bool Tile::mayPlace(Level* level, int x, int y, int z) {
+  3870→    int t = level->getTile(x, y, z);
+  3871→    return t == 0 || Tile::tiles[t]->material->isReplaceable();
+  3872→}
+  3873→```
+  3874→
+  3875→`mayPlace` is true iff the target tile is air or replaceable (water, lava, fire, topSnow, plant, replaceable_plant — based on Material flags).
+  3876→
+  3877→### Tile::getAABB / addAABBs / getTileAABB / setShape — VERIFIED (Tile.cpp:548–565, 720–732)
+  3878→```cpp
+  3879→AABB* Tile::getAABB(Level* level, int x, int y, int z) {
+  3880→    tmpBB.x0 = x + xx0;
+  3881→    tmpBB.y0 = y + yy0;
+  3882→    tmpBB.z0 = z + zz0;
+  3883→    tmpBB.x1 = x + xx1;
+  3884→    tmpBB.y1 = y + yy1;
+  3885→    tmpBB.z1 = z + zz1;
+  3886→    return &tmpBB;
+  3887→}
+  3888→
+  3889→void Tile::addAABBs(Level* level, int x, int y, int z, const AABB* box, std::vector<AABB>& boxes) {
+  3890→    AABB* aabb = getAABB(level, x, y, z);
+  3891→    if (aabb != NULL && box->intersects(*aabb)) {
+  3892→        boxes.push_back(*aabb);
+  3893→    }
+  3894→}
+  3895→
+  3896→AABB Tile::getTileAABB(Level* level, int x, int y, int z) {
+  3897→    return AABB(x + xx0, y + yy0, z + zz0, x + xx1, y + yy1, z + zz1);
+  3898→}
+  3899→
+  3900→void Tile::setShape(float x0, float y0, float z0, float x1, float y1, float z1) {
+  3901→    this->xx0 = x0; this->yy0 = y0; this->zz0 = z0;
+  3902→    this->xx1 = x1; this->yy1 = y1; this->zz1 = z1;
+  3903→}
+  3904→```
+  3905→
+  3906→Default shape from constructor: `(0,0,0,1,1,1)` — full 1×1×1 cube. `addAABBs` returns the single tile AABB if it intersects the query box. Some tiles (`FenceTile`, `StairTile`, `WallTile`, `ThinFenceTile`, etc.) override `addAABBs` to return multiple AABBs.
+  3907→
+  3908→### Tile::getTickDelay() — VERIFIED (Tile.cpp:582–585)
+  3909→```cpp
+  3910→int Tile::getTickDelay() {
+  3911→    return 10;
+  3912→}
+  3913→```
+  3914→Default 10 ticks delay when scheduling a tile update. Overridden by LiquidTile (5 for water, 30 for lava), etc.
+  3915→
+  3916→### Tile::getResource / getResourceCount / spawnResources / popResource — VERIFIED (Tile.cpp:455–495)
+  3917→```cpp
+  3918→void Tile::spawnResources(Level* level, int x, int y, int z, int data, float odds) {
+  3919→    if (level->isClientSide) return;
+  3920→    int count = getResourceCount(&level->random);
+  3921→    for (int i = 0; i < count; i++) {
+  3922→        if (level->random.nextFloat() > odds) continue;
+  3923→        int type = getResource(data, &level->random);
+  3924→        if (type <= 0) continue;
+  3925→        const float s = 0.7f;
+  3926→        float xo = level->random.nextFloat() * s + (1 - s) * 0.5f;
+  3927→        float yo = level->random.nextFloat() * s + (1 - s) * 0.5f;
+  3928→        float zo = level->random.nextFloat() * s + (1 - s) * 0.5f;
+  3929→        ItemEntity* item = new ItemEntity(level, x + xo, y + yo, z + zo, ItemInstance(type, 1, getSpawnResourcesAuxValue(data)));
+  3930→        item->throwTime = 10;
+  3931→        level->addEntity(item);
+  3932→    }
+  3933→}
+  3934→
+  3935→void Tile::spawnResources(Level* level, int x, int y, int z, int data) {
+  3936→    spawnResources(level, x, y, z, data, 1);
+  3937→}
+  3938→
+  3939→void Tile::popResource(Level* level, int x, int y, int z, const ItemInstance& itemInstance) {
+  3940→    if (level->isClientSide || level->getLevelData()->getGameType() == GameType::Creative) return;
+  3941→    float s = 0.7f;
+  3942→    float xo = level->random.nextFloat() * s + (1 - s) * 0.5f;
+  3943→    float yo = level->random.nextFloat() * s + (1 - s) * 0.5f;
+  3944→    float zo = level->random.nextFloat() * s + (1 - s) * 0.5f;
+  3945→    ItemEntity* item = new ItemEntity(level, x + xo, y + yo, z + zo, itemInstance);
+  3946→    item->throwTime = 10;
+  3947→    level->addEntity(item);
+  3948→}
+  3949→
+  3950→void Tile::destroy(Level* level, int x, int y, int z, int data) {
+  3951→    // empty default
+  3952→}
+  3953→
+  3954→int Tile::getResourceCount(Random* random) { return 1; }
+  3955→int Tile::getResource(int data, Random* random) { return id; }
+  3956→int Tile::getSpawnResourcesAuxValue(int data) { return 0; }
+  3957→```
+  3958→
+  3959→Default: drops 1 of itself. Overridden by:
+  3960→- `OreTile` → drops the resource item (e.g. `diamond`, `ironIngot`), not the ore block.
+  3961→- `GravelTile` → 90% gravel, 10% flint.
+  3962→- `LeafTile` → 5% sapling, 1-2% apple.
+  3963→- `CropTile` → wheat + seeds.
+  3964→- `GrassTile` → drops dirt (not grass block).
+  3965→
+  3966→`popResource` is blocked in Creative game type.
+  3967→
+  3968→### Tile::getExplosionResistance — VERIFIED (Tile.cpp:597–600)
+  3969→```cpp
+  3970→float Tile::getExplosionResistance(Entity* source) {
+  3971→    return explosionResistance / 5.0f;
+  3972→}
+  3973→```
+  3974→Stored `explosionResistance = explodeableArg * 3` (see `setExplodeable`). So `getExplosionResistance = (explodeableArg * 3) / 5`.
+  3975→
+  3976→### Tile::setExplodeable / setDestroyTime / setLightEmission / setLightBlock / setTicking — VERIFIED (Tile.cpp:362–365, 675–697)
+  3977→```cpp
+  3978→Tile* Tile::setLightEmission(float f) {
+  3979→    Tile::lightEmission[id] = (int) (Level::MAX_BRIGHTNESS * f);     // = 15 * f
+  3980→    return this;
+  3981→}
+  3982→
+  3983→Tile* Tile::setLightBlock(int i) {
+  3984→    lightBlock[id] = i;
+  3985→    return this;
+  3986→}
+  3987→
+  3988→Tile* Tile::setExplodeable(float explosionResistance) {
+  3989→    this->explosionResistance = explosionResistance * 3;
+  3990→    return this;
+  3991→}
+  3992→
+  3993→Tile* Tile::setDestroyTime(float destroySpeed) {
+  3994→    this->destroySpeed = destroySpeed;
+  3995→    if (explosionResistance < destroySpeed * 5) explosionResistance = destroySpeed * 5;
+  3996→    return this;
+  3997→}
+  3998→
+  3999→void Tile::setTicking(bool tick) {
+  4000→    shouldTick[id] = tick;
+  4001→}
+  4002→```
+  4003→
+  4004→So:
+  4005→- `setLightEmission(1.0)` → `lightEmission[id] = 15` (max).
+  4006→- `setLightEmission(0.5)` → `lightEmission[id] = 7`.
+  4007→- `setExplodeable(10)` → `explosionResistance = 30`.
+  4008→- `setDestroyTime(d)` also implicitly raises `explosionResistance` to `d * 5` if it was lower (i.e. blast resistance scales with destroy time as a minimum).
+  4009→
+  4010→### Tile::use / playerDestroy / canSurvive — VERIFIED (Tile.cpp:607–651)
+  4011→```cpp
+  4012→bool Tile::use(Level* level, int x, int y, int z, Player* player) {
+  4013→    return false;
+  4014→}
+  4015→
+  4016→void Tile::playerDestroy(Level* level, Player* player, int x, int y, int z, int data) {
+  4017→    spawnResources(level, x, y, z, data);
+  4018→}
+  4019→
+  4020→bool Tile::canSurvive(Level* level, int x, int y, int z) {
+  4021→    return true;
+  4022→}
+  4023→```
+  4024→
+  4025→### Tile::transformToValidBlockId — VERIFIED (Tile.cpp:311–319)
+  4026→```cpp
+  4027→int Tile::transformToValidBlockId(int blockId) {
+  4028→    return transformToValidBlockId(blockId, 0, 0, 0);
+  4029→}
+  4030→
+  4031→int Tile::transformToValidBlockId(int blockId, int x, int y, int z) {
+  4032→    if (blockId != 0 && Tile::tiles[blockId] == NULL)
+  4033→        return (((x + y + z) & 1) == 1) ? Tile::info_updateGame1->id : Tile::info_updateGame2->id;
+  4034→    return blockId;
+  4035→}
+  4036→```
+  4037→
+  4038→Used by save/load: if an unknown block id is loaded (e.g. from a future-version save), substitute `info_updateGame1` or `info_updateGame2` based on the parity of `x + y + z` so that the player sees a visible "unknown block" placeholder.
+  4039→
+  4040→
+  4041→---
+  4042→
+  4043→## Entry 12: GameMode / SurvivalMode / CreativeMode — block breaking (line-by-line read)
+  4044→
+  4045→**Files:** `client/gamemode/GameMode.{h,cpp}`, `client/gamemode/SurvivalMode.{h,cpp}`, `client/gamemode/CreativeMode.{h,cpp}`
+  4046→
+  4047→### GameMode.h — fields — VERIFIED (lines 14–61)
+  4048→```cpp
+  4049→class GameMode
+  4050→{
+  4051→protected:
+  4052→    Minecraft* minecraft;
+  4053→public:
+  4054→    GameMode(Minecraft* minecraft);
+  4055→    virtual ~GameMode() {}
+  4056→
+  4057→    virtual void initLevel(Level* level) {}
+  4058→
+  4059→    virtual void startDestroyBlock(int x, int y, int z, int face);
+  4060→    virtual bool destroyBlock(int x, int y, int z, int face);
+  4061→    virtual void continueDestroyBlock(int x, int y, int z, int face) = 0;  // pure virtual
+  4062→    virtual void stopDestroyBlock() {}
+  4063→
+  4064→    virtual void tick();
+  4065→    virtual void render(float a);
+  4066→
+  4067→    virtual float getPickRange();
+  4068→    /* void postLevelGen(LevelGen levelGen, Level level) {} */
+  4069→
+  4070→    virtual bool useItem(Player* player, Level* level, ItemInstance* item);
+  4071→    virtual bool useItemOn(Player* player, Level* level, ItemInstance* item, int x, int y, int z, int face, const Vec3& hit);
+  4072→
+  4073→    virtual Player* createPlayer(Level* level);
+  4074→    virtual void initPlayer(Player* player);
+  4075→    virtual void adjustPlayer(Player* player) {}
+  4076→    virtual bool canHurtPlayer() { return false; }
+  4077→
+  4078→    virtual void interact(Player* player, Entity* entity);
+  4079→    virtual void attack(Player* player, Entity* entity);
+  4080→
+  4081→    virtual ItemInstance* handleInventoryMouseClick(int containerId, int slotNum, int buttonNum, Player* player);
+  4082→    virtual void handleCloseInventory(int containerId, Player* player);
+  4083→
+  4084→    virtual bool isCreativeType() { return false; }
+  4085→    virtual bool isSurvivalType() { return false; }
+
+[showing lines 3636-4085 of 11684; use offset=4086 with limit to continue reading]

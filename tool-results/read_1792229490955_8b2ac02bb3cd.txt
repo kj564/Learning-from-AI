@@ -1,0 +1,802 @@
+ 10650→    while (Mouse::next()) {
+ 10651→        int passedTime = getTimeMs() - lastTickTime;
+ 10652→        if (passedTime > 200) continue;     // drop events older than 200ms
+ 10653→
+ 10654→        const MouseAction& e = Mouse::getEvent();
+ 10655→
+ 10656→        // Click on GUI (hotbar buttons) — only on left-button down
+ 10657→        if (allowGuiClicks && e.action == MouseAction::ACTION_LEFT && e.data == MouseAction::DATA_DOWN) {
+ 10658→            gui.handleClick(MouseAction::ACTION_LEFT, Mouse::getX(), Mouse::getY());
+ 10659→        }
+ 10660→
+ 10661→        // Mouse wheel → hotbar slot selection
+ 10662→        if (e.action == MouseAction::ACTION_WHEEL) {
+ 10663→            Inventory* v = player->inventory;
+ 10664→            int numSlots = gui.getNumSlots() - 1;     // 9 slots - 1 = 8 (for wrap-around)
+ 10665→            int slot = (v->selected - e.dy + numSlots) % numSlots;
+ 10666→            v->selectSlot(slot);
+ 10667→        }
+ 10668→    }
+ 10669→
+ 10670→    TIMER_POP_PUSH("keyboard");
+ 10671→    while (Keyboard::next()) {
+ 10672→        int key = Keyboard::getEventKey();
+ 10673→        bool isPressed = (Keyboard::getEventKeyState() == KeyboardAction::KEYDOWN);
+ 10674→        player->setKey(key, isPressed);     // forward key state to player (for movement keys)
+ 10675→
+ 10676→        if (isPressed) {
+ 10677→            gui.handleKeyPressed(key);     // hotbar keys 1-9, screenshot, F3 debug, etc.
+ 10678→
+ 10679→            // (WIN32-only: F=toggle fly, T=3rd person, O=ambientOcclusion, L=viewDistance,
+ 10680→            //  B=creative, P=+1000 time, G=armor, Y=reload, Z=spawn mob, X=kill entities,
+ 10681→            //  C=clear inv, H=prerender, M=peaceful, F3=debug)
+ 10682→
+ 10683→            #ifndef RPI
+ 10684→                if (key == 82) pauseGame(false);     // 82 = 'R' = pause (or ESC on RPI)
+ 10685→            #else
+ 10686→                if (key == Keyboard::KEY_ESCAPE) pauseGame(false);
+ 10687→            #endif
+ 10688→        }
+ 10689→        #ifdef WIN32
+ 10690→            if (key == Keyboard::KEY_M) {
+ 10691→                for (int i = 0; i < 5 * SharedConstants::TicksPerSecond; ++i)
+ 10692→                    level->tick();      // debug: 5 seconds of ticks in one frame
+ 10693→            }
+ 10694→        #endif
+ 10695→
+ 10696→        // (Non-mouse-digging mode) Destroy/Use on key press
+ 10697→        if (!options.useMouseForDigging) {
+ 10698→            int passedTime = getTimeMs() - lastTickTime;
+ 10699→            if (passedTime > 200) continue;
+ 10700→
+ 10701→            if (key == options.keyDestroy.key && isPressed) {
+ 10702→                BuildActionIntention bai(BuildActionIntention::BAI_REMOVE | BuildActionIntention::BAI_ATTACK);
+ 10703→                handleBuildAction(&bai);
+ 10704→            }
+ 10705→            else if (key == options.keyUse.key && isPressed) {
+ 10706→                BuildActionIntention bai(BuildActionIntention::BAI_BUILD | BuildActionIntention::BAI_INTERACT);
+ 10707→                handleBuildAction(&bai);
+ 10708→            }
+ 10709→        }
+ 10710→    }
+ 10711→
+ 10712→    TIMER_POP_PUSH("tickbuild");
+ 10713→    BuildActionIntention bai;
+ 10714→    // Polling-based build input (touch / mouse-for-digging): inputHolder->getBuildInput()->tickBuild returns true on action
+ 10715→    bool buildHandled = inputHolder->getBuildInput()->tickBuild(player, &bai);
+ 10716→    if (buildHandled) {
+ 10717→        if (!bai.isRemoveContinue())
+ 10718→            handleBuildAction(&bai);
+ 10719→    }
+ 10720→
+ 10721→    bool isTryingToDestroyBlock = (options.useMouseForDigging
+ 10722→                    ? (Mouse::isButtonDown(MouseAction::ACTION_LEFT) && mouseDiggable)
+ 10723→                    : Keyboard::isKeyDown(options.keyDestroy.key))
+ 10724→                || (buildHandled && bai.isRemove());
+ 10725→
+ 10726→    TIMER_POP_PUSH("handlemouse");
+ 10727→#ifdef RPI
+ 10728→    handleMouseDown(MouseAction::ACTION_LEFT, isTryingToDestroyBlock);
+ 10729→    handleMouseClick(buildHandled && bai.isInteract()
+ 10730→        || options.useMouseForDigging && Mouse::isButtonDown(MouseAction::ACTION_RIGHT));
+ 10731→#else
+ 10732→    handleMouseDown(MouseAction::ACTION_LEFT, isTryingToDestroyBlock || (buildHandled && bai.isInteract()));
+ 10733→#endif
+ 10734→
+ 10735→    lastTickTime = getTimeMs();
+ 10736→
+ 10737→    TIMER_POP();
+ 10738→}
+ 10739→```
+ 10740→
+ 10741→### 18.6 — Minecraft::handleMouseDown (left-click → continueDestroyBlock) — VERIFIED (Minecraft.cpp:917-942)
+ 10742→
+ 10743→```cpp
+ 10744→void Minecraft::handleMouseDown(int button, bool down) {
+ 10745→#ifndef STANDALONE_SERVER
+ 10746→#ifndef RPI
+ 10747→    if (player->isUsingItem()) {
+ 10748→        // If using an item (eating/drinking), release on left-click up
+ 10749→        if (!down && !Keyboard::isKeyDown(options.keyUse.key)) {
+ 10750→            gameMode->releaseUsingItem(player);
+ 10751→        }
+ 10752→        return;
+ 10753→    }
+ 10754→#endif
+ 10755→    if (player->isSleeping()) return;
+ 10756→
+ 10757→    if (button == MouseAction::ACTION_LEFT && missTime > 0) return;     // block-break cooldown
+ 10758→
+ 10759→    if (down && hitResult.type == TILE && button == MouseAction::ACTION_LEFT && !hitResult.indirectHit) {
+ 10760→        int x = hitResult.x;
+ 10761→        int y = hitResult.y;
+ 10762→        int z = hitResult.z;
+ 10763→        gameMode->continueDestroyBlock(x, y, z, hitResult.f);     // advance break progress (verified Entry 11)
+ 10764→        particleEngine->crack(x, y, z, hitResult.f);              // spawn crack particles
+ 10765→        player->swing();                                          // arm-swing animation
+ 10766→    } else {
+ 10767→        gameMode->stopDestroyBlock();    // reset break progress on release or off-target
+ 10768→    }
+ 10769→#endif
+ 10770→}
+ 10771→```
+ 10772→
+ 10773→### 18.7 — Minecraft::handleBuildAction — VERIFIED (Minecraft.cpp:953-1031)
+ 10774→
+ 10775→```cpp
+ 10776→void Minecraft::handleBuildAction(BuildActionIntention* action) {
+ 10777→#ifndef STANDALONE_SERVER
+ 10778→    if (action->isRemove()) {
+ 10779→        if (missTime > 0) return;     // can't destroy during miss cooldown
+ 10780→        player->swing();              // arm-swing
+ 10781→    }
+ 10782→    if (player->isUsingItem())
+ 10783→        return;     // can't act while using item (eating/drinking)
+ 10784→
+ 10785→    bool mayUse = true;
+ 10786→
+ 10787→    if (!hitResult.isHit()) {
+ 10788→        // No target: in survival, set miss cooldown (prevents spam-clicking air)
+ 10789→        if (action->isRemove() && !gameMode->isCreativeType()) {
+ 10790→            missTime = 10;       // 10-tick (0.5s) cooldown
+ 10791→        }
+ 10792→    } else if (hitResult.type == ENTITY) {
+ 10793→        if (action->isAttack()) {
+ 10794→            player->swing();
+ 10795→            InteractPacket packet(InteractPacket::Attack, player->entityId, hitResult.entity->entityId);
+ 10796→            raknetInstance->send(packet);       // network: tell other clients
+ 10797→            gameMode->attack(player, hitResult.entity);
+ 10798→        } else if (action->isInteract()) {
+ 10799→            if (hitResult.entity->interactPreventDefault())
+ 10800→                mayUse = false;
+ 10801→            InteractPacket packet(InteractPacket::Interact, player->entityId, hitResult.entity->entityId);
+ 10802→            raknetInstance->send(packet);
+ 10803→            gameMode->interact(player, hitResult.entity);
+ 10804→        }
+ 10805→    } else if (hitResult.type == TILE) {
+ 10806→        int x = hitResult.x;
+ 10807→        int y = hitResult.y;
+ 10808→        int z = hitResult.z;
+ 10809→        int face = hitResult.f;
+ 10810→
+ 10811→        int oldTileId = level->getTile(x, y, z);
+ 10812→        Tile* oldTile = Tile::tiles[oldTileId];
+ 10813→
+ 10814→        if (action->isRemove()) {
+ 10815→            if (!oldTile) return;
+ 10816→            level->extinguishFire(x, y, z, hitResult.f);
+ 10817→            gameMode->startDestroyBlock(x, y, z, hitResult.f);    // begin breaking (verified Entry 11)
+ 10818→        }
+ 10819→        else {     // Build/use
+ 10820→            ItemInstance* item = player->inventory->getSelected();
+ 10821→            if (gameMode->useItemOn(player, level, item, x, y, z, face, hitResult.pos)) {
+ 10822→                mayUse = false;
+ 10823→                player->swing();
+ 10824→            }
+ 10825→            if (item && item->count <= 0) {
+ 10826→                player->inventory->clearSlot(player->inventory->selected);
+ 10827→            }
+ 10828→        }
+ 10829→    }
+ 10830→    if (mayUse && action->isInteract()) {
+ 10831→        // No block/entity target, but use button pressed → use held item (eat, drink, throw)
+ 10832→        ItemInstance* item = player->inventory->getSelected();
+ 10833→        if (item && !player->isUsingItem()) {
+ 10834→            if (gameMode->useItem(player, level, item)) {
+ 10835→                gameRenderer->itemInHandRenderer->itemUsed();    // animate item-use
+ 10836→            }
+ 10837→            if (item && item->count <= 0) {
+ 10838→                player->inventory->clearSlot(player->inventory->selected);
+ 10839→            }
+ 10840→        }
+ 10841→    }
+ 10842→#endif
+ 10843→}
+ 10844→```
+ 10845→
+ 10846→**Build action dispatch (handleBuildAction):**
+ 10847→- `isRemove() + no target + survival`: set `missTime = 10` cooldown.
+ 10848→- `hitResult.type == ENTITY + isAttack()`: send Attack packet, call `gameMode->attack`.
+ 10849→- `hitResult.type == ENTITY + isInteract()`: send Interact packet, call `gameMode->interact`.
+ 10850→- `hitResult.type == TILE + isRemove()`: extinguish fire, call `gameMode->startDestroyBlock`.
+ 10851→- `hitResult.type == TILE + !isRemove()`: call `gameMode->useItemOn` with the held item.
+ 10852→- `mayUse && isInteract() && no target`: call `gameMode->useItem` (eat/drink/throw).
+ 10853→- Inventory slot cleared if item count drops to 0.
+ 10854→
+ 10855→### 18.8 — Minecraft::pauseGame / setScreen / grabMouse / releaseMouse — VERIFIED (Minecraft.cpp:1043-1123)
+ 10856→
+ 10857→```cpp
+ 10858→void Minecraft::pauseGame(bool isBackPaused) {
+ 10859→    if (screen != NULL) return;
+ 10860→    screenChooser.setScreen(isBackPaused? SCREEN_PAUSEPREV : SCREEN_PAUSE);
+ 10861→}
+ 10862→
+ 10863→void Minecraft::setScreen( Screen* screen )
+ 10864→{
+ 10865→    Mouse::reset();
+ 10866→    Multitouch::reset();
+ 10867→    Multitouch::resetThisUpdate();
+ 10868→
+ 10869→    if (screenMutex) {       // inside screen->updateEvents — defer setScreen
+ 10870→        hasScheduledScreen = true;
+ 10871→        scheduledScreen = screen;
+ 10872→        return;
+ 10873→    }
+ 10874→
+ 10875→    if (screen != NULL && screen->isErrorScreen())
+ 10876→        return;     // error screens bypass setScreen
+ 10877→
+ 10878→    if (screen == NULL && level == NULL)
+ 10879→        screen = screenChooser.createScreen(SCREEN_STARTMENU);    // null screen + no level → start menu
+ 10880→
+ 10881→    if (this->screen != NULL) {
+ 10882→        this->screen->removed();
+ 10883→        delete this->screen;
+ 10884→    }
+ 10885→
+ 10886→    this->screen = screen;
+ 10887→    if (screen != NULL) {
+ 10888→        releaseMouse();
+ 10889→        int screenWidth  = (int)(width  * Gui::InvGuiScale);
+ 10890→        int screenHeight = (int)(height * Gui::InvGuiScale);
+ 10891→        screen->init(this, screenWidth, screenHeight);
+ 10892→
+ 10893→        if (screen->isInGameScreen() && level) {
+ 10894→            level->saveLevelData();
+ 10895→            level->saveGame();
+ 10896→        }
+ 10897→    } else {
+ 10898→        grabMouse();
+ 10899→    }
+ 10900→}
+ 10901→
+ 10902→void Minecraft::grabMouse()
+ 10903→{
+ 10904→    if (mouseGrabbed) return;
+ 10905→    mouseGrabbed = true;
+ 10906→    mouseHandler.grab();
+ 10907→}
+ 10908→
+ 10909→void Minecraft::releaseMouse()
+ 10910→{
+ 10911→    if (!mouseGrabbed) return;
+ 10912→    if (player) {
+ 10913→        player->releaseAllKeys();
+ 10914→    }
+ 10915→    mouseGrabbed = false;
+ 10916→    mouseHandler.release();
+ 10917→}
+ 10918→```
+ 10919→
+ 10920→**setScreen behavior:**
+ 10921→- If called from inside `screen->updateEvents` (screenMutex is true), the new screen is deferred to the next safe point.
+ 10922→- If `screen == NULL && level == NULL`, replaces with the start menu.
+ 10923→- Old screen's `removed()` is called and then deleted.
+ 10924→- New screen: `releaseMouse()`, then `screen->init(this, screenWidth, screenHeight)`. In-game screens trigger `level->saveLevelData` + `saveGame`.
+ 10925→- NULL screen: `grabMouse()`.
+ 10926→
+ 10927→### 18.9 — Minecraft::init / setSize / setIsCreativeMode — VERIFIED (Minecraft.cpp:1134-1166, 1168-1220, 1481-1498)
+ 10928→
+ 10929→```cpp
+ 10930→void Minecraft::init()
+ 10931→{
+ 10932→    options.minecraft = this;
+ 10933→    options.initDefaultValues();
+ 10934→
+ 10935→    _supportsNonTouchscreen = !platform()->supportsTouchscreen();
+ 10936→
+ 10937→    textures = new Textures(&options, platform());
+ 10938→    textures->addDynamicTexture(new WaterTexture());
+ 10939→    textures->addDynamicTexture(new WaterSideTexture());
+ 10940→    gui.texturesLoaded(textures);
+ 10941→
+ 10942→    levelRenderer = new LevelRenderer(this);
+ 10943→    gameRenderer  = new GameRenderer(this);
+ 10944→    particleEngine = new ParticleEngine(level, textures);
+ 10945→
+ 10946→    font = new Font(&options, "font/default8.png", textures);
+ 10947→    _perfRenderer = new PerfRenderer(this, font);
+ 10948→
+ 10949→    user = new User("TestUser", "");
+ 10950→    setIsCreativeMode(false);    // default Survival
+ 10951→    reloadOptions();
+ 10952→}
+ 10953→
+ 10954→void Minecraft::setSize(int w, int h) {
+ 10955→    transformResolution(&w, &h);    // Kindle Fire correction
+ 10956→    width = w; height = h;
+ 10957→
+ 10958→    // GUI scale based on screen width
+ 10959→    if (width >= 1000) {
+ 10960→        Gui::GuiScale = 4.0f;     // (8.0 on Apple if width > 2000)
+ 10961→    } else if (width >= 800) {
+ 10962→        Gui::GuiScale = 3.0f;    // (4.0 on Apple)
+ 10963→    } else if (width >= 400) {
+ 10964→        Gui::GuiScale = 2.0f;
+ 10965→    } else {
+ 10966→        Gui::GuiScale = 1.0f;
+ 10967→    }
+ 10968→    Gui::InvGuiScale = 1.0f / Gui::GuiScale;
+ 10969→    int screenWidth  = (int)(width  * Gui::InvGuiScale);
+ 10970→    int screenHeight = (int)(height * Gui::InvGuiScale);
+ 10971→
+ 10972→    // (pixel density config setup)
+ 10973→    if (screen) screen->setSize(screenWidth, screenHeight);
+ 10974→    if (inputHolder) inputHolder->onConfigChanged(config);
+ 10975→}
+ 10976→
+ 10977→void Minecraft::setIsCreativeMode(bool isCreative)
+ 10978→{
+ 10979→#ifdef CREATORMODE
+ 10980→    delete gameMode;
+ 10981→    gameMode = new CreatorMode(this);
+ 10982→    _isCreativeMode = true;
+ 10983→#else
+ 10984→    if (!gameMode || isCreative != _isCreativeMode) {
+ 10985→        delete gameMode;
+ 10986→        if (isCreative) gameMode = new CreativeMode(this);
+ 10987→        else            gameMode = new SurvivalMode(this);
+ 10988→        _isCreativeMode = isCreative;
+ 10989→    }
+ 10990→#endif
+ 10991→    if (player)
+ 10992→        gameMode->initAbilities(player->abilities);
+ 10993→}
+ 10994→
+ 10995→bool Minecraft::isCreativeMode() { return _isCreativeMode; }
+ 10996→```
+ 10997→
+ 10998→**GUI scale tiers:**
+ 10999→- width < 400: scale 1 (1×)
+ 11000→- 400 ≤ width < 800: scale 2 (2×)
+ 11001→- 800 ≤ width < 1000: scale 3 (3×) — non-Apple
+ 11002→- width ≥ 1000: scale 4 (4×) — non-Apple; 8× on Apple if width > 2000
+ 11003→
+ 11004→### 18.10 — Minecraft::leaveGame — VERIFIED (Minecraft.cpp:314-357)
+ 11005→
+ 11006→```cpp
+ 11007→void Minecraft::leaveGame(bool renameLevel /*=false*/)
+ 11008→{
+ 11009→    if (isGeneratingLevel || !_hasSignaledGeneratingLevelFinished)
+ 11010→        return;
+ 11011→
+ 11012→    isGeneratingLevel = false;
+ 11013→    bool saveLevel = level && (!level->isClientSide || renameLevel);
+ 11014→
+ 11015→    raknetInstance->disconnect();
+ 11016→    if (saveLevel) {
+ 11017→        level->getChunkSource()->saveAll(true);    // save all chunks
+ 11018→    }
+ 11019→
+ 11020→    cameraTargetPlayer = NULL;
+ 11021→    levelRenderer->setLevel(NULL);
+ 11022→    particleEngine->setLevel(NULL);
+ 11023→    delete netCallback;
+ 11024→    netCallback = NULL;
+ 11025→
+ 11026→    if (level != NULL) {
+ 11027→        delete level->getLevelStorage();
+ 11028→        delete level;
+ 11029→        level = NULL;
+ 11030→    }
+ 11031→    player = NULL;
+ 11032→    cameraTargetPlayer = NULL;
+ 11033→
+ 11034→    _running = false;
+ 11035→    if (renameLevel) {
+ 11036→        setScreen(new RenameMPLevelScreen(LevelStorageSource::TempLevelId));
+ 11037→    }
+ 11038→    else
+ 11039→        screenChooser.setScreen(SCREEN_STARTMENU);
+ 11040→}
+ 11041→```
+ 11042→
+ 11043→### 18.11 — Minecraft constructor & progress messages — VERIFIED (Minecraft.cpp:115-203)
+ 11044→
+ 11045→```cpp
+ 11046→const char* Minecraft::progressMessages[] = {
+ 11047→    "Locating server",
+ 11048→    "Building terrain",
+ 11049→    "Preparing",
+ 11050→    "Saving chunks"
+ 11051→};
+ 11052→
+ 11053→Minecraft::Minecraft()
+ 11054→:       user(NULL),
+ 11055→        level(NULL),
+ 11056→        player(NULL),
+ 11057→        cameraTargetPlayer(NULL),
+ 11058→        levelRenderer(NULL),
+ 11059→        gameRenderer(NULL),
+ 11060→        particleEngine(NULL),
+ 11061→        _commandServer(NULL),
+ 11062→        textures(NULL),
+ 11063→        lastTickTime(-1),
+ 11064→        lastTime(0),
+ 11065→        ticksSinceLastUpdate(0),
+ 11066→        gameMode(NULL),
+ 11067→        mouseGrabbed(true),
+ 11068→        missTime(0),
+ 11069→        pause(false),
+ 11070→        _running(false),
+ 11071→        timer(20),       // <-- 20 ticks per second
+ 11072→        gui(this),
+ 11073→        netCallback(NULL),
+ 11074→        screen(NULL),
+ 11075→        font(NULL),
+ 11076→        screenMutex(false),
+ 11077→        scheduledScreen(NULL),
+ 11078→        hasScheduledScreen(false),
+ 11079→        soundEngine(NULL),
+ 11080→        ticks(0),
+ 11081→        isGeneratingLevel(false),
+ 11082→        _hasSignaledGeneratingLevelFinished(true),
+ 11083→        generateLevelThread(NULL),
+ 11084→        progressStagePercentage(0),
+ 11085→        progressStageStatusId(0),
+ 11086→        isLookingForMultiplayer(false),
+ 11087→        _licenseId(LicenseCodes::WAIT_PLATFORM_NOT_READY),
+ 11088→        inputHolder(0),
+ 11089→        _supportsNonTouchscreen(false),
+ 11090→        screenChooser(this),
+ 11091→        width(1), height(1),
+ 11092→        _powerVr(false),
+ 11093→        commandPort(4711),
+ 11094→        reserved_d1(0),reserved_d2(0),
+ 11095→        reserved_f1(0),reserved_f2(0)
+ 11096→{
+ 11097→    raknetInstance = new RakNetInstance();
+ 11098→    soundEngine = new SoundEngine(20.0f);    // 20.0 = some sound engine parameter
+ 11099→    soundEngine->init(this, &options);
+ 11100→}
+ 11101→```
+ 11102→
+ 11103→### 18.12 — Minecraft::useTouchscreen — VERIFIED (Minecraft.cpp:1125-1133)
+ 11104→
+ 11105→```cpp
+ 11106→bool Minecraft::useTouchscreen() {
+ 11107→#ifdef RPI
+ 11108→    return false;
+ 11109→#endif
+ 11110→    return options.useTouchScreen || !_supportsNonTouchscreen;
+ 11111→}
+ 11112→```
+ 11113→
+ 11114→### Constants table (Entry 18)
+ 11115→
+ 11116→| Constant | Value | Source |
+ 11117→|---|---|---|
+ 11118→| `Timer::ticksPerSecond` | 20 | Minecraft.cpp:153 |
+ 11119→| `Timer::MAX_TICKS_PER_UPDATE` | 10 (max 500 ms of ticks per update) | Timer.h:116 |
+ 11120→| `Timer::adjustTime` lerp factor | 0.2 per long-delay event | Timer.h:32 |
+ 11121→| `Timer` clamp on `passedSeconds` | [0, 1] | Timer.h:46-47 |
+ 11122→| `Minecraft::progressMessages` | "Locating server", "Building terrain", "Preparing", "Saving chunks" | Minecraft.cpp:115-120 |
+ 11123→| `Minecraft::commandPort` | 4711 | Minecraft.cpp:187 |
+ 11124→| SoundEngine ctor argument | 20.0f | Minecraft.cpp:199 |
+ 11125→| `missTime` (attack-miss cooldown) | set to 10 ticks (0.5s) | Minecraft.cpp:965 |
+ 11126→| Mouse event age cutoff | 200 ms | Minecraft.cpp:648, 863 |
+ 11127→| `lastTickTime` | ms-timestamp of last `tickInput()` end | Minecraft.cpp:903 |
+ 11128→| Pause key (non-RPI) | 82 ('R') | Minecraft.cpp:836 |
+ 11129→| Pause key (RPI) | `Keyboard::KEY_ESCAPE` | Minecraft.cpp:839 |
+ 11130→| GUI scale: width < 400 | 1 | Minecraft.cpp:1191 |
+ 11131→| GUI scale: 400 ≤ width < 800 | 2 | Minecraft.cpp:1190 |
+ 11132→| GUI scale: 800 ≤ width < 1000 | 3 (non-Apple); 4 (Apple) | Minecraft.cpp:1186-1187 |
+ 11133→| GUI scale: width ≥ 1000 | 4 (non-Apple); 8 if width > 2000 (Apple) | Minecraft.cpp:1178-1180 |
+ 11134→| Default game mode | Survival (`setIsCreativeMode(false)` in init) | Minecraft.cpp:1163 |
+ 11135→| Touchscreen on RPI | false | Minecraft.cpp:1126-1128 |
+ 11136→| Multiplayer port (default) | 19132 | Minecraft.cpp:1275 |
+ 11137→
+ 11138→### UNVERIFIED items (Entry 18)
+ 11139→1. **`BuildActionIntention`** flags: `BAI_REMOVE`, `BAI_BUILD`, `BAI_ATTACK`, `BAI_INTERACT`, `isRemoveContinue`, `isRemove`, `isInteract`, `isBuild`, `isAttack`. UNVERIFIED exact bit layout.
+ 11140→2. **`MouseAction::ACTION_LEFT`, `ACTION_WHEEL`, `DATA_DOWN`** — mouse event enum values. UNVERIFIED exact integer codes.
+ 11141→3. **`Keyboard::KEY_ESCAPE`, `KEY_F3`, `KEY_M`** etc. — keyboard key codes. UNVERIFIED exact values.
+ 11142→4. **`Options::keyDestroy`, `keyUse`, `keyMenuNext`, `keyMenuPrevious`, `keyMenuOk`** — configurable key bindings. UNVERIFIED default values (likely mouse-left, mouse-right, arrows, enter).
+ 11143→5. **`GameMode::continueDestroyBlock / startDestroyBlock / stopDestroyBlock / useItemOn / useItem / attack / interact / releaseUsingItem`** — verified in Entry 11.
+ 11144→6. **`Level::animateTick(x, y, z)`** — block entity animation tick near player. UNVERIFIED.
+ 11145→7. **`Level::tickEntities()`** — entity tick loop. UNVERIFIED ordering and per-entity tick logic.
+ 11146→8. **`Gui::tick / handleClick / handleKeyPressed / isInside / getNumSlots`** — UNVERIFIED.
+ 11147→9. **`Textures::tick(bool)`** — dynamic texture animation. UNVERIFIED.
+ 11148→10. **`InputRAII` destructor** — calls `Mouse::reset()` and `Keyboard::reset()`. UNVERIFIED exact reset semantics.
+ 11149→11. **`inputHolder->getBuildInput()->tickBuild(player, &bai)`** — build input polling (mouse-for-digging or touch). UNVERIFIED.
+ 11150→12. **`RakNetInstance::runEvents(netCallback)`** — network pump. UNVERIFIED.
+ 11151→
+ 11152→## Entry 19: ParticleEngine.cpp / .h — particle tick & render
+ 11153→
+ 11154→### 19.1 — ParticleEngine.h — VERIFIED (ParticleEngine.h:1-54)
+ 11155→
+ 11156→```cpp
+ 11157→class ParticleEngine
+ 11158→{
+ 11159→public:
+ 11160→    static const int MISC_TEXTURE = 0;            // particles.png
+ 11161→    static const int TERRAIN_TEXTURE = 1;         // terrain.png
+ 11162→    static const int ITEM_TEXTURE = 2;            // gui/items.png
+ 11163→    static const int ENTITY_PARTICLE_TEXTURE = 3;  // crits / lit particles
+ 11164→    static const int TEXTURE_COUNT = 4;
+ 11165→
+ 11166→    ParticleEngine(Level* level, Textures* textures);
+ 11167→    ~ParticleEngine();
+ 11168→
+ 11169→    void add(Particle* p);       // route to particles[getParticleTexture()]
+ 11170→    void destroy(int x, int y, int z);   // block-break particle burst
+ 11171→
+ 11172→    void tick();
+ 11173→    void render(Entity* player, float a);
+ 11174→    void renderLit(Entity* player, float a);
+ 11175→
+ 11176→    void setLevel(Level* level);
+ 11177→
+ 11178→    void crack(int x, int y, int z, int face);   // block-crack particles (one per click)
+ 11179→
+ 11180→    std::string countParticles();
+ 11181→
+ 11182→protected:
+ 11183→    void clear();
+ 11184→    Level* level;
+ 11185→    GLuint textureIds[4];       // (unused — textures are looked up by name)
+ 11186→private:
+ 11187→    ParticleList particles[4];  // 4 lists, one per texture group
+ 11188→    Textures* textures;
+ 11189→    Random random;
+ 11190→};
+ 11191→```
+ 11192→
+ 11193→### 19.2 — ParticleEngine constructor/destructor — VERIFIED (ParticleEngine.cpp:8-17)
+ 11194→
+ 11195→```cpp
+ 11196→ParticleEngine::ParticleEngine(Level* level, Textures* textures)
+ 11197→:       level(level),
+ 11198→        textures(textures)
+ 11199→{
+ 11200→    textures->loadTexture("particles.png");
+ 11201→}
+ 11202→
+ 11203→ParticleEngine::~ParticleEngine() {
+ 11204→    clear();
+ 11205→}
+ 11206→```
+ 11207→
+ 11208→### 19.3 — ParticleEngine::add — VERIFIED (ParticleEngine.cpp:19-22)
+ 11209→
+ 11210→```cpp
+ 11211→void ParticleEngine::add(Particle* p) {
+ 11212→    int t = p->getParticleTexture();     // particle's texture group (0..3)
+ 11213→    particles[t].push_back(p);
+ 11214→}
+ 11215→```
+ 11216→
+ 11217→### 19.4 — ParticleEngine::tick — VERIFIED (ParticleEngine.cpp:24-38)
+ 11218→
+ 11219→```cpp
+ 11220→void ParticleEngine::tick() {
+ 11221→    for (int tt = 0; tt < TEXTURE_COUNT; tt++) {       // 4 texture groups
+ 11222→        ParticleList& list = particles[tt];
+ 11223→        unsigned int size = list.size();
+ 11224→        for (unsigned int i = 0; i < size; ++i) {
+ 11225→            Particle* p = list[i];
+ 11226→            p->tick();                                   // physics + lifetime update
+ 11227→            if (p->removed) {                            // particle expired
+ 11228→                list.erase(list.begin() + (i--));
+ 11229→                --size;
+ 11230→                delete p;
+ 11231→            }
+ 11232→        }
+ 11233→    }
+ 11234→}
+ 11235→```
+ 11236→**Tick:** iterate each of 4 particle lists, call `Particle::tick()` for each, remove+delete if `removed` flag is set. The `i--` re-checks the same index after erase (since the list shifted down).
+ 11237→
+ 11238→### 19.5 — ParticleEngine::render — VERIFIED (ParticleEngine.cpp:40-72)
+ 11239→
+ 11240→```cpp
+ 11241→void ParticleEngine::render(Entity* player, float a) {
+ 11242→    // Camera-billboard basis vectors for orienting particle quads toward camera
+ 11243→    float xa = (float) Mth::cos(player->yRot * Mth::PI / 180);
+ 11244→    float za = (float) Mth::sin(player->yRot * Mth::PI / 180);
+ 11245→
+ 11246→    float xa2 = -za * (float) Mth::sin(player->xRot * Mth::PI / 180);
+ 11247→    float za2 = xa * (float) Mth::sin(player->xRot * Mth::PI / 180);
+ 11248→    float ya = (float) Mth::cos(player->xRot * Mth::PI / 180);
+ 11249→
+ 11250→    Particle::xOff = (player->xOld+(player->x-player->xOld)*a);
+ 11251→    Particle::yOff = (player->yOld+(player->y-player->yOld)*a);
+ 11252→    Particle::zOff = (player->zOld+(player->z-player->zOld)*a);
+ 11253→
+ 11254→    // Render the first 3 texture groups (MISC, TERRAIN, ITEM)
+ 11255→    for (int tt = 0; tt < 3; tt++) {
+ 11256→        if (particles[tt].size() == 0) continue;
+ 11257→
+ 11258→        if (tt == MISC_TEXTURE)         textures->loadAndBindTexture("particles.png");
+ 11259→        else if (tt == TERRAIN_TEXTURE) textures->loadAndBindTexture("terrain.png");
+ 11260→        else if (tt == ITEM_TEXTURE)    textures->loadAndBindTexture("gui/items.png");
+ 11261→
+ 11262→        Tesselator& t = Tesselator::instance;
+ 11263→        t.begin();
+ 11264→        for (unsigned int i = 0; i < particles[tt].size(); i++) {
+ 11265→            Particle* p = particles[tt][i];
+ 11266→            p->render(t, a, xa, ya, za, xa2, za2);    // particle emits 4 vertices to tesselator
+ 11267→        }
+ 11268→        t.draw();
+ 11269→    }
+ 11270→
+ 11271→    renderLit(player, a);    // 4th group: ENTITY_PARTICLE_TEXTURE
+ 11272→}
+ 11273→```
+ 11274→
+ 11275→**Billboard vectors:**
+ 11276→- `xa = cos(yRot)`, `za = sin(yRot)` — camera-right and camera-forward (in world XZ plane)
+ 11277→- `xa2 = -sin(yRot) * sin(xRot)`, `za2 = cos(yRot) * sin(xRot)`, `ya = cos(xRot)` — camera-up (with pitch tilt)
+ 11278→- Particles use these to construct their on-screen quad oriented toward the camera.
+ 11279→
+ 11280→**Texture groups bound:**
+ 11281→- 0 (MISC): `particles.png` (smoke, flame, explode, reddust, bubble, etc.)
+ 11282→- 1 (TERRAIN): `terrain.png` (TerrainParticle — block break particles)
+ 11283→- 2 (ITEM): `gui/items.png` (BreakingItemParticle — item-break particles)
+ 11284→- 3 (ENTITY_PARTICLE): rendered separately in `renderLit`.
+ 11285→
+ 11286→### 19.6 — ParticleEngine::renderLit — VERIFIED (ParticleEngine.cpp:74-93)
+ 11287→
+ 11288→```cpp
+ 11289→void ParticleEngine::renderLit(Entity* player, float a) {
+ 11290→    int tt = ENTITY_PARTICLE_TEXTURE;
+ 11291→    ParticleList& pl = particles[tt];
+ 11292→    const int size = pl.size();
+ 11293→    if (size == 0) return;
+ 11294→
+ 11295→    // (Same camera-billboard basis as render)
+ 11296→    float xa = Mth::cos(player->yRot * Mth::DEGRAD);
+ 11297→    float za = Mth::sin(player->yRot * Mth::DEGRAD);
+ 11298→
+ 11299→    float xs = Mth::sin(player->xRot * Mth::DEGRAD);
+ 11300→    float xa2 = -za * xs;
+ 11301→    float za2 = xa * xs;
+ 11302→    float ya = Mth::cos(player->xRot * Mth::DEGRAD);
+ 11303→
+ 11304→    Tesselator& t = Tesselator::instance;
+ 11305→    for (int i = 0; i < size; i++) {
+ 11306→        Particle* p = pl[i];
+ 11307→        p->render(t, a, xa, ya, za, xa2, za2);
+ 11308→    }
+ 11309→}
+ 11310→```
+ 11311→**Note:** `renderLit` doesn't wrap particles in `t.begin()/t.draw()` — it's intended to be called inside another tesselator session OR the particles render with their own draw call. UNVERIFIED which — the code looks like a bug (missing begin/draw), but it may rely on the caller's begin/draw. Looking at `render()` which calls `renderLit` after the third `t.draw()`, there is no `t.begin()` after — likely a bug or relies on `Particle::render` to handle it. Flagged UNVERIFIED.
+ 11312→
+ 11313→### 19.7 — ParticleEngine::destroy (block-break particle burst) — VERIFIED (ParticleEngine.cpp:100-119)
+ 11314→
+ 11315→```cpp
+ 11316→void ParticleEngine::destroy(int x, int y, int z) {
+ 11317→    int tid = level->getTile(x, y, z);
+ 11318→    if (tid == 0) return;     // air → no particles
+ 11319→    int data = level->getData(x, y, z);
+ 11320→
+ 11321→    Tile* tile = Tile::tiles[tid];
+ 11322→    const int SD = 3;     // 3×3 particle grid per face (well, 3×3×3 minus the bottom layer)
+ 11323→    for (int xx = 0; xx < SD; xx++)
+ 11324→        for (int yy = 1; yy < SD; yy++)      // yy starts at 1, not 0 — only 6 of 9 cells in the y layer
+ 11325→            for (int zz = 0; zz < SD; zz++) {
+ 11326→                float xp = x + (xx + 0.5f) / SD;     // = x + (0.17, 0.5, 0.83)
+ 11327→                float yp = y + (yy + 0.5f) / SD;
+ 11328→                float zp = z + (zz + 0.5f) / SD;
+ 11329→                // Velocity: 2 * (cell_center - 0.5) — outward burst from block center
+ 11330→                add((new TerrainParticle(level, xp, yp, zp,
+ 11331→                    2*(xp - x - 0.5f),
+ 11332→                    2*(yp - y - 0.5f),
+ 11333→                    2*(zp - z - 0.5f),
+ 11334→                    tile, data))->init(x, y, z));
+ 11335→            }
+ 11336→}
+ 11337→```
+ 11338→**Break particles:** 3×3×3 grid minus the bottom layer (yy starts at 1) = 18 particles per block break. Each particle's position is at the cell-center within the block, and its velocity is outward from the block center (multiplied by 2).
+ 11339→
+ 11340→### 19.8 — ParticleEngine::crack (per-click crack particles) — VERIFIED (ParticleEngine.cpp:121-139)
+ 11341→
+ 11342→```cpp
+ 11343→void ParticleEngine::crack(int x, int y, int z, int face) {
+ 11344→    int tid = level->getTile(x, y, z);
+ 11345→    if (tid == 0) return;
+ 11346→    int data = level->getData(x, y, z);
+ 11347→    Tile* tile = Tile::tiles[tid];
+ 11348→    float r = 0.10f;     // margin from face edge
+ 11349→
+ 11350→    // Random position within the tile's box (xx0..xx1, yy0..yy1, zz0..zz1)
+ 11351→    float xp = x + random.nextFloat() * ((tile->xx1 - tile->xx0) - r * 2) + r + tile->xx0;
+ 11352→    float yp = y + random.nextFloat() * ((tile->yy1 - tile->yy0) - r * 2) + r + tile->yy0;
+ 11353→    float zp = z + random.nextFloat() * ((tile->zz1 - tile->zz0) - r * 2) + r + tile->zz0;
+ 11354→
+ 11355→    // Snap to the clicked face (offset by r outside the face)
+ 11356→    switch (face) {
+ 11357→        case 0: yp = y + tile->yy0 - r; break;     // DOWN
+ 11358→        case 1: yp = y + tile->yy1 + r; break;     // UP
+ 11359→        case 2: zp = z + tile->zz0 - r; break;     // NORTH
+ 11360→        case 3: zp = z + tile->zz1 + r; break;     // SOUTH
+ 11361→        case 4: xp = x + tile->xx0 - r; break;     // WEST
+ 11362→        case 5: xp = x + tile->xx1 + r; break;     // EAST
+ 11363→    }
+ 11364→    add((new TerrainParticle(level, xp, yp, zp, 0, 0, 0, tile, data))
+ 11365→        ->init(x, y, z)->setPower(0.2f)->scale(0.6f));
+ 11366→}
+ 11367→```
+ 11368→**Crack particles:** 1 particle per click, randomly placed within the tile's box, then snapped to the clicked face with `r = 0.10` margin. Velocity (0,0,0). Power 0.2 (small), scale 0.6 (60% size).
+ 11369→
+ 11370→### 19.9 — ParticleEngine::setLevel / clear / countParticles — VERIFIED (ParticleEngine.cpp:95-98, 141-157)
+ 11371→
+ 11372→```cpp
+ 11373→void ParticleEngine::setLevel(Level* level) {
+ 11374→    this->level = level;
+ 11375→    clear();      // delete all particles
+ 11376→}
+ 11377→
+ 11378→std::string ParticleEngine::countParticles() {
+ 11379→    std::stringstream ss;
+ 11380→    int count = 0;
+ 11381→    for (int i = 0; i < TEXTURE_COUNT; ++i)
+ 11382→        count += particles[i].size();
+ 11383→    ss << count;
+ 11384→    return ss.str();
+ 11385→}
+ 11386→
+ 11387→void ParticleEngine::clear()
+ 11388→{
+ 11389→    for (int tt = 0; tt < TEXTURE_COUNT; tt++) {
+ 11390→        for (unsigned int i = 0; i < particles[tt].size(); i++)
+ 11391→            delete particles[tt][i];
+ 11392→        particles[tt].clear();
+ 11393→    }
+ 11394→}
+ 11395→```
+ 11396→
+ 11397→### Constants table (Entry 19)
+ 11398→
+ 11399→| Constant | Value | Source |
+ 11400→|---|---|---|
+ 11401→| `ParticleEngine::TEXTURE_COUNT` | 4 | ParticleEngine.h:24 |
+ 11402→| Texture groups | 0=MISC(particles.png), 1=TERRAIN(terrain.png), 2=ITEM(gui/items.png), 3=ENTITY_PARTICLE | ParticleEngine.h:19-22 |
+ 11403→| Default particles.png | loaded in constructor | ParticleEngine.cpp:12 |
+ 11404→| `destroy()` SD (grid size) | 3 | ParticleEngine.cpp:108 |
+ 11405→| `destroy()` yy start | 1 (skips bottom layer) | ParticleEngine.cpp:110 |
+ 11406→| `destroy()` particle count | 18 per block break (3×2×3) | ParticleEngine.cpp:109-111 |
+ 11407→| `destroy()` particle velocity | `2 * (cell_center - block_center)` outward | ParticleEngine.cpp:115 |
+ 11408→| `crack()` margin `r` | 0.10 | ParticleEngine.cpp:126 |
+ 11409→| `crack()` particle power | 0.2 | ParticleEngine.cpp:138 |
+ 11410→| `crack()` particle scale | 0.6 | ParticleEngine.cpp:138 |
+ 11411→| `crack()` particles per click | 1 | ParticleEngine.cpp:127-138 |
+ 11412→
+ 11413→### UNVERIFIED items (Entry 19)
+ 11414→1. **`Particle::tick()`** — base particle physics (gravity, drag, lifetime). UNVERIFIED.
+ 11415→2. **`Particle::render(t, a, xa, ya, za, xa2, za2)`** — emits 4 billboarded vertices to Tesselator. UNVERIFIED the exact vertex layout (likely a 4-vertex quad oriented using the basis vectors).
+ 11416→3. **`Particle::init(x, y, z)`** — likely sets texture coords from the source tile's UV in terrain.png. UNVERIFIED.
+ 11417→4. **`Particle::setPower(float)` and `Particle::scale(float)`** — modifiers. UNVERIFIED.
+ 11418→5. **`TerrainParticle` constructor** — likely takes (level, x, y, z, xa, ya, za, tile, data). UNVERIFIED.
+ 11419→6. **`renderLit` missing begin/draw** — looks like a bug or relies on Particle::render to handle its own batch. UNVERIFIED.
+ 11420→7. **Particle texture indices** in particles.png — UNVERIFIED per-particle-type UV (smoke, flame, etc.).
+ 11421→8. **`Level::getTile` / `Level::getData`** — verified in earlier MODLOG Entry 9.
+ 11422→
+ 11423→---
+ 11424→
+ 11425→## RE-Chunk-Animal-Screen Stage Summary
+ 11426→
+ 11427→### Verified constants and formulas (this stage)
+ 11428→
+ 11429→**Chunk meshing (Entry 14):**
+ 11430→- `Chunk::NumLayers = 3` (solid / cutout / water)
+ 11431→- Rebuild scale: `1.000001` (avoids z-fighting at chunk seams)
+ 11432→- AABB padding: +1 x/z (both sides), +2 top, 0 bottom
+ 11433→- Face brightness: down=0.5, up=1.0, N/S=0.8, W/E=0.6
+ 11434→- Texture atlas: 256×256 with 16×16 tiles; UV formula `((xt + box*16 - 0.01)/256, (yt + box*16)/256)` where `xt=(tex&0xF)<<4`, `yt=tex&0xF0`
+ 11435→- Layer system: tiles dispatch by `getRenderLayer()`; rebuild enables higher layers on-demand
+ 11436→
+ 11437→**LevelRenderer (Entry 15):**
+ 11438→- CHUNK_SIZE = 16 (8 if GFX_SMALLER_CHUNKS)
+ 11439→- View distance: `(512 >> 3) << (3 - viewDistance)` capped at 400
+ 11440→- yChunks = 8 (world is 128 blocks tall)
+ 11441→- MaxFrameTime for dirty chunks = 10 ms
+ 11442→- 3 nearest far-dirty-chunks per frame; unlimited near-dirty-chunks within time budget
+ 11443→- Cull step: chunks re-cull every 16 frames round-robin
+ 11444→- Player-move > 4 blocks triggers chunk re-sort
+ 11445→
+ 11446→**GameRenderer (Entry 15):**
+ 11447→- Camera render distance: `256 / 2^viewDistance`
+ 11448→- Near plane 0.05; stereo scale 0.07; default 3rd-person distance 4
+ 11449→- Base FOV 70°, underwater 60°, death narrows by `fov /= ((1 - 500/(d+500))*2 + 1)`
+
+[showing lines 10650-11449 of 11684; use offset=11450 with limit to continue reading]

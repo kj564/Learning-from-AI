@@ -1,0 +1,702 @@
+  7310→        mc->levelRenderer->updateDirtyChunks(cameraEntity, false);
+  7311→
+  7312→        if (mc->options.fancyGraphics) {
+  7313→            prepareAndRenderClouds(levelRenderer, a);
+  7314→        }
+  7315→
+  7316→        setupFog(0);
+  7317→        glEnable2(GL_FOG);
+  7318→
+  7319→        mc->textures->loadAndBindTexture("terrain.png");
+  7320→        glDisable2(GL_ALPHA_TEST);
+  7321→        glDisable2(GL_BLEND);
+  7322→        glEnable2(GL_CULL_FACE);
+  7323→        TIMER_POP_PUSH("terrain-0");
+  7324→        levelRenderer->render(cameraEntity, 0, a);   // layer 0 = solid
+  7325→
+  7326→        TIMER_POP_PUSH("terrain-1");
+  7327→        glEnable2(GL_ALPHA_TEST);
+  7328→        levelRenderer->render(cameraEntity, 1, a);   // layer 1 = alpha-tested (cutout)
+  7329→        
+  7330→        glShadeModel2(GL_FLAT);
+  7331→        TIMER_POP_PUSH("entities");
+  7332→        mc->levelRenderer->renderEntities(cameraEntity->getPos(a), &frustum, a);
+  7333→
+  7334→        TIMER_POP_PUSH("particles");
+  7335→        particleEngine->render(cameraEntity, a);
+  7336→
+  7337→        glDisable2(GL_BLEND);
+  7338→        glBlendFunc2(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+  7339→        setupFog(0);
+  7340→        glEnable2(GL_BLEND);
+  7341→        glDisable2(GL_CULL_FACE);
+  7342→        glDepthMask(GL_FALSE);
+  7343→        glDisable2(GL_ALPHA_TEST);
+  7344→        mc->textures->loadAndBindTexture("terrain.png");
+  7345→        {
+  7346→            TIMER_POP_PUSH("terrain-water");
+  7347→            glEnable2(GL_DEPTH_TEST);
+  7348→            levelRenderer->render(cameraEntity, 2, a);   // layer 2 = water (translucent)
+  7349→        }
+  7350→
+  7351→        glDepthMask(GL_TRUE);
+  7352→        glEnable2(GL_CULL_FACE);
+  7353→        glDisable2(GL_BLEND);
+  7354→        glEnable2(GL_ALPHA_TEST);
+  7355→
+  7356→        if (zoom == 1 && cameraEntity->isPlayer()) {
+  7357→            if (mc->hitResult.isHit() && !cameraEntity->isUnderLiquid(Material::water)) {
+  7358→                TIMER_POP_PUSH("select");
+  7359→                Player* player = (Player*) cameraEntity;
+  7360→                if (mc->useTouchscreen()) {
+  7361→                    levelRenderer->renderHitSelect(player, mc->hitResult, 0, NULL, a);
+  7362→                }
+  7363→                levelRenderer->renderHit(player, mc->hitResult, 0, NULL, a);
+  7364→            }
+  7365→        }
+  7366→
+  7367→        glDisable2(GL_FOG);
+  7368→        setupFog(1);
+  7369→
+  7370→        if (zoom == 1) {
+  7371→            TIMER_POP_PUSH("hand");
+  7372→            glClear(GL_DEPTH_BUFFER_BIT);
+  7373→            renderItemInHand(a, i);
+  7374→        }
+  7375→
+  7376→        if (!mc->options.anaglyph3d) {
+  7377→            TIMER_POP();
+  7378→            return;   // skip second pass for non-anaglyph
+  7379→        }
+  7380→    }
+  7381→    glColorMask(true, true, true, false);
+  7382→    TIMER_POP();
+  7383→}
+  7384→```
+  7385→
+  7386→**Render order per frame:**
+  7387→1. `pick(a)` — raycast for hitResult
+  7388→2. `setupClearColor` + `glClear(COLOR|DEPTH)`
+  7389→3. `setupCamera(a, eye)` — projection + modelview (perspective, bob, moveCameraToPlayer)
+  7390→4. `FrustumCuller.prepare(xOff,yOff,zOff)` — sets up frustum planes
+  7391→5. `levelRenderer->cull(&frustum, a)` — marks chunks visible
+  7392→6. `levelRenderer->updateDirtyChunks(player, false)` — rebuild nearest dirty chunks (the rebuilds themselves, NOT just the queue — this is called every RENDER frame, not per tick)
+  7393→7. (if fancyGraphics) `prepareAndRenderClouds(levelRenderer, a)`
+  7394→8. `levelRenderer->render(cameraEntity, 0, a)` — SOLID layer (no alpha test, no blend, cull face on)
+  7395→9. `levelRenderer->render(cameraEntity, 1, a)` — CUTOUT layer (alpha test on)
+  7396→10. `levelRenderer->renderEntities(...)` — entities + tile entities
+  7397→11. `particleEngine->render(cameraEntity, a)` — particles (3 of 4 texture groups; ENTITY_PARTICLE_TEXTURE rendered separately as renderLit)
+  7398→12. `levelRenderer->render(cameraEntity, 2, a)` — WATER layer (depth-write off, blend on, cull face off, alpha test off)
+  7399→13. (if hitResult.isHit() && ! underwater) `renderHit` (and renderHitSelect on touch)
+  7400→14. `glClear(GL_DEPTH_BUFFER_BIT)` + `renderItemInHand(a, eye)`
+  7401→15. Loop again only for anaglyph 3D (i=1 with red/cyan color masks).
+  7402→
+  7403→### 15.18 — GameRenderer::tick — VERIFIED (GameRenderer.cpp:738-791)
+  7404→
+  7405→```cpp
+  7406→void GameRenderer::tick(int nTick, int maxTick) {
+  7407→    --_t_keepPic;   // screenshot countdown
+  7408→
+  7409→    if (!mc->player) return;
+  7410→
+  7411→    if (--_shTicks == 0)
+  7412→        mc->hitResult.type = NO_HIT;   // freeform pick "stale" timer
+  7413→
+  7414→    if (nTick == maxTick) {
+  7415→        const float tickMult = 1.0f / (float)(1 + maxTick);
+  7416→        _rotXlast = 0.4f * std::pow(std::abs(_rotX), 1.2f) * tickMult;
+  7417→        if (_rotX < 0) _rotXlast = -_rotXlast;
+  7418→
+  7419→        _rotYlast = 0.4f * std::pow(std::abs(_rotY), 1.2f) * tickMult;
+  7420→        if (_rotY < 0) _rotYlast = -_rotYlast;
+  7421→
+  7422→        _rotX = 0;
+  7423→        _rotY = 0;
+  7424→    }
+  7425→
+  7426→    // Lerp previous-frame values
+  7427→    fogBrO = fogBr;
+  7428→    thirdDistanceO = thirdDistance;
+  7429→    thirdRotationO = thirdRotation;
+  7430→    thirdTiltO = thirdTilt;
+  7431→    fovOffsetO = fovOffset;
+  7432→    cameraRollO = cameraRoll;
+  7433→
+  7434→    if (mc->cameraTargetPlayer == NULL) {
+  7435→        mc->cameraTargetPlayer = mc->player;
+  7436→    }
+  7437→
+  7438→    tickFov();
+  7439→
+  7440→    float brr = mc->level->getBrightness(Mth::floor(mc->cameraTargetPlayer->x),
+  7441→                                        Mth::floor(mc->cameraTargetPlayer->y),
+  7442→                                        Mth::floor(mc->cameraTargetPlayer->z));
+  7443→
+  7444→    float whiteness = (3 - mc->options.viewDistance) / 3.0f;
+  7445→    float fogBrT = brr * (1 - whiteness) + whiteness;
+  7446→    fogBr += (fogBrT - fogBr) * 0.1f;   // smooth fog brightness toward target
+  7447→
+  7448→    _tick++;
+  7449→    itemInHandRenderer->tick();
+  7450→}
+  7451→```
+  7452→
+  7453→**Mouse → rotation conversion (per-tick):** `_rotXlast = 0.4 * |accumulatedMouseX|^1.2 / (1 + maxTick)`, preserving sign. This is the "rotation amount consumed per tick" — applied to player via `player->turn(deltaT * _rotXlast, ...)` in `render()`.
+  7454→**Fog brightness:** `fogBrT = playerBrightness * (1 - whiteness) + whiteness` where `whiteness = (3 - viewDistance) / 3` (viewDistance 0 → whiteness 1, viewDistance 3 → whiteness 0). Then `fogBr += (fogBrT - fogBr) * 0.1` (lerp 10% per tick).
+  7455→**tickFov:** `fov += (player.getFieldOfViewModifier() - fov) * 0.5` — lerps 50% per tick toward the player's FOV modifier.
+  7456→
+  7457→### 15.19 — GameRenderer::getFov — VERIFIED (GameRenderer.cpp:472-487)
+  7458→
+  7459→```cpp
+  7460→float GameRenderer::getFov(float a, bool applyEffects) {
+  7461→    Mob* player = mc->cameraTargetPlayer;
+  7462→    float fov = 70;
+  7463→
+  7464→    if (applyEffects)
+  7465→        fov *= this->oFov + (this->fov - this->oFov) * a;
+  7466→
+  7467→    if (player->isUnderLiquid(Material::water)) fov = 60;
+  7468→    if (player->health <= 0) {
+  7469→        float duration = player->deathTime + a;
+  7470→        fov /= ((1 - 500 / (duration + 500)) * 2.0f + 1);
+  7471→    }
+  7472→    return fov + fovOffsetO + (fovOffset - fovOffsetO) * a;
+  7473→}
+  7474→```
+  7475→**Base FOV:** 70 degrees. Water FOV: 60. On death: `fov /= ((1 - 500/(duration+500))*2 + 1)` — narrows the FOV as `deathTime` grows.
+  7476→
+  7477→### 15.20 — GameRenderer::pick — VERIFIED (GameRenderer.cpp:648-736)
+  7478→
+  7479→```cpp
+  7480→void GameRenderer::pick(float a) {
+  7481→    if (mc->level == NULL) return;
+  7482→    if (mc->cameraTargetPlayer == NULL) return;
+  7483→    if (!mc->cameraTargetPlayer->isAlive()) return;
+  7484→
+  7485→    float range = mc->gameMode->getPickRange();
+  7486→    bool isPicking = true;
+  7487→
+  7488→    bool freeform = mc->useTouchscreen()  && !mc->options.isJoyTouchArea;
+  7489→    if (freeform) {
+  7490→        isPicking = updateFreeformPickDirection(a, pickDirection);
+  7491→    } else {
+  7492→        mc->hitResult = mc->cameraTargetPlayer->pick(range, a);
+  7493→        pickDirection = mc->cameraTargetPlayer->getViewVector(a);
+  7494→    }
+  7495→
+  7496→    Vec3 from = mc->cameraTargetPlayer->getPos(a);
+  7497→    float dist = range;
+  7498→    if (mc->hitResult.isHit()) {
+  7499→        dist = mc->hitResult.pos.distanceTo(from);
+  7500→    }
+  7501→
+  7502→    if (mc->gameMode->isCreativeType()) {
+  7503→        range = 12;
+  7504→    } else {
+  7505→        if (dist > 3) dist = 3;   // survival: pick distance capped at 3 blocks
+  7506→        range = dist;
+  7507→    }
+  7508→
+  7509→    Vec3 pv = (pickDirection * range);
+  7510→    Vec3 to  = from + pv;
+  7511→    mc->cameraTargetPlayer->aimDirection = pickDirection;
+  7512→
+  7513→    Entity* hovered = NULL;
+  7514→    const float g = 1;
+  7515→    AABB aabb = mc->cameraTargetPlayer->bb.expand(pv.x, pv.y, pv.z).grow(g, g, g);
+  7516→    EntityList& objects = mc->level->getEntities(mc->cameraTargetPlayer, aabb);
+  7517→    float nearest = 0;
+  7518→    for (unsigned int i = 0; i < objects.size(); i++) {
+  7519→        Entity* e = objects[i];
+  7520→        if (!e->isPickable()) continue;
+  7521→
+  7522→        float rr = e->getPickRadius();
+  7523→        AABB bb = e->bb.grow(rr, rr, rr);
+  7524→        HitResult p = bb.clip(from, to);
+  7525→
+  7526→        if (bb.contains(from)) {
+  7527→            if (nearest >= 0) {
+  7528→                hovered = e;
+  7529→                nearest = 0;
+  7530→            }
+  7531→        } else if (p.isHit()) {
+  7532→            float dd = from.distanceTo(p.pos);
+  7533→            if (dd < nearest || nearest == 0) {
+  7534→                hovered = e;
+  7535→                nearest = dd;
+  7536→            }
+  7537→        }
+  7538→    }
+  7539→
+  7540→    if (hovered != NULL) {
+  7541→        if (nearest < dist) {
+  7542→            mc->hitResult = HitResult(hovered);
+  7543→        }
+  7544→    }
+  7545→    else if (isPicking && !mc->hitResult.isHit()) {
+  7546→        // MCPE simplification: when looking down by > ~45°, snap to block beneath player
+  7547→        if (pickDirection.y < -.7f) {
+  7548→            Vec3 to = from.add(0, -2.0f, 0);
+  7549→            HitResult downHitResult = mc->level->clip(from, to);
+  7550→            if (downHitResult.isHit()) {
+  7551→                mc->hitResult = downHitResult;
+  7552→                mc->hitResult.indirectHit = true;
+  7553→                if (std::abs(pickDirection.x) > std::abs(pickDirection.z)) {
+  7554→                    mc->hitResult.f = (pickDirection.x < 0)? 4 : 5;
+  7555→                } else {
+  7556→                    mc->hitResult.f = (pickDirection.z < 0)? 2 : 3;
+  7557→                }
+  7558→            }
+  7559→        }
+  7560→    }
+  7561→}
+  7562→```
+  7563→
+  7564→**Pick range:** `gameMode->getPickRange()`. For creative: range = 12 (override). For survival: pick distance capped at 3 blocks (if hit block was farther, can't target it).
+  7565→**Freeform (touchscreen non-joy):** uses `glhUnProjectf` from screen mouse pos with last saved matrices → constructs pick direction from camera through cursor. Picks within 6 blocks (first person) or 12 blocks (third person).
+  7566→**MCPE simplification:** if no hit but looking down by > 0.7 (≈45°), do a 2-block downward raycast and treat that as the hit (with `indirectHit = true` and a face perpendicular to the dominant horizontal axis). This makes building floors easier on touch.
+  7567→
+  7568→### 15.21 — GameRenderer::moveCameraToPlayer — VERIFIED (GameRenderer.cpp:489-562)
+  7569→
+  7570→```cpp
+  7571→void GameRenderer::moveCameraToPlayer(float a) {
+  7572→    Entity* player = mc->cameraTargetPlayer;
+  7573→
+  7574→    float heightOffset = player->heightOffset - 1.62f;
+  7575→
+  7576→    float x = player->xo + (player->x - player->xo) * a;
+  7577→    float y = player->yo + (player->y - player->yo) * a - heightOffset;
+  7578→    float z = player->zo + (player->z - player->zo) * a;
+  7579→
+  7580→    glRotatef2(cameraRollO + (cameraRoll - cameraRollO) * a, 0, 0, 1);
+  7581→
+  7582→    if (player->isPlayer() && ((Player*)player)->isSleeping()) {
+  7583→        heightOffset += 1.0;
+  7584→        glTranslatef(0.0f, 0.3f, 0);
+  7585→        if (!mc->options.fixedCamera) {
+  7586→            int t = mc->level->getTile(Mth::floor(player->x), Mth::floor(player->y), Mth::floor(player->z));
+  7587→            if (t == Tile::bed->id) {
+  7588→                int data = mc->level->getData(Mth::floor(player->x), Mth::floor(player->y), Mth::floor(player->z));
+  7589→                int direction = data & 3;
+  7590→                glRotatef(float(direction * 90), 0, 1, 0);
+  7591→            }
+  7592→            glRotatef(player->yRotO + (player->yRot - player->yRotO) * a + 180, 0, -1, 0);
+  7593→            glRotatef(player->xRotO + (player->xRot - player->xRotO) * a, -1, 0, 0);
+  7594→        }
+  7595→    } else if (mc->options.thirdPersonView) {
+  7596→        float cameraDist = thirdDistanceO + (thirdDistance - thirdDistanceO) * a;
+  7597→
+  7598→        if (mc->options.fixedCamera) {
+  7599→            // free-orbit camera
+  7600→            float rotationY = thirdRotationO + (thirdRotation - thirdRotationO) * a;
+  7601→            float xRot = thirdTiltO + (thirdTilt - thirdTiltO) * a;
+  7602→            glTranslatef2(0, 0, (float) -cameraDist);
+  7603→            glRotatef2(xRot, 1, 0, 0);
+  7604→            glRotatef2(rotationY, 0, 1, 0);
+  7605→        } else {
+  7606→            // third-person camera: pull back along player look vector; clip to wall via 8-sample ray test
+  7607→            float yRot = player->yRot;
+  7608→            float xRot = player->xRot;
+  7609→            float xd = -Mth::sin(yRot / 180 * Mth::PI) * Mth::cos(xRot / 180 * Mth::PI) * cameraDist;
+  7610→            float zd = Mth::cos(yRot / 180 * Mth::PI) * Mth::cos(xRot / 180 * Mth::PI) * cameraDist;
+  7611→            float yd = -Mth::sin(xRot / 180 * Mth::PI) * cameraDist;
+  7612→
+  7613→            for (int i = 0; i < 8; i++) {  // 8 jittered raycasts around camera to clip
+  7614→                float xo = (float)((i & 1) * 2 - 1);
+  7615→                float yo = (float)(((i >> 1) & 1) * 2 - 1);
+  7616→                float zo = (float)(((i >> 2) & 1) * 2 - 1);
+  7617→                xo *= 0.1f; yo *= 0.1f; zo *= 0.1f;
+  7618→                HitResult hr = mc->level->clip(Vec3(x + xo, y + yo, z + zo),
+  7619→                                              Vec3(x - xd + xo + zo, y - yd + yo, z - zd + zo));
+  7620→                if (hr.type != NO_HIT) {
+  7621→                    float dist = hr.pos.distanceTo(Vec3(x, y, z));
+  7622→                    if (dist < cameraDist) cameraDist = dist;
+  7623→                }
+  7624→            }
+  7625→
+  7626→            glRotatef2(player->xRot - xRot, 1, 0, 0);
+  7627→            glRotatef2(player->yRot - yRot, 0, 1, 0);
+  7628→            glTranslatef2(0, 0, (float) -cameraDist);
+  7629→            glRotatef2(yRot - player->yRot, 0, 1, 0);
+  7630→            glRotatef2(xRot - player->xRot, 1, 0, 0);
+  7631→        }
+  7632→    } else {
+  7633→        glTranslatef2(0, 0, -0.1f);
+  7634→    }
+  7635→
+  7636→    if (!mc->options.fixedCamera) {
+  7637→        glRotatef2(player->xRotO + (player->xRot - player->xRotO) * a, 1.0f, 0.0f, 0.0f);
+  7638→        glRotatef2(player->yRotO + (player->yRot - player->yRotO) * a + 180, 0, 1.0f, 0.0f);
+  7639→    }
+  7640→    glTranslatef2(0, heightOffset, 0);
+  7641→}
+  7642→```
+  7643→
+  7644→**Eye height:** `player.heightOffset - 1.62` (player eye is 1.62 below heightOffset).
+  7645→**Sleeping:** rotates around bed direction (data & 3) × 90°, plus 180° Y rotation, plus player xRot tilt.
+  7646→**Third-person:** backs up by `thirdDistance` along the player's look vector, with 8 jittered raycasts (±0.1 cube) to clip to walls.
+  7647→**First-person:** `glTranslatef(0, 0, -0.1)` only.
+  7648→
+  7649→### 15.22 — GameRenderer::bobHurt / bobView — VERIFIED (GameRenderer.cpp:498-536)
+  7650→
+  7651→```cpp
+  7652→void GameRenderer::bobHurt(float a) {
+  7653→    Mob* player = mc->cameraTargetPlayer;
+  7654→    float hurt = player->hurtTime - a;
+  7655→
+  7656→    if (player->health <= 0) {
+  7657→        float duration = player->deathTime + a;
+  7658→        glRotatef2(40 - (40 * 200) / (duration + 200), 0, 0, 1);   // death tilt
+  7659→    }
+  7660→    if (player->hurtTime <= 0) return;
+  7661→
+  7662→    hurt /= player->hurtDuration;
+  7663→    hurt = (float) Mth::sin(hurt * hurt * hurt * hurt * Mth::PI);   // sin of hurt^4
+  7664→    float rr = player->hurtDir;
+  7665→    glRotatef2(-rr, 0, 1, 0);
+  7666→    glRotatef2(-hurt * 14, 0, 0, 1);
+  7667→    glRotatef2(+rr, 0, 1, 0);
+  7668→}
+  7669→
+  7670→void GameRenderer::bobView(float a) {
+  7671→    if (!(mc->cameraTargetPlayer->isPlayer())) return;
+  7672→    Player* player = (Player*) mc->cameraTargetPlayer;
+  7673→
+  7674→    float wda = player->walkDist - player->walkDistO;
+  7675→    float b = -(player->walkDist + wda * a);
+  7676→    float bob = player->oBob + (player->bob - player->oBob) * a;
+  7677→    float tilt = player->oTilt + (player->tilt - player->oTilt) * a;
+  7678→    glTranslatef2((float) Mth::sin(b * Mth::PI) * bob * 0.5f, -(float) std::abs(Mth::cos(b * Mth::PI) * bob), 0);
+  7679→    glRotatef2((float) Mth::sin(b * Mth::PI) * bob * 3, 0, 0, 1);
+  7680→    glRotatef2((float) std::abs(Mth::cos(b * Mth::PI - 0.2f) * bob) * 5, 1, 0, 0);
+  7681→    glRotatef2((float) tilt, 1, 0, 0);
+  7682→}
+  7683→```
+  7684→**Hurt shake:** `hurt = sin(hurtFraction^4 * PI)`, then `glRotatef(-hurt*14, 0,0,1)` between two Y rotations by `-hurtDir / +hurtDir`.
+  7685→**Death tilt:** `glRotatef(40 - 40*200/(deathTime + 200), 0, 0, 1)` — tilts up to 40° as `deathTime` grows.
+  7686→**View bob:** sinusoidal translation/rotation driven by `player.walkDist` (cumulative distance walked). `bob` and `tilt` are smoothed (`oBob`/`bob` lerp).
+  7687→
+  7688→### 15.23 — GameRenderer::setupFog — VERIFIED (GameRenderer.cpp:539-595)
+  7689→
+  7690→```cpp
+  7691→void GameRenderer::setupFog(int i) {
+  7692→    Mob* player = mc->cameraTargetPlayer;
+  7693→    float fogBuffer[4] = {fr, fg, fb, 1};
+  7694→    glFogfv(GL_FOG_COLOR, (GLfloat*)fogBuffer);
+  7695→    glColor4f2(1, 1, 1, 1);
+  7696→
+  7697→    if (player->isUnderLiquid(Material::water)) {
+  7698→        glFogx(GL_FOG_MODE, GL_EXP);
+  7699→        glFogf(GL_FOG_DENSITY, 0.1f);
+  7700→    } else if (player->isUnderLiquid(Material::lava)) {
+  7701→        glFogx(GL_FOG_MODE, GL_EXP);
+  7702→        glFogf(GL_FOG_DENSITY, 2.f);
+  7703→    } else {
+  7704→        glFogx(GL_FOG_MODE, GL_LINEAR);
+  7705→        glFogf(GL_FOG_START, renderDistance * 0.6f);
+  7706→        glFogf(GL_FOG_END, renderDistance);
+  7707→        if (i < 0) {
+  7708→            glFogf(GL_FOG_START, 0);
+  7709→            glFogf(GL_FOG_END, renderDistance * 1.0f);
+  7710→        }
+  7711→        if (mc->level->dimension->foggy) {
+  7712→            glFogf(GL_FOG_START, 0);
+  7713→        }
+  7714→    }
+  7715→    glEnable2(GL_COLOR_MATERIAL);
+  7716→}
+  7717→```
+  7718→**Fog:** Linear with `start = 0.6*renderDistance`, `end = renderDistance` for air. Exp density 0.1 underwater, 2.0 under lava.
+  7719→
+  7720→### 15.24 — GameRenderer::setupClearColor — VERIFIED (GameRenderer.cpp:794-841)
+  7721→
+  7722→```cpp
+  7723→void GameRenderer::setupClearColor(float a) {
+  7724→    Level* level = mc->level;
+  7725→    Mob* player = mc->cameraTargetPlayer;
+  7726→
+  7727→    float whiteness = 1.0f / (4 - mc->options.viewDistance);
+  7728→    whiteness = 1 - (float) pow(whiteness, 0.25f);
+  7729→
+  7730→    Vec3 skyColor = level->getSkyColor(mc->cameraTargetPlayer, a);
+  7731→    float sr = (float) skyColor.x, sg = (float) skyColor.y, sb = (float) skyColor.z;
+  7732→
+  7733→    Vec3 fogColor = level->getFogColor(a);
+  7734→    fr = (float) fogColor.x; fg = (float) fogColor.y; fb = (float) fogColor.z;
+  7735→
+  7736→    fr += (sr - fr) * whiteness;
+  7737→    fg += (sg - fg) * whiteness;
+  7738→    fb += (sb - fb) * whiteness;
+  7739→
+  7740→    if (player->isUnderLiquid(Material::water)) {
+  7741→        fr = 0.02f; fg = 0.02f; fb = 0.2f;
+  7742→    } else if (player->isUnderLiquid(Material::lava)) {
+  7743→        fr = 0.6f; fg = 0.1f; fb = 0.00f;
+  7744→    }
+  7745→
+  7746→    float brr = fogBrO + (fogBr - fogBrO) * a;
+  7747→    fr *= brr; fg *= brr; fb *= brr;
+  7748→
+  7749→    if (mc->options.anaglyph3d) {
+  7750→        float frr = (fr * 30 + fg * 59 + fb * 11) / 100;
+  7751→        float fgg = (fr * 30 + fg * 70) / (100);
+  7752→        float fbb = (fr * 30 + fb * 70) / (100);
+  7753→        fr = frr; fg = fgg; fb = fbb;
+  7754→    }
+  7755→
+  7756→    glClearColor(fr, fg, fb, 1.0f);
+  7757→}
+  7758→```
+  7759→**Sky-fog blend:** `whiteness = 1 - (1/(4-viewDistance))^0.25` — at viewDistance 0 whiteness≈0.124, viewDistance 3 whiteness≈0.292 (but capped because of pow). Fog color lerps toward sky color by `whiteness` (distant fog is more sky-colored).
+  7760→**Water clear:** (0.02, 0.02, 0.2).
+  7761→**Lava clear:** (0.6, 0.1, 0.0).
+  7762→**Brightness multiplier:** `brr = fogBrO + (fogBr - fogBrO) * a` (per-frame interpolation of `fogBr` set in tick).
+  7763→
+  7764→### 15.25 — GameRenderer::setupGuiScreen — VERIFIED (GameRenderer.cpp:855-871)
+  7765→
+  7766→```cpp
+  7767→void GameRenderer::setupGuiScreen( bool clearColorBuffer )
+  7768→{
+  7769→    int screenWidth = (int)(mc->width * Gui::InvGuiScale);
+  7770→    int screenHeight = (int)(mc->height * Gui::InvGuiScale);
+  7771→
+  7772→    GLbitfield clearBits = clearColorBuffer?
+  7773→                    GL_DEPTH_BUFFER_BIT|GL_COLOR_BUFFER_BIT
+  7774→            :       GL_DEPTH_BUFFER_BIT;
+  7775→    glClear(clearBits);
+  7776→    glMatrixMode(GL_PROJECTION);
+  7777→    glLoadIdentity2();
+  7778→    glOrthof(0, (GLfloat)screenWidth, (GLfloat)screenHeight, 0, 2000, 3000);
+  7779→    glMatrixMode(GL_MODELVIEW);
+  7780→    glLoadIdentity2();
+  7781→    glTranslatef2(0, 0, -2000);
+  7782→}
+  7783→```
+  7784→**GUI projection:** `glOrthof(0, screenWidth, screenHeight, 0, 2000, 3000)` — left-handed Y-down ortho, near=2000, far=3000, translated to z=-2000.
+  7785→
+  7786→### 15.26 — GameRenderer::renderItemInHand — VERIFIED (GameRenderer.cpp:874-901)
+  7787→
+  7788→```cpp
+  7789→void GameRenderer::renderItemInHand(float a, int eye) {
+  7790→    glLoadIdentity2();
+  7791→    if (mc->options.anaglyph3d) glTranslatef2((eye * 2 - 1) * 0.10f, 0, 0);
+  7792→
+  7793→    glPushMatrix2();
+  7794→    bobHurt(a);
+  7795→    if (mc->options.bobView) bobView(a);
+  7796→
+  7797→    if (!mc->options.thirdPersonView && (mc->cameraTargetPlayer->isPlayer() && !((Player*)mc->cameraTargetPlayer)->isSleeping())) {
+  7798→        if (!mc->options.hideGui) {
+  7799→            float fov = getFov(a, false);
+  7800→            if (fov != _setupCameraFov) {
+  7801→                glMatrixMode(GL_PROJECTION);
+  7802→                glLoadIdentity();
+  7803→                gluPerspective(fov, mc->width / (float) mc->height, 0.05f, renderDistance);
+  7804→                glMatrixMode(GL_MODELVIEW);
+  7805→            }
+  7806→            itemInHandRenderer->render(a);
+  7807→        }
+  7808→    }
+  7809→
+  7810→    glPopMatrix2();
+  7811→    if (!mc->options.thirdPersonView && (mc->cameraTargetPlayer->isPlayer() && !((Player*)mc->cameraTargetPlayer)->isSleeping())) {
+  7812→        itemInHandRenderer->renderScreenEffect(a);
+  7813→        bobHurt(a);
+  7814→    }
+  7815→    if (mc->options.bobView) bobView(a);
+  7816→}
+  7817→```
+  7818→
+  7819→### 15.27 — GameRenderer::prepareAndRenderClouds — VERIFIED (GameRenderer.cpp:923-952)
+  7820→
+  7821→```cpp
+  7822→void GameRenderer::prepareAndRenderClouds( LevelRenderer* levelRenderer, float a ) {
+  7823→    TIMER_PUSH("clouds");
+  7824→    glMatrixMode(GL_PROJECTION);
+  7825→    glPushMatrix2();
+  7826→    glLoadIdentity2();
+  7827→    gluPerspective(_setupCameraFov = getFov(a, true), mc->width / (float) mc->height, 2, renderDistance * 512);
+  7828→    glMatrixMode(GL_MODELVIEW);
+  7829→    glPushMatrix2();
+  7830→    setupFog(0);
+  7831→    glDepthMask(false);
+  7832→    glEnable2(GL_FOG);
+  7833→    glFogf(GL_FOG_START, renderDistance  * 0.2f);
+  7834→    glFogf(GL_FOG_END, renderDistance * 0.75f);
+  7835→    levelRenderer->renderSky(a);
+  7836→    glFogf(GL_FOG_START, renderDistance * 4.2f * 0.6f);
+  7837→    glFogf(GL_FOG_END, renderDistance * 4.2f);
+  7838→    levelRenderer->renderClouds(a);
+  7839→    glFogf(GL_FOG_START, renderDistance  * 0.6f);
+  7840→    glFogf(GL_FOG_END, renderDistance);
+  7841→    glDisable2(GL_FOG);
+  7842→    glDepthMask(true);
+  7843→    setupFog(1);
+  7844→    glPopMatrix2();
+  7845→    glMatrixMode(GL_PROJECTION);
+  7846→    glPopMatrix2();
+  7847→    glMatrixMode(GL_MODELVIEW);
+  7848→    TIMER_POP();
+  7849→}
+  7850→```
+  7851→**Sky/cloud far plane:** `renderDistance * 512` (sky is essentially infinite).
+  7852→**Sky fog:** 0.2× to 0.75× renderDistance.
+  7853→**Cloud fog:** 4.2×0.6 = 2.52× to 4.2× renderDistance.
+  7854→
+  7855→### 15.28 — Tesselator vertex format (VertecDecl.h) — VERIFIED
+  7856→
+  7857→```cpp
+  7858→typedef struct VertexDeclPTC {
+  7859→    GLfloat x, y, z;     // 12 bytes
+  7860→    GLfloat u, v;        // 8 bytes
+  7861→    GLuint  color;       // 4 bytes  (ABGR packed: (a<<24)|(b<<16)|(g<<8)|r)
+  7862→} VertexDeclPTC;          // = 24 bytes per vertex
+  7863→```
+  7864→**VertexSizeBytes = 24.** Note that normals (`VertexDeclPTCN`) are declared but unused — `Tesselator::normal()` actually does nothing (logs a warning).
+  7865→
+  7866→### 15.29 — Tesselator.h state — VERIFIED (Tesselator.h:17-128)
+  7867→
+  7868→```cpp
+  7869→class Tesselator
+  7870→{
+  7871→    static const int MAX_MEMORY_USE = 16 * 1024 * 1024;     // 16 MB
+  7872→    static const int MAX_FLOATS = MAX_MEMORY_USE / 4 / 2;   // 2M floats
+  7873→
+  7874→    Tesselator(int size);
+  7875→public:
+  7876→    static const int ACCESS_DYNAMIC = 1;
+  7877→    static const int ACCESS_STATIC = 2;
+  7878→    static Tesselator instance;
+  7879→
+  7880→    ~Tesselator();
+  7881→    void init();   // calls glGenBuffers2(vboCounts, vboIds)
+  7882→    void clear();
+  7883→
+  7884→    void begin();           // begin(GL_QUADS) - default mode
+  7885→    void begin(int mode);
+  7886→    void draw();
+  7887→    RenderChunk end(bool useMine, int bufferId);
+  7888→
+  7889→    void color(int c);
+  7890→    void color(int c, int alpha);
+  7891→    void color(float r, float g, float b);
+  7892→    void color(float r, float g, float b, float a);
+  7893→    void color(int r, int g, int b);
+  7894→    void color(int r, int g, int b, int a);
+  7895→    void color(char r, char g, char b);
+  7896→    void colorABGR( int c );
+  7897→
+  7898→    void normal(float x, float y, float z);   // WARNING: logs "Can't use normals" and returns — UNUSED
+  7899→    void voidBeginAndEndCalls(bool doVoid);
+  7900→
+  7901→    void tex(float u, float v);
+  7902→
+  7903→    void vertex(float x, float y, float z);
+  7904→    void vertexUV(float x, float y, float z, float u, float v);
+  7905→
+  7906→    void scale2d(float x, float y);
+  7907→    void resetScale();
+  7908→
+  7909→    void noColor();
+  7910→    void enableColor();
+  7911→
+  7912→private:
+  7913→    void setAccessMode(int mode);
+  7914→public:
+  7915→    void offset(float xo, float yo, float zo);
+  7916→    void offset(const Vec3& v);
+  7917→    void addOffset(float x, float y, float z);
+  7918→    void addOffset(const Vec3& v);
+  7919→
+  7920→    int getVboCount();
+  7921→    int getColor();
+  7922→
+  7923→    __inline void beginOverride() {
+  7924→        begin();
+  7925→        voidBeginAndEndCalls(true);
+  7926→    }
+  7927→    __inline void endOverrideAndDraw() {
+  7928→        voidBeginAndEndCalls(false);
+  7929→        draw();
+  7930→    }
+  7931→    __inline bool isOverridden() { return _voidBeginEnd; }
+  7932→    __inline RenderChunk endOverride(int bufferId) {
+  7933→        voidBeginAndEndCalls(false);
+  7934→        return end(true, bufferId);
+  7935→    }
+  7936→
+  7937→private:
+  7938→    VERTEX* _varray;            // vertex array buffer (24 bytes/vertex)
+  7939→    int vertices;               // logical vertex count (quads count as 4)
+  7940→    float xo, yo, zo;           // current offset
+  7941→    float u, v;                 // pending texture coords
+  7942→    unsigned int _color;        // pending color (ABGR)
+  7943→    int _normal;                // pending normal (UNUSED)
+  7944→    float _sx, _sy;             // 2D scale (only x,y multiplied; z passed through)
+  7945→
+  7946→    bool hasColor, hasTexture, hasNormal, _noColor, _voidBeginEnd;
+  7947→    int p;                      // raw array index (slot count)
+  7948→    int count;                  // count of vertices added in current begin() session (mod 4 for quad tracking)
+  7949→    bool tesselating;
+  7950→
+  7951→    bool vboMode;
+  7952→    int vboCounts;              // 128 (VBO ring buffer count)
+  7953→    int vboId;                  // current VBO index (cycles 0..127)
+  7954→    GLuint* vboIds;             // 128 VBO ids allocated via glGenBuffers2
+  7955→
+  7956→    int size, totalSize, maxVertices;     // size in bytes / cumulative bytes / max vertex count
+  7957→    int mode, accessMode;
+  7958→    IntGLMap map;
+  7959→};
+  7960→```
+  7961→
+  7962→### 15.30 — Tesselator::instance & constructor — VERIFIED (Tesselator.cpp:6-41)
+  7963→
+  7964→```cpp
+  7965→Tesselator Tesselator::instance(sizeof(GLfloat) * MAX_FLOATS); // max size in bytes
+  7966→// = sizeof(float) * 2M = 8MB buffer for the vertex array
+  7967→
+  7968→const int VertexSizeBytes = sizeof(VERTEX);   // = 24
+  7969→
+  7970→Tesselator::Tesselator( int size )
+  7971→:       size(size),
+  7972→        vertices(0),
+  7973→        u(0), v(0),
+  7974→        _color(0),
+  7975→        hasColor(false),
+  7976→        hasTexture(false),
+  7977→        hasNormal(false),
+  7978→        p(0),
+  7979→        count(0),
+  7980→        _noColor(false),
+  7981→        mode(0),
+  7982→        xo(0), yo(0), zo(0),
+  7983→        _normal(0),
+  7984→        _sx(1), _sy(1),
+  7985→        tesselating(false),
+  7986→        vboId(-1),
+  7987→        vboCounts(128),
+  7988→        totalSize(0),
+  7989→        accessMode(ACCESS_STATIC),
+  7990→        maxVertices(size / sizeof(VERTEX)),    // = 8MB / 24B = ~349,525 vertices
+  7991→        _voidBeginEnd(false)
+  7992→{
+  7993→    vboIds = new GLuint[vboCounts];
+  7994→    _varray = new VERTEX[maxVertices];
+  7995→}
+  7996→```
+  7997→
+  7998→### 15.31 — Tesselator::begin / tex / color — VERIFIED (Tesselator.cpp:141-241)
+  7999→
+  8000→```cpp
+  8001→void Tesselator::begin( int mode )
+  8002→{
+  8003→    if (tesselating || _voidBeginEnd) {
+  8004→        if (tesselating && !_voidBeginEnd) LOGI("already tesselating!\n");
+  8005→        return;
+  8006→    }
+  8007→    tesselating = true;
+  8008→    clear();
+  8009→    this->mode = mode;
+
+[showing lines 7310-8009 of 11684; use offset=8010 with limit to continue reading]

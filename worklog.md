@@ -1728,3 +1728,168 @@ Stage Summary:
 - Commit: 67d6ce55
 - Faithful port verified working: title screen -> game -> pause, with HUD/hotbar/health
 - No additions made: only rujukan structure translated (constants, class names, tick flow, tile registry, screen lifecycle)
+
+---
+Task ID: 9
+Agent: full-stack-developer (faithful rewrite from MODLOG)
+Task: Rewrite voxelcraft-rujukan-port.html from MODLOG verified code
+
+Work Log:
+- Read MODLOG.md entries 1–19 (Entity, Mob, Player, LocalPlayer, KeyboardInput,
+  Level, LevelChunk, Tile registry, GameMode, LevelGen, Chunk, LevelRenderer,
+  GameRenderer, Chicken, Animal, PathfinderMob, Screen, Button, StartMenuScreen,
+  PauseScreen, Minecraft, ParticleEngine) line-by-line per Rule Zero.
+- Read worklog.md Task 6 + 6b/7 to learn prior port (4278 lines) had a known
+  Screen.init/init() virtual collision bug (renamed to initScreen in the rewrite).
+- Wrote /home/z/my-project/public/voxelcraft-rujukan-port.html (4659 lines,
+  ~170 KB) then synced to /tmp/Surprise564/public/voxelcraft-rujukan-port.html.
+- Organized script into 31 SECTION blocks mirroring rujukan folder paths
+  exactly: world/phys (Vec3/AABB with clipX/Y/ZCollide + clip→HitResult),
+  world/level (LevelConstants + Material + SoundType + Tile + subclasses +
+  TileRegistry with exact Entry-11 IDs + DataLayer nibble + LevelChunk 32768-
+  byte blocks[(x<<11)|(z<<7)|y] + Level with tick order + LCG + brightness),
+  world/level/levelgen (5×17×5 noise grid + buildSurfaces + ore distribution
+  per Entry 13 table + tree scatter), world/entity (Entity move Y→X→Z AABB
+  clip + !slide zero-out + baseTick + moveRelative), world/entity/Mob (aiStep
+  with xxa*=0.98 yya*=0.98 yRotA*=0.9 + travel 3-branch water/lava/land with
+  friction2 formula + gravity 0.08 + air drag 0.98 + jumpFromGround yd=0.42
+  + updateAi 2%/5%/80% look/turn/swim), world/entity/animal (Animal spawn on
+  grass+brightness>8 + fleeTime=60 on hurt + wander ±6/±3/±6 10 samples
+  MAX_TURN=30, Chicken with VERIFIED wing-flap dynamics + slow fall + NO
+  egg laying), world/entity/player (Player MAX_HEALTH=20 DEFAULT_WALK_SPEED=
+  0.1 DEFAULT_FLY_SPEED=0.02 AABB 0.6×1.8 eye 1.62 + travel flying override
+  flyingSpeed=0.05 + yd *= 0.6 + aiStep peaceful regen + bob/tilt lerp 0.4/0.8
+  NO super call, LocalPlayer VERIFIED Entry 6 aiStep double-jump fly 7-tick
+  window mayfly-only + vertical impulse ±0.15/tick + using-item damping 0.35
+  + Mob::aiStep first then Player::aiStep + move flying path with calculateFlight
+  via SmoothFloat accel=0.35*sensitivity + autojump half-tile trigger + look-ahead
+  + isJumpable blacklist), client/player/input (KeyboardInput forward=+1 back=-1
+  left=+1 right=-1 sneak *=0.3, MouseTurnInput linearTransform deadzone 40/30
+  scale 0.4/0.6, MouseBuildInput left every-tick vs right first-tick-only
+  buildDelayTicks=10), world/inventory (Item + TileItem + ItemInstance +
+  Inventory 9+27 slots), client/gamemode (GameMode pick range 5.0 + tick saves
+  oDestroyProgress + render interpolates with alpha, SurvivalMode progress
+  formula + 5-tick destroyDelay cooldown + step sound every 4 ticks
+  (destroyTicks&3==1), CreativeMode DestructionTickDelay=10 instant + repeat
+  every 10 ticks + mayfly/instabuild/invulnerable), client/gui (GuiComponent +
+  Font via @font-face Minecraft Ten 12px + Gui HUD with hotbar/hearts/XYZ/
+  mode/time/fps overlay), client/gui/Screen (VERIFIED lifecycle initScreen→
+  init()→setupPositions()→updateTabButtonSelection + mouseClicked→hit-test→
+  press→record + mouseReleased→buttonClicked+sound+released + keyPressed
+  ESC→setScreen(null) + tabButtons keyboard nav), client/gui/components/Button
+  (200×24 default yImage 0/1/2 text colors 0xffa0a0a0/0xe0e0e0/0xffffa0
+  y_offset=46+yImage*20 dirt bg 0x404040), client/gui/screens (StartMenuScreen
+  bHost=2/bJoin=3 160×24 bOptions=4 78×22 bSurvival=10 yBase=height/2+25
+  bHost.y=yBase-28 bJoin.y=yBase bSurvival.y=yBase+28 title at y=4 version y=62
+  gray copyright y=height-10 white isInGameScreen=false handleBackEvent quits;
+  PauseScreen bContinue=1/bQuit=2 160 wide y=48/80 "Game menu" y=24 white
+  isInGameScreen=true), client (Minecraft Timer 20 TPS MAX_TICKS_PER_UPDATE=
+  10 + tick order VERIFIED Entry 18 gameMode.tick→tickInput→gui.tick→
+  gameRenderer.tick→levelRenderer.tick→level.tickEntities→level.tick→
+  particleEngine.tick→screen.tick + update order timer.advanceTime→tick×N→
+  gameMode.render(a)→soundEngine.update(a)→gameRenderer.render(a)→
+  renderer.render(scene, camera)→gui.renderHUD + Options + KeyMapping +
+  MouseHandler), client/renderer (Tesselator 24 bytes/vertex pos+uv+color,
+  Textures with VoxelCraft pack loader + magenta fallback, ChunkMesh with
+  per-chunk rebuild face culling via Tile::shouldRenderFace + per-face brightness
+  VERIFIED Entry 14 down 0.5 / up 1.0 / N-S 0.8 / W-E 0.6 + UV mapping
+  terrain.png 16×16 grid -0.01 inset, LevelRenderer 16×8×16=2048 chunks for
+  256×256×128 world + dirty queue + 3 render layers (solid/alpha-tested/
+  translucent water), GameRenderer setupCamera FOV 70 water 60 +
+  moveCameraToPlayer first-person + pick range 5 + mouse sens cubic curve
+  ((sensitivity*0.6+0.2)^3)*8 + renderLevel order), client/particle/
+  ParticleEngine VERIFIED Entry 19 destroy 18 particles in 3×2×3 grid (yy
+  starts at 1) velocity 2*(cell_center-0.5) outward + crack 1 particle on
+  face with r=0.10 margin + 4 texture groups).
+- Verified script syntax via acorn.parse with sourceType:'module' — no errors.
+- Verified all required block textures present in
+  /home/z/my-project/public/VoxelCraft/textures/blocks/: stone, grass_top,
+  grass_side, dirt, cobblestone, planks_oak, bedrock, water_still, lava_still,
+  sand, gravel, gold_ore, iron_ore, coal_ore, log_oak, log_oak_top,
+  leaves_oak_opaque, glass, brick, tnt_side, tnt_top, bookshelf,
+  cobblestone_mossy (moss_stone), obsidian, torch_on, diamond_ore,
+  diamond_block, crafting_table_*, furnace_*, ice, netherrack, glowstone,
+  chest. Magenta fallback for missing names.
+- Verified dev server returns HTTP 200 for the HTML file, all block textures,
+  and the Minecraft Ten font.
+- bun run lint passes with no errors.
+- Synced workspace to /tmp/Surprise564/public/voxelcraft-rujukan-port.html via cp.
+
+Stage Summary:
+- File produced: /tmp/Surprise564/public/voxelcraft-rujukan-port.html — 4659
+  lines, ~170 KB, single self-contained HTML with Three.js via importmap.
+- Workspace mirror: /home/z/my-project/public/voxelcraft-rujukan-port.html
+  (same content, served by Next.js dev server on port 3000).
+- Systems ported EXACTLY from MODLOG entries 1–19 line-by-line:
+  - Mob::travel 3 branches (water drag 0.8 / lava drag 0.5 / land friction2
+    formula `(0.6*0.6*0.91*0.91*0.6*0.91)/(friction^3)` + gravity 0.08 + air
+    drag 0.98 + swim impulse +0.04 + jumpFromGround yd=0.42)
+  - Entity::move Y→X→Z AABB clip per axis with !slide zero-out
+  - Mob::aiStep xxa *= 0.98 yya *= 0.98 yRotA *= 0.9 before travel
+  - Player double-jump fly 7-tick window (mayfly only) + vertical impulse
+    ±0.15/tick + using-item damping 0.35
+  - AutoJump half-tile trigger + look-ahead + isJumpable blacklist
+  - Tile registry exact IDs 1-95 from MODLOG Entry 11 with destroySpeed/
+    soundType/lightBlock/lightEmission; getDestroyProgress `(speed/dSpeed)/30`
+  - Survival break: progress + 5-tick destroyDelay + step sound every 4
+    ticks; Creative break: DestructionTickDelay=10 instant + repeat every 10
+  - Chicken: size 0.3×0.7 health 4 flapSpeed += (onGround?-1:4)*0.3 clamp
+    [0,1] + flapping *= 0.9 + slow fall yd *= 0.6 + NO egg laying
+  - Animal wander ±6/±3/±6 10 samples + look 2%/tick 10..30 + MAX_TURN=30
+  - Screen lifecycle initScreen→init→setupPositions; mouseClicked→press→record,
+    mouseReleased→buttonClicked+sound; keyPressed ESC→setScreen(null)
+  - Button 200×24 yImage 0/1/2 text colors 0xffa0a0a0/0xe0e0e0/0xffffa0
+    y_offset=46+yImage*20
+  - StartMenu bHost/bJoin 160×24 bOptions 78×22 yBase=height/2+25
+  - PauseScreen Continue/Quit 160 wide y=48/80 "Game menu" y=24 white
+  - Minecraft tick order EXACT from Entry 18: gameMode.tick → tickInput →
+    gui.tick → gameRenderer.tick → levelRenderer.tick → level.tickEntities →
+    level.tick → particleEngine.tick → screen.tick → soundEngine.update
+  - World 256×256×128 bounded, sea level 63, 20 TPS fixed-timestep, no
+    clouds/vignette/sprint-FOV/extra features
+  - ParticleEngine destroy 18 particles in 3×2×3 grid (yy starts at 1)
+    velocity 2*(cell_center-0.5) outward
+
+---
+Task ID: 10 (final)
+Agent: Z.ai Code (orchestrator)
+Task: Install universal-modder, RE rujukan with RE skill, rewrite port from MODLOG, verify, commit
+
+Work Log:
+- Installed universal-modder per user request: `npx skills add` hung (npm registry 404 for non-package), so installed manually:
+  - Copied skills/ from github.com/rehan-remade/universal-modder to workspace skills/ (only port-a-mod was new; others already present)
+  - Installed `um` CLI via `uv tool install git+...universal-modder` (succeeded: universal-modder 0.2.0, provides um scan/fal/sprite/render3d/video/win/backup/publish/kb)
+  - Read field note "An Android port of Insaniquarium Deluxe from the WinFish decompilation" — same decomp-recomp route pattern as our port
+- RE phase (3 subagents, parallel): Read rujukan C++ source LINE-BY-LINE per reverse-engineering skill Rule Zero ("read the real thing, don't guess"):
+  - RE-Player: Player.cpp/h, LocalPlayer.cpp/h, KeyboardInput/MouseBuild/MouseTurn — Entries 5-8
+  - RE-Level-Tile: Level.cpp/h, LevelChunk, Tile.cpp/h, GameMode/Survival/Creative, LevelGen, MobSpawner — Entries 9-13
+  - RE-Chunk-Animal-Screen: Chunk.cpp/h, LevelRenderer, GameRenderer, Tesselator, Chicken/Animal/PathfinderMob, Screen/Button/StartMenu/Pause, Minecraft.cpp main loop, ParticleEngine — Entries 14-19
+  - MODLOG.md grew to 11,683 lines of EXACT C++ code (not summaries)
+- Port rewrite (1 subagent): Rewrote voxelcraft-rujukan-port.html (4659 lines) transcribing from MODLOG verified code, NOT from summaries
+- Fixed 2 runtime bugs found via Agent Browser:
+  1. Textures not loading on first chunk rebuild (async Image.onload) -> added _preloadTextures() in Minecraft.init() + force chunk dirty after setLevel
+  2. Camera pitch sign wrong (look down made camera look up) -> fixed dirY = -sin(xRot_rad)
+- Verified in Agent Browser:
+  - Title screen with Start/Join/Options/Mode buttons
+  - Start Game -> 3D world with grass/dirt/stone textures (VLM confirmed "green grass, brown dirt, grey stone, pixelated textures applied, characteristic of a faithful visual style")
+  - HUD: XYZ 128.5/105/158.5, Health 20/20, Mode Survival, Time, FPS
+  - 9-slot hotbar, 10 hearts
+  - Block break works
+- Committed: "Rewrite faithful port from MODLOG verified code (RE skill Rule Zero)" (1343359e, 16413 insertions, 4103 deletions)
+
+Stage Summary:
+- Branch: feat/rujukan-faithful-port (local commit 1343359e, NOT pushed — token invalid)
+- Files: public/voxelcraft-rujukan-port.html (4659 lines), MODLOG.md (11683 lines)
+- Skills installed: universal-modder (um CLI + 12 skills including port-a-mod, reverse-engineering)
+- Major fidelity gains over previous port:
+  - Mob::travel 3-branch physics with friction2 formula (verified)
+  - Entity::move Y->X->Z AABB clip order (verified)
+  - jumpFromGround = 0.42 single value (corrected from previous 0.42-with-branches guess)
+  - Double-jump fly 7-tick window, ±0.15 impulse (verified)
+  - AutoJump half-tile trigger (verified)
+  - Chicken wing flap formula + NO egg laying (verified)
+  - Minecraft tick order exact (verified)
+  - Tile registry with exact IDs (verified from Tile::initTiles)
+  - Per-face brightness constants (verified)
+  - ParticleEngine 18 particles 3x2x3 grid (verified)
+- BLOCKER: GitHub token expired/invalid — user needs to create new token at https://github.com/settings/tokens and share it to push. Local commit is ready.

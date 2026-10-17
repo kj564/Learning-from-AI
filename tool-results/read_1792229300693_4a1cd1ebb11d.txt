@@ -1,0 +1,802 @@
+  2200→}
+  2201→```
+  2202→
+  2203→**Random tick algorithm — EXACT:**
+  2204→1. Build the set of chunks to poll from each player's chunk position by adding 80 surrounding chunk offsets (a diamond pattern spanning ±4 chunks; total 80 chunk positions per player).
+  2205→2. **Chunk-poll grid bounds**: `xp,zp` clamped to `[0, CHUNK_CACHE_WIDTH)` = `[0, 16)` — the chunk cache is only 16×16 = 256 chunks total. (Pocket Edition world is fixed-size 256×256 columns.)
+  2206→3. For each chunk in the set:
+  2207→   - Run **20** random ticks per chunk per tick (constant hardcoded `20` in the inner `for` loop; comment marks it as `CHUNK_TILE_TICK_COUNT`).
+  2208→4. **LCG**: `_randValue = _randValue * 3 + _addend` (initial seed 42184323, addend 1013904223 — these are the Linear Congruential Generator constants).
+  2209→5. **Index decode from `val = _randValue >> 2`:**
+  2210→   - `x = val & 15`         (chunk-relative X, 0..15)
+  2211→   - `z = (val >> 8) & 15`  (chunk-relative Z, 0..15)
+  2212→   - `y = (val >> 16) & 127` (height, 0..127 — full LEVEL_HEIGHT range)
+  2213→6. Look up tile at `(x,y,z)` in the chunk; if `Tile::shouldTick[id]` is `true`, call `tile->tick(level, x+xo, y, z+zo, &random)` with world coords.
+  2214→
+  2215→**Effectively**: each tick, every loaded chunk within ±4 chunks of any player gets 20 random block picks. With 256 chunks max and a single player, only ~80 chunks are polled per tick.
+  2216→
+  2217→### Level::tickPendingTicks(bool force) — VERIFIED (Level.cpp:339–358)
+  2218→```cpp
+  2219→bool Level::tickPendingTicks(bool force) {
+  2220→    int count = _tickNextTickSet.size();
+  2221→    if (count > MAX_TICK_TILES_PER_TICK) count = MAX_TICK_TILES_PER_TICK;
+  2222→    for (int i = 0; i < count; i++) {
+  2223→        TickDataSet::iterator td = _tickNextTickSet.begin();
+  2224→        if (!force && td->delay > levelData.getTime()) {
+  2225→            break;
+  2226→        }
+  2227→        int r = 8;
+  2228→        if (hasChunksAt(td->x - r, td->y - r, td->z - r, td->x + r, td->y + r, td->z + r)) {
+  2229→            int id = getTile(td->x, td->y, td->z);
+  2230→            if (id == td->tileId && id > 0) {
+  2231→                Tile::tiles[id]->tick(this, td->x, td->y, td->z, &random);
+  2232→            }
+  2233→        }
+  2234→        _tickNextTickSet.erase(td);
+  2235→    }
+  2236→    return _tickNextTickSet.size() != 0;
+  2237→}
+  2238→```
+  2239→
+  2240→**Algorithm:** At most `MAX_TICK_TILES_PER_TICK = 100` scheduled ticks per call. For each entry in `_tickNextTickSet` (a `std::set<TickNextTickData>` ordered by delay), only fire if:
+  2241→- `force` is true, or `td.delay <= levelData.getTime()` (scheduled time has arrived).
+  2242→- The 8-block-radius cube around the position is fully loaded (`hasChunksAt(x-8..x+8, y-8..y+8, z-8..z+8)`).
+  2243→- The current tile at `(x,y,z)` is still the originally scheduled tile id and > 0.
+  2244→Otherwise, the entry is simply erased without firing.
+  2245→
+  2246→### Level::addToTickNextTick — VERIFIED (Level.cpp:1307–1328)
+  2247→```cpp
+  2248→void Level::addToTickNextTick(int x, int y, int z, int tileId, int tickDelay) {
+  2249→    TickNextTickData td(x, y, z, tileId);
+  2250→    int r = 8;
+  2251→    if (instaTick) {
+  2252→        if (hasChunksAt(td.x - r, td.y - r, td.z - r, td.x + r, td.y + r, td.z + r)) {
+  2253→            int id = getTile(td.x, td.y, td.z);
+  2254→            if (id == td.tileId && id > 0) {
+  2255→                Tile::tiles[id]->tick(this, td.x, td.y, td.z, &random);
+  2256→            }
+  2257→        }
+  2258→        return;
+  2259→    }
+  2260→    if (hasChunksAt(x - r, y - r, z - r, x + r, y + r, z + r)) {
+  2261→        if (tileId > 0) {
+  2262→            td.setDelay(tickDelay + levelData.getTime());
+  2263→        }
+  2264→        if (_tickNextTickSet.find(td) == _tickNextTickSet.end()) {
+  2265→            _tickNextTickSet.insert(td);
+  2266→        }
+  2267→    }
+  2268→}
+  2269→```
+  2270→**`instaTick`** flag forces the tick to fire immediately (used during worldgen or some game logic). Otherwise the entry's delay is set to `currentTime + tickDelay` and inserted into the set (deduped).
+  2271→
+  2272→### Level::getTile(x,y,z) — VERIFIED (Level.cpp:515–526)
+  2273→```cpp
+  2274→int Level::getTile(int x, int y, int z) {
+  2275→    if (y < 0) return 0;
+  2276→    if (y >= DEPTH) return 0;
+  2277→    return getChunk(x >> 4, z >> 4)->getTile(x & 15, y, z & 15);
+  2278→}
+  2279→```
+  2280→
+  2281→**Index math — EXACT:**
+  2282→- Chunk coords: `chunkX = x >> 4`, `chunkZ = z >> 4` (div by 16)
+  2283→- In-chunk coords: `lx = x & 15`, `lz = z & 15` (mod 16)
+  2284→- `y` passed through unchanged (no `& 15` — chunks are full-height).
+  2285→- Bounds: `y < 0` or `y >= 128` returns **0 (air)**. No bounds check on x/z — out-of-range chunks resolve to `EmptyLevelChunk` which returns `Tile::invisible_bedrock->id`.
+  2286→
+  2287→### Level::setTile / setTileAndData / setTileNoUpdate — VERIFIED (Level.cpp:643–658, 569–587)
+  2288→```cpp
+  2289→bool Level::setTile(int x, int y, int z, int tile) {
+  2290→    if (setTileNoUpdate(x, y, z, tile)) {
+  2291→        tileUpdated(x, y, z, tile);
+  2292→        return true;
+  2293→    }
+  2294→    return false;
+  2295→}
+  2296→
+  2297→bool Level::setTileAndData(int x, int y, int z, int tile, int data) {
+  2298→    if (setTileAndDataNoUpdate(x, y, z, tile, data)) {
+  2299→        tileUpdated(x, y, z, tile);
+  2300→        return true;
+  2301→    }
+  2302→    return false;
+  2303→}
+  2304→
+  2305→bool Level::setTileNoUpdate(int x, int y, int z, int tile) {
+  2306→    if (y < 0) return false;
+  2307→    if (y >= DEPTH) return false;
+  2308→    LevelChunk* c = getChunk(x >> 4, z >> 4);
+  2309→    return c->setTile(x & 15, y, z & 15, tile);
+  2310→}
+  2311→
+  2312→bool Level::setTileAndDataNoUpdate(int x, int y, int z, int tile, int data) {
+  2313→    if (y < 0) return false;
+  2314→    if (y >= DEPTH) return false;
+  2315→    LevelChunk* c = getChunk(x >> 4, z >> 4);
+  2316→    return c->setTileAndData(x & 15, y, z & 15, tile, data);
+  2317→}
+  2318→```
+  2319→
+  2320→### Level::tileUpdated / updateNeighborsAt / neighborChanged — VERIFIED (Level.cpp:667–719)
+  2321→```cpp
+  2322→/*protected*/ void Level::tileUpdated(int x, int y, int z, int tile) {
+  2323→    sendTileUpdated(x, y, z);
+  2324→    this->updateNeighborsAt(x, y, z, tile);
+  2325→}
+  2326→
+  2327→void Level::sendTileUpdated(int x, int y, int z) {
+  2328→    for (unsigned int i = 0; i < _listeners.size(); i++) {
+  2329→        _listeners[i]->tileChanged(x, y, z);
+  2330→    }
+  2331→}
+  2332→
+  2333→void Level::updateNeighborsAt(int x, int y, int z, int tile) {
+  2334→    neighborChanged(x - 1, y, z, tile);
+  2335→    neighborChanged(x + 1, y, z, tile);
+  2336→    neighborChanged(x, y - 1, z, tile);
+  2337→    neighborChanged(x, y + 1, z, tile);
+  2338→    neighborChanged(x, y, z - 1, tile);
+  2339→    neighborChanged(x, y, z + 1, tile);
+  2340→}
+  2341→
+  2342→/*private*/ void Level::neighborChanged(int x, int y, int z, int type) {
+  2343→    if (noNeighborUpdate || isClientSide) return;
+  2344→    Tile* tile = Tile::tiles[getTile(x, y, z)];
+  2345→    if (tile != NULL) tile->neighborChanged(this, x, y, z, type);
+  2346→}
+  2347→```
+  2348→
+  2349→`noNeighborUpdate` flag suppresses cascading neighbor updates (used during batch operations). Client-side never fires neighborChanged.
+  2350→
+  2351→### Level::getRawBrightness / getBrightness — VERIFIED (Level.cpp:725–761, 812–839)
+  2352→```cpp
+  2353→int Level::getRawBrightness(int x, int y, int z) {
+  2354→    return getRawBrightness(x, y, z, true);
+  2355→}
+  2356→
+  2357→int Level::getRawBrightness(int x, int y, int z, bool propagate) {
+  2358→    if (propagate) {
+  2359→        int id = getTile(x, y, z);
+  2360→        if (id == Tile::stoneSlabHalf->id || id == Tile::farmland->id) {
+  2361→            int br = getRawBrightness(x, y + 1, z, false);
+  2362→            int br1 = getRawBrightness(x + 1, y, z, false);
+  2363→            int br2 = getRawBrightness(x - 1, y, z, false);
+  2364→            int br3 = getRawBrightness(x, y, z + 1, false);
+  2365→            int br4 = getRawBrightness(x, y, z - 1, false);
+  2366→            if (br1 > br) br = br1;
+  2367→            if (br2 > br) br = br2;
+  2368→            if (br3 > br) br = br3;
+  2369→            if (br4 > br) br = br4;
+  2370→            return br;
+  2371→        }
+  2372→    }
+  2373→
+  2374→    if (y < 0) return 0;
+  2375→    if (y >= DEPTH) {
+  2376→        int br = MAX_BRIGHTNESS - skyDarken;
+  2377→        if (br < 0) br = 0;
+  2378→        return br;
+  2379→    }
+  2380→
+  2381→    LevelChunk* c = getChunk(x >> 4, z >> 4);
+  2382→    x &= 15;
+  2383→    z &= 15;
+  2384→    return c->getRawBrightness(x, y, z, skyDarken);
+  2385→}
+  2386→
+  2387→int Level::getBrightness(const LightLayer& layer, int x, int y, int z) {
+  2388→    if (y < 0 || y >= DEPTH) {
+  2389→        return layer.surrounding;
+  2390→    }
+  2391→    int xc = x >> 4;
+  2392→    int zc = z >> 4;
+  2393→    if (!hasChunk(xc, zc)) return 0;
+  2394→    LevelChunk* c = getChunk(xc, zc);
+  2395→    return c->getBrightness(layer, x & 15, y, z & 15);
+  2396→}
+  2397→
+  2398→float Level::getBrightness(int x, int y, int z) {
+  2399→    return dimension->brightnessRamp[getRawBrightness(x, y, z)];
+  2400→}
+  2401→```
+  2402→
+  2403→**Sky/block light formula — EXACT:**
+  2404→- For `stoneSlabHalf` and `farmland` tiles (half-height blocks), the brightness is the **max** of the 4 horizontal neighbours + the top neighbour (so light leaks around half-slabs).
+  2405→- Above the world (`y >= 128`): brightness = `MAX_BRIGHTNESS - skyDarken` = `15 - skyDarken` (clamped ≥0).
+  2406→- Below the world (`y < 0`): brightness = 0.
+  2407→- Otherwise delegate to `LevelChunk::getRawBrightness(lx, y, lz, skyDarken)`:
+  2408→  ```
+  2409→  rawBrightness = max(skyLight - skyDarken, blockLight)
+  2410→  ```
+  2411→  (see Entry 10 — `LevelChunk::getRawBrightness`).
+  2412→
+  2413→`LightLayer::Sky.surrounding = 15`, `LightLayer::Block.surrounding = 0` (verified LightLayer.cpp:3–4). So `getBrightness(layer, *, y<0, *)` returns `15` for sky light and `0` for block light when below the world.
+  2414→
+  2415→**brightnessRamp formula (Dimension::updateLightRamp, Dimension.cpp:66–74) — VERIFIED:**
+  2416→```cpp
+  2417→void Dimension::updateLightRamp() {
+  2418→    float ambientLight = 0.05f;
+  2419→    for (int i = 0; i <= 15; i++) {
+  2420→        float v = (1 - i / (float) (16));
+  2421→        brightnessRamp[i] = ((1 - v) / (v * 3 + 1)) * (1 - ambientLight) + ambientLight * 3;
+  2422→    }
+  2423→}
+  2424→```
+  2425→For brightness `i ∈ [0..15]`: `v = 1 - i/16`. The mapped float = `((1 - v) / (v*3 + 1)) * 0.95 + 0.15`. So at i=0: v=1, ramp = 0/4*0.95 + 0.15 = 0.15 (minimum); at i=15: v=0.0625, ramp ≈ (0.9375/1.1875)*0.95 + 0.15 ≈ 0.9. This is used by `Level::getBrightness(x,y,z)` (the float variant) for shading.
+  2426→
+  2427→### Level::getTimeOfDay / setTime / getTime / isDay / getSkyDarken — VERIFIED (Level.cpp:1232–1243, 2023–2033, 841–843, 1163–1170)
+  2428→```cpp
+  2429→float Level::getTimeOfDay(float a) {
+  2430→    return dimension->getTimeOfDay(levelData.getTime(), a);
+  2431→}
+  2432→
+  2433→void Level::setTime(long time) { this->levelData.setTime(time); }
+  2434→long Level::getTime()         { return levelData.getTime(); }
+  2435→
+  2436→bool Level::isDay()           { return this->skyDarken < 4; }
+  2437→
+  2438→int Level::getSkyDarken(float a) {
+  2439→    float td = getTimeOfDay(a);
+  2440→    float br = 1 - (Mth::cos(td * Mth::PI * 2) * 2 + 0.5f);
+  2441→    if (br < 0.0f) br = 0.0f;
+  2442→    if (br > 0.80f) br = 0.80f;
+  2443→    return ((int) (br * 11));
+  2444→}
+  2445→```
+  2446→
+  2447→`getSkyDarken` returns `0..8` (clamped by `0.80 * 11 = 8.8 → int 8`). This is subtracted from `skyLight` per-block when computing raw brightness.
+  2448→
+  2449→### NormalDayCycleDimension::getTimeOfDay — VERIFIED (NormalDayCycleDimension.h:12–20)
+  2450→```cpp
+  2451→float getTimeOfDay(long time, float a) {
+  2452→    int dayStep = (int) (time % Level::TICKS_PER_DAY);
+  2453→    float td = (dayStep + a) / Level::TICKS_PER_DAY - 0.25f;
+  2454→    if (td < 0) td += 1;
+  2455→    if (td > 1) td -= 1;
+  2456→    float tdo = td;
+  2457→    td = 1 - (cos(td * Mth::PI) + 1) * 0.5f;
+  2458→    return tdo + (td - tdo) / 3.0f;
+  2459→}
+  2460→```
+  2461→With `TICKS_PER_DAY = 19200`. Used in survival mode. Note `-0.25f` shifts dawn so day starts at `time=0` representing morning. Final output is a non-linear 0..1 curve used to drive sun angle, sky color, fog, etc.
+  2462→
+  2463→### Dimension::getTimeOfDay (base, creative) — VERIFIED (Dimension.cpp:52–54)
+  2464→```cpp
+  2465→float Dimension::getTimeOfDay(long time, float a) {
+  2466→    return 1;
+  2467→}
+  2468→```
+  2469→Creative mode (base `Dimension`) returns constant `1` — **always day**.
+  2470→
+  2471→### DimensionFactory — VERIFIED (Dimension.cpp:126–140)
+  2472→```cpp
+  2473→Dimension* DimensionFactory::createDefaultDimension(LevelData* data) {
+  2474→    int dimensionId = Dimension::NORMAL;
+  2475→    switch(data->getGameType()) {
+  2476→    case GameType::Survival: dimensionId = Dimension::NORMAL_DAYCYCLE; break;
+  2477→    case GameType::Creative:
+  2478→    default:                 dimensionId = Dimension::NORMAL;         break;
+  2479→    }
+  2480→    return Dimension::getNew(dimensionId);
+  2481→}
+  2482→```
+  2483→**Survival → NormalDayCycleDimension** (day/night cycle). **Creative → base Dimension** (always day). Dimension IDs: `NORMAL = 0`, `NORMAL_DAYCYCLE = 10`.
+  2484→
+  2485→### Level::tickEntities() — VERIFIED (Level.cpp:1330–1468)
+  2486→```cpp
+  2487→void Level::tickEntities() {
+  2488→    TIMER_PUSH("entities");
+  2489→    TIMER_PUSH("remove");
+  2490→
+  2491→    EntityList pendingRemovedEntities;
+  2492→    std::vector<Zombie*> zombies;
+  2493→
+  2494→    TIMER_POP_PUSH("regular");
+  2495→    for (unsigned int i = 0; i < entities.size(); i++) {
+  2496→        Entity* e = entities[i];
+  2497→
+  2498→        if (!e->removed) {
+  2499→            tick(e);
+  2500→            if (e->getEntityTypeId() == MobTypes::Zombie) {
+  2501→                zombies.push_back((Zombie*)e);
+  2502→                ((Zombie*)e)->setUseNewAi(false);
+  2503→            }
+  2504→        }
+  2505→
+  2506→        TIMER_PUSH("remove");
+  2507→        if (e->removed && (!e->isPlayer() || e->reallyRemoveIfPlayer)) {
+  2508→            int xc = e->xChunk;
+  2509→            int zc = e->zChunk;
+  2510→            if (e->inChunk && hasChunk(xc, zc)) {
+  2511→                getChunk(xc, zc)->removeEntity(e);
+  2512→            }
+  2513→            entityIdLookup.erase(e->entityId);
+  2514→            entities.erase(entities.begin() + (i--));
+  2515→            entityRemoved(e);
+  2516→            pendingRemovedEntities.push_back(e);
+  2517→        }
+  2518→        TIMER_POP();
+  2519→    }
+  2520→    
+  2521→    TIMER_POP_PUSH("remove");
+  2522→    for (unsigned int i = 0; i < pendingRemovedEntities.size(); ++i) {
+  2523→        Entity* e = pendingRemovedEntities[i];
+  2524→        if (e->isPlayer())
+  2525→            _pendingPlayerRemovals.push_back( PRInfo(e, 16) );
+  2526→        else
+  2527→            delete e;
+  2528→    } pendingRemovedEntities.clear();
+  2529→
+  2530→    for (int i = (int)_pendingPlayerRemovals.size()-1; i >= 0; --i) {
+  2531→        PRInfo& pr = _pendingPlayerRemovals[i];
+  2532→        if (--pr.ticks <= 0) {
+  2533→            LOGI("deleting: %p\n", pr.e);
+  2534→            delete pr.e;
+  2535→            _pendingPlayerRemovals.erase(_pendingPlayerRemovals.begin() + i);
+  2536→        }
+  2537→    }
+  2538→
+  2539→    TIMER_POP_PUSH("tileEntities");
+  2540→    updatingTileEntities = true;
+  2541→    for (unsigned int i = 0; i < tileEntities.size(); ++i) {
+  2542→        TileEntity* te = tileEntities[i];
+  2543→        if (!te->isRemoved() && te->level != NULL) {
+  2544→            if (hasChunkAt(te->x, te->y, te->z)) {
+  2545→                te->tick();
+  2546→            }
+  2547→        }
+  2548→        if (te->isRemoved()) {
+  2549→            tileEntities.erase(tileEntities.begin() + (i--));
+  2550→            if (hasChunk(te->x >> 4, te->z >> 4)) {
+  2551→                LevelChunk* lc = getChunk(te->x >> 4, te->z >> 4);
+  2552→                if (lc != NULL) {
+  2553→                    lc->removeTileEntity(te->x & 15, te->y, te->z & 15);
+  2554→                }
+  2555→            }
+  2556→            delete te;
+  2557→        }
+  2558→    }
+  2559→    updatingTileEntities = false;
+  2560→
+  2561→    TIMER_POP_PUSH("pendingTileEntities");
+  2562→    if (!pendingTileEntities.empty()) {
+  2563→        for (unsigned int i = 0; i < pendingTileEntities.size(); ++i) {
+  2564→            TileEntity* e = pendingTileEntities[i];
+  2565→            if (!e->isRemoved()) {
+  2566→                bool found = false;
+  2567→                for (unsigned int j = 0; j < tileEntities.size(); ++j) {
+  2568→                    if (tileEntities[j] == e) { found = true; break; }
+  2569→                }
+  2570→                int xx = e->x, yy = e->y, zz = e->z;
+  2571→                LevelChunk* lc = getChunk(xx >> 4, zz >> 4);
+  2572→                bool has = lc && lc->hasTileEntityAt(e);
+  2573→                if (!found) {
+  2574→                    if (!has) tileEntities.push_back(e);
+  2575→                    else { delete e; e = NULL; }
+  2576→                }
+  2577→                if (e && lc) lc->setTileEntity(xx & 15, yy, zz & 15, e);
+  2578→                sendTileUpdated(xx, yy, zz);
+  2579→            }
+  2580→        }
+  2581→        pendingTileEntities.clear();
+  2582→    }
+  2583→
+  2584→    TIMER_POP();
+  2585→    TIMER_POP();
+  2586→}
+  2587→```
+  2588→
+  2589→**Tick-entities order — EXACT:**
+  2590→1. For each non-removed entity: call `tick(e)` (= `Level::tick(e, true)`). If it's a zombie, also flag `setUseNewAi(false)` (legacy AI).
+  2591→2. For each entity flagged `removed` (and either non-player OR `reallyRemoveIfPlayer`): remove from chunk, erase from `entityIdLookup`, erase from `entities` (decrement loop counter), call `entityRemoved(e)` listeners, queue on `pendingRemovedEntities`.
+  2592→3. After main loop: for each pendingRemovedEntity, if player → `_pendingPlayerRemovals.push_back(PRInfo(e, 16))` (16-tick delayed delete); else `delete e` immediately.
+  2593→4. Decrement `_pendingPlayerRemovals` countdown; on reaching 0, `delete` the player entity.
+  2594→5. Tick all tile entities whose chunk is loaded. Remove & `delete` any that are flagged removed, also calling `chunk->removeTileEntity`.
+  2595→6. Process pending tile entities (added during this tick): dedup and bind to chunk.
+  2596→
+  2597→### Level::tick(Entity* e, bool actual) — VERIFIED (Level.cpp:1500–1554)
+  2598→```cpp
+  2599→void Level::tick(Entity* e) {
+  2600→    tick(e, true);
+  2601→}
+  2602→
+  2603→void Level::tick(Entity* e, bool actual) {
+  2604→    int xc = Mth::floor(e->x);
+  2605→    int zc = Mth::floor(e->z);
+  2606→    int r = 32;
+  2607→    if (actual && !hasChunksAt(xc - r, 0, zc - r, xc + r, 128, zc + r)) {
+  2608→        return;
+  2609→    }
+  2610→
+  2611→    e->xOld = e->x;
+  2612→    e->yOld = e->y;
+  2613→    e->zOld = e->z;
+  2614→    e->yRotO = e->yRot;
+  2615→    e->xRotO = e->xRot;
+  2616→
+  2617→    if (actual && e->inChunk) {
+  2618→        e->tick();
+  2619→    }
+  2620→
+  2621→    TIMER_PUSH("chunkCheck");
+  2622→    // SANITY!! — NaN guard
+  2623→    if (e->x != e->x) e->x = e->xOld;
+  2624→    if (e->y != e->y) e->y = e->yOld;
+  2625→    if (e->z != e->z) e->z = e->zOld;
+  2626→    if (e->xRot != e->xRot) e->xRot = e->xRotO;
+  2627→    if (e->yRot != e->yRot) e->yRot = e->yRotO;
+  2628→
+  2629→    int xcn = Mth::floor(e->x / 16.0f);
+  2630→    int ycn = Mth::floor(e->y / 16.0f);
+  2631→    int zcn = Mth::floor(e->z / 16.0f);
+  2632→
+  2633→    if (!e->inChunk || (e->xChunk != xcn || e->yChunk != ycn || e->zChunk != zcn)) {
+  2634→        if (e->inChunk && hasChunk(e->xChunk, e->zChunk)) {
+  2635→            getChunk(e->xChunk, e->zChunk)->removeEntity(e, e->yChunk);
+  2636→        }
+  2637→        if (hasChunk(xcn, zcn)) {
+  2638→            e->inChunk = true;
+  2639→            getChunk(xcn, zcn)->addEntity(e);
+  2640→        } else {
+  2641→            e->inChunk = false;
+  2642→        }
+  2643→    }
+  2644→    TIMER_POP();
+  2645→
+  2646→    const float now = getTimeS();
+  2647→    if (now - _lastSavedPlayerTime >= 30) {
+  2648→        saveLevelData();
+  2649→        _lastSavedPlayerTime = now;
+  2650→    }
+  2651→}
+  2652→```
+  2653→
+  2654→**Key logic:**
+  2655→- Entity ticks only if a 32-block-radius cube of chunks around it is loaded (otherwise skipped entirely).
+  2656→- Saves previous x/y/z/yRot/xRot for interpolation.
+  2657→- Calls `e->tick()` (the entity's per-tick behavior).
+  2658→- NaN guard: if any axis became NaN, restore the previous-tick value (`xOld`, etc).
+  2659→- Transfers entity between chunks if it crossed a chunk boundary (chunk coords = `floor(pos / 16)`).
+  2660→- Saves level data every 30 real seconds (using `getTimeS()`).
+  2661→
+  2662→### Level::isSolidBlockingTile / isSolidRenderTile — VERIFIED (Level.cpp:1693–1704)
+  2663→```cpp
+  2664→bool Level::isSolidBlockingTile(int x, int y, int z) {
+  2665→    Tile* tile = Tile::tiles[getTile(x, y, z)];
+  2666→    if (tile == NULL) return false;
+  2667→    return tile->material->isSolidBlocking() && tile->isCubeShaped();
+  2668→}
+  2669→
+  2670→bool Level::isSolidRenderTile(int x, int y, int z) {
+  2671→    Tile* tile = Tile::tiles[getTile(x, y, z)];
+  2672→    if (tile == NULL) return false;
+  2673→    return tile->isSolidRender();
+  2674→}
+  2675→```
+  2676→
+  2677→### Level::getTopTile / getTopTileY / getTopSolidBlock / getSeaLevel — VERIFIED (Level.cpp:467–481, 1268–1291, 1980–1982)
+  2678→```cpp
+  2679→int Level::getTopTile(int x, int z) {
+  2680→    int y = 63;
+  2681→    while (!isEmptyTile(x, y + 1, z)) {
+  2682→        y++;
+  2683→    }
+  2684→    return getTile(x, y, z);
+  2685→}
+  2686→
+  2687→int Level::getTopTileY(int x, int z) {
+  2688→    int y = 63;
+  2689→    while (!isEmptyTile(x, y + 1, z)) {
+  2690→        y++;
+  2691→    }
+  2692→    return y;
+  2693→}
+  2694→
+  2695→int Level::getTopSolidBlock(int x, int z) {
+  2696→    LevelChunk* levelChunk = getChunkAt(x, z);
+  2697→    int y = Level::DEPTH - 1;  // 127
+  2698→    while (getMaterial(x, y, z)->blocksMotion() && y > 0) {
+  2699→        y--;
+  2700→    }
+  2701→    x &= 15;
+  2702→    z &= 15;
+  2703→    while (y > 0) {
+  2704→        int t = levelChunk->getTile(x, y, z);
+  2705→        if (t == 0
+  2706→            || !(Tile::tiles[t]->material->blocksMotion())
+  2707→            || Tile::tiles[t]->material == Material::leaves) {
+  2708→            y--;
+  2709→        } else {
+  2710→            return y + 1;
+  2711→        }
+  2712→    }
+  2713→    return -1;
+  2714→}
+  2715→
+  2716→int Level::getSeaLevel() { return SEA_LEVEL; }  // = 63
+  2717→```
+  2718→
+  2719→Note: `getTopTile`/`getTopTileY` start at `y = 63` (sea level!) and walk upward. `getTopSolidBlock` starts at 127 and walks downward, skipping air/non-blocking/leaves, returns the y *above* the topmost solid-blocking-non-leaf tile.
+  2720→
+  2721→### Level::setInitialSpawn — VERIFIED (Level.cpp:429–445)
+  2722→```cpp
+  2723→void Level::setInitialSpawn() {
+  2724→    isFindingSpawn = true;
+  2725→    int xSpawn = CHUNK_CACHE_WIDTH * CHUNK_WIDTH / 2;  // 16*16/2 = 128
+  2726→    int ySpawn = 64;
+  2727→    int zSpawn = CHUNK_CACHE_WIDTH * CHUNK_DEPTH / 2;  // 128
+  2728→    while (!dimension->isValidSpawn(xSpawn, zSpawn)) {
+  2729→        xSpawn += random.nextInt(32) - random.nextInt(32);
+  2730→        zSpawn += random.nextInt(32) - random.nextInt(32);
+  2731→        if (xSpawn < 4) xSpawn += 32;
+  2732→        if (xSpawn >= LEVEL_WIDTH-4) xSpawn -= 32;
+  2733→        if (zSpawn < 4) zSpawn += 32;
+  2734→        if (zSpawn >= LEVEL_DEPTH-4) zSpawn -= 32;
+  2735→    }
+  2736→    levelData.setSpawn(xSpawn, ySpawn, zSpawn);
+  2737→    isFindingSpawn = false;
+  2738→}
+  2739→```
+  2740→
+  2741→Spawn starts at center of world (128, 64, 128) and random-walks by ±32 in x/z until `dimension->isValidSpawn` returns true. Walk is bounded to [4, LEVEL_WIDTH-4) = [4, 252).
+  2742→
+  2743→### Level::animateTick — VERIFIED (Level.cpp:1886–1899)
+  2744→```cpp
+  2745→void Level::animateTick(int xt, int yt, int zt) {
+  2746→    int r = 16;
+  2747→    Random animateRandom;
+  2748→    for (int i = 0; i < 100; i++) {
+  2749→        int x = xt + random.nextInt(r) - random.nextInt(r);
+  2750→        int y = yt + random.nextInt(r) - random.nextInt(r);
+  2751→        int z = zt + random.nextInt(r) - random.nextInt(r);
+  2752→        int t = getTile(x, y, z);
+  2753→        if (t > 0) {
+  2754→            Tile::tiles[t]->animateTick(this, x, y, z, &animateRandom);
+  2755→        }
+  2756→    }
+  2757→}
+  2758→```
+  2759→
+  2760→100 random particle attempts around `(xt, yt, zt)` within ±16 blocks each axis, using the level's `random` for position and a separate local `animateRandom` for the tile's particle parameters.
+  2761→
+  2762→### Level::canSeeSky / isSkyLit / getHeightmap — VERIFIED (Level.cpp:721–723, 763–786)
+  2763→```cpp
+  2764→bool Level::canSeeSk(int x, int y, int z) {
+  2765→    return getChunk(x >> 4, z >> 4)->isSkyLit(x & 15, y, z & 15);
+  2766→}
+  2767→
+  2768→bool Level::isSkyLit(int x, int y, int z) {
+  2769→    if (y < 0) return false;
+  2770→    if (y >= DEPTH) return true;
+  2771→    if (!hasChunk(x >> 4, z >> 4)) return false;
+  2772→    LevelChunk* c = getChunk(x >> 4, z >> 4);
+  2773→    x &= 15; z &= 15;
+  2774→    return c->isSkyLit(x, y, z);
+  2775→}
+  2776→
+  2777→int Level::getHeightmap(int x, int z) {
+  2778→    if (!hasChunk(x >> 4, z >> 4)) return 0;
+  2779→    LevelChunk* c = getChunk(x >> 4, z >> 4);
+  2780→    return c->getHeightmap(x & 15, z & 15);
+  2781→}
+  2782→```
+  2783→
+  2784→`LevelChunk::isSkyLit(x,y,z) = y >= heightmap[z<<4|x]` (see Entry 10). So sky-lit means "above the topmost light-blocking block in this column".
+  2785→
+  2786→### Level::inRange — VERIFIED (Level.cpp:2224–2228)
+  2787→```cpp
+  2788→bool Level::inRange(int x, int y, int z) {
+  2789→    return x >= 0 && x < LEVEL_WIDTH
+  2790→        && y >= 0 && y < LEVEL_HEIGHT
+  2791→        && z >= 0 && z < LEVEL_DEPTH;
+  2792→}
+  2793→```
+  2794→With LEVEL_WIDTH = LEVEL_DEPTH = 256, LEVEL_HEIGHT = 128.
+  2795→
+  2796→### Level::getMaterial — VERIFIED (Level.cpp:589–593)
+  2797→```cpp
+  2798→const Material* Level::getMaterial(int x, int y, int z) {
+  2799→    int t = getTile(x, y, z);
+  2800→    if (t == 0) return Material::air;
+  2801→    return Tile::tiles[t]->material;
+  2802→}
+  2803→```
+  2804→
+  2805→
+  2806→---
+  2807→
+  2808→## Entry 10: LevelChunk — storage (line-by-line read)
+  2809→
+  2810→**Files:** `world/level/chunk/LevelChunk.{h,cpp}`, `world/level/chunk/DataLayer.h`, `world/level/chunk/EmptyLevelChunk.h`
+  2811→
+  2812→### LevelChunk.h — key fields (lines 109–141) — VERIFIED
+  2813→```cpp
+  2814→class LevelChunk
+  2815→{
+  2816→public:
+  2817→    typedef std::map<TilePos, TileEntity*> TEMap;
+  2818→
+  2819→    static bool touchedSky;
+  2820→    static const int ChunkBlockCount = CHUNK_BLOCK_COUNT;   // 32768
+  2821→    static const int ChunkSize = ChunkBlockCount;            // 32768
+  2822→    static const int UpdateMapBitShift = 4;                  // power of (LEVEL_HEIGHT / 8) == 16
+  2823→                                                             // → y >> 4 (16-block-tall updateMap regions)
+  2824→
+  2825→    int blocksLength;
+  2826→    bool loaded;
+  2827→    Level* level;
+  2828→    DataLayer data;           // 4-bit nibble storage (block data / aux value)
+  2829→    DataLayer skyLight;       // 4-bit nibble storage (sky light 0..15)
+  2830→    DataLayer blockLight;     // 4-bit nibble storage (block light 0..15)
+  2831→
+  2832→    char heightmap[CHUNK_COLUMNS];              // 256 bytes (16x16)
+  2833→    unsigned char updateMap[CHUNK_COLUMNS];     // 256 bytes — modified-region bitmask
+  2834→    int minHeight;
+  2835→
+  2836→    const int x, z;            // chunk x, z (chunk coords, not block coords)
+  2837→    const int xt, zt;          // block-coord origin = x * 16, z * 16
+  2838→
+  2839→    bool terrainPopulated;
+  2840→    bool unsaved;
+  2841→    bool dontSave;
+  2842→    bool createdFromSave;
+  2843→    bool lastSaveHadEntities;
+  2844→    long lastSaveTime;
+  2845→protected:
+  2846→    unsigned char* blocks;     // 32768-byte block-id array
+  2847→
+  2848→    static const int EntityBlocksArraySize = 128/16;       // = 8
+  2849→    std::vector<Entity*> entityBlocks[EntityBlocksArraySize];  // 8 entity buckets by Y-sub-chunk
+  2850→
+  2851→    TEMap tileEntities;       // map<TilePos(x,y,z), TileEntity*>
+  2852→};
+  2853→```
+  2854→
+  2855→**Storage layout:**
+  2856→- `blocks`: 32768 bytes — one byte per block, indexed by `(x << 11) | (z << 7) | y` (see getTile below).
+  2857→- `data`, `skyLight`, `blockLight`: each a `DataLayer` storing 4-bit nibbles, 16384 bytes each (`ChunkBlockCount >> 1`).
+  2858→- `heightmap`: 256 bytes — for each (x,z) column, the y of the topmost light-blocking block (used for sky light propagation).
+  2859→- `updateMap`: 256 bytes — bitmask tracking which sub-chunk regions (y>>4 → 8 regions per column) were modified for multiplayer delta sync.
+  2860→- `entityBlocks[8]`: entity list bucketed by Y sub-chunk index `yc = floor(e.y / 16)`, clamped to [0, 7] (since `LEVEL_HEIGHT=128`, `128/16 = 8`).
+  2861→- `tileEntities`: a `std::map<TilePos, TileEntity*>` (key is local (x,y,z) 0..15 / 0..127 / 0..15).
+  2862→
+  2863→### DataLayer.h — VERIFIED (lines 1–73)
+  2864→```cpp
+  2865→class DataLayer {
+  2866→public:
+  2867→    DataLayer() : data(NULL), length(0) {}
+  2868→
+  2869→    DataLayer(int length) {             // length passed in = ChunkBlockCount = 32768
+  2870→        this->length = length >> 1;     // 16384 bytes (4-bit per block)
+  2871→        data = new unsigned char[this->length];
+  2872→        setAll(0);
+  2873→        slotMax = this->length;
+  2874→    }
+  2875→
+  2876→    DataLayer(unsigned char* data, int length) {
+  2877→        this->length = length >> 1;
+  2878→        this->data = data;
+  2879→    }
+  2880→
+  2881→    ~DataLayer() { delete[] data; }
+  2882→
+  2883→    int get(int x, int y, int z) { return get(x << 11 | z << 7 | y); }
+  2884→    void set(int x, int y, int z, int val) { set(x << 11 | z << 7 | y, val); }
+  2885→
+  2886→    __inline int get(int pos) {
+  2887→        int slot = pos >> 1;
+  2888→        int part = pos & 1;
+  2889→        if (part == 0) {
+  2890→            return data[slot] & 0xf;
+  2891→        } else {
+  2892→            return (data[slot] >> 4) & 0xf;
+  2893→        }
+  2894→    }
+  2895→    __inline void set(int pos, int val) {
+  2896→        int slot = pos >> 1;
+  2897→        int part = pos & 1;
+  2898→        if (part == 0) {
+  2899→            data[slot] = ((data[slot] & 0xf0) | (val & 0xf));
+  2900→        } else {
+  2901→            data[slot] = ((data[slot] & 0x0f) | ((val & 0xf) << 4));
+  2902→        }
+  2903→    }
+  2904→
+  2905→    bool isValid() { return data != NULL; }
+  2906→    void setAll(int br) {
+  2907→        unsigned char val = (br & (br << 4));
+  2908→        memset(data, val, length);
+  2909→    }
+  2910→
+  2911→    unsigned char* data;
+  2912→    int length;
+  2913→    int slotMax;
+  2914→};
+  2915→```
+  2916→
+  2917→**Nibble storage:** 2 blocks per byte. For position index `pos = (x<<11) | (z<<7) | y`:
+  2918→- `slot = pos >> 1` (byte index)
+  2919→- `part = pos & 1` (which nibble: 0 = low, 1 = high)
+  2920→- Even pos → low nibble (`data[slot] & 0xf`)
+  2921→- Odd pos → high nibble (`(data[slot] >> 4) & 0xf`)
+  2922→- `setAll(br)`: writes `br | (br << 4)` to every byte, so both nibbles get the same value.
+  2923→
+  2924→### LevelChunk constructors — VERIFIED (LevelChunk.cpp:16–56)
+  2925→```cpp
+  2926→LevelChunk::LevelChunk(Level* level, int x, int z)
+  2927→:   level(level), x(x), z(z),
+  2928→    xt(x * CHUNK_WIDTH),     // x * 16 (block-coord origin)
+  2929→    zt(z * CHUNK_DEPTH)      // z * 16
+  2930→{
+  2931→    init();
+  2932→}
+  2933→
+  2934→LevelChunk::LevelChunk(Level* level, unsigned char* blocks, int x, int z)
+  2935→:   level(level), x(x), z(z),
+  2936→    xt(x * CHUNK_WIDTH), zt(z * CHUNK_DEPTH),
+  2937→    blocks(blocks),
+  2938→    data(ChunkBlockCount),       // 32768
+  2939→    skyLight(ChunkBlockCount),   // 32768
+  2940→    blockLight(ChunkBlockCount), // 32768
+  2941→    blocksLength(ChunkBlockCount)
+  2942→{
+  2943→    init();
+  2944→}
+  2945→
+  2946→void LevelChunk::init() {
+  2947→    terrainPopulated = false;
+  2948→    dontSave = false;
+  2949→    unsaved = false;
+  2950→    lastSaveHadEntities = false;
+  2951→    createdFromSave = false;
+  2952→    lastSaveTime = 0;
+  2953→    memset(heightmap, 0, 256);
+  2954→    memset(updateMap, 0, 256);
+  2955→}
+  2956→```
+  2957→
+  2958→The `(Level*, blocks, x, z)` constructor is the one used by `RandomLevelSource::getChunk` — caller-allocated `blocks` array, with `data`/`skyLight`/`blockLight` allocated fresh inside the chunk and initialized to zero via `DataLayer(int)` constructor's `setAll(0)`. The `(Level*, x, z)` constructor (used by `EmptyLevelChunk`) does NOT allocate `blocks`, `data`, `skyLight`, `blockLight` — it just calls `init()`.
+  2959→
+  2960→### LevelChunk::getTile / setTile / setTileAndData — VERIFIED (LevelChunk.cpp:368–371, 59–142)
+  2961→```cpp
+  2962→int LevelChunk::getTile(int x, int y, int z) {
+  2963→    return blocks[x << 11 | z << 7 | y] & 0xff;
+  2964→}
+  2965→
+  2966→void LevelChunk::setTileRaw(int x, int y, int z, int tile) {
+  2967→    blocks[x << 11 | z << 7 | y] = tile;
+  2968→}
+  2969→
+  2970→bool LevelChunk::setTile(int x, int y, int z, int tile_) {
+  2971→    int tile = tile_ & 0xff;
+  2972→    int oldHeight = heightmap[z << 4 | x] & 0xff;
+  2973→
+  2974→    int old = blocks[x << 11 | z << 7 | y] & 0xff;
+  2975→    if (old == tile_) return false;
+  2976→    int xOffs = xt + x;
+  2977→    int zOffs = zt + z;
+  2978→    blocks[x << 11 | z << 7 | y] = (unsigned char) (tile & 0xff);
+  2979→    if (old != 0) {
+  2980→        Tile::tiles[old]->onRemove(level, xOffs, y, zOffs);
+  2981→    }
+  2982→    data.set(x, y, z, 0);
+  2983→
+  2984→    if (Tile::lightBlock[tile & 0xff] != 0) {
+  2985→        if (y >= oldHeight) {
+  2986→            recalcHeight(x, y + 1, z);
+  2987→        }
+  2988→    } else {
+  2989→        if (y == oldHeight - 1) {
+  2990→            recalcHeight(x, y, z);
+  2991→        }
+  2992→    }
+  2993→
+  2994→    level->updateLight(LightLayer::Sky, xOffs, y, zOffs, xOffs, y, zOffs);
+  2995→    level->updateLight(LightLayer::Block, xOffs, y, zOffs, xOffs, y, zOffs);
+  2996→    lightGaps(x, z);
+  2997→
+  2998→    if (tile_ != 0) {
+  2999→        if (!level->isClientSide) Tile::tiles[tile_]->onPlace(level, xOffs, y, zOffs);
+
+[showing lines 2200-2999 of 11684; use offset=3000 with limit to continue reading]

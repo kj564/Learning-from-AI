@@ -1,0 +1,602 @@
+  4200→    if (level->isClientSide) {
+  4201→        UseItemPacket packet(x, y, z, face, item, player->entityId, clickX, clickY, clickZ);
+  4202→        minecraft->raknetInstance->send(packet);
+  4203→    }
+  4204→    int t = level->getTile(x, y, z);
+  4205→    if (t == Tile::invisible_bedrock->id) return false;
+  4206→    if (t > 0 && Tile::tiles[t]->use(level, x, y, z, player))
+  4207→        return true;
+  4208→
+  4209→    if (item == NULL) return false;
+  4210→    if (isCreativeType()) {
+  4211→        int aux = item->getAuxValue();
+  4212→        int count = item->count;
+  4213→        bool success = item->useOn(player, level, x, y, z, face, clickX, clickY, clickZ);
+  4214→        item->setAuxValue(aux);
+  4215→        item->count = count;
+  4216→        return success;
+  4217→    } else {
+  4218→        return item->useOn(player, level, x, y, z, face, clickX, clickY, clickZ);
+  4219→    }
+  4220→}
+  4221→```
+  4222→
+  4223→In Creative mode, item's `auxValue` and `count` are saved/restored around `useOn` so placing blocks doesn't consume the item from the inventory.
+  4224→
+  4225→### GameMode::useItem — VERIFIED (GameMode.cpp:114–130)
+  4226→```cpp
+  4227→bool GameMode::useItem(Player* player, Level* level, ItemInstance* item) {
+  4228→    int oldCount = item->count;
+  4229→    ItemInstance* itemInstance = item->use(level, player);
+  4230→    if (level->isClientSide) {
+  4231→        UseItemPacket packet(item, player->entityId, player->aimDirection);
+  4232→        minecraft->raknetInstance->send(packet);
+  4233→    }
+  4234→    if (itemInstance != item || (itemInstance != NULL && itemInstance->count != oldCount)) {
+  4235→        return true;
+  4236→    }
+  4237→    return false;
+  4238→}
+  4239→```
+  4240→
+  4241→### GameMode::getPickRange — VERIFIED (GameMode.cpp:142–144)
+  4242→```cpp
+  4243→float GameMode::getPickRange() {
+  4244→    return 5.0f;
+  4245→}
+  4246→```
+  4247→Reach distance is 5 blocks (consistent across game modes).
+  4248→
+  4249→### GameMode::initPlayer — VERIFIED (GameMode.cpp:146–148)
+  4250→```cpp
+  4251→void GameMode::initPlayer(Player* player) {
+  4252→    initAbilities(player->abilities);
+  4253→}
+  4254→```
+  4255→
+  4256→### GameMode::releaseUsingItem — VERIFIED (GameMode.cpp:150–156)
+  4257→```cpp
+  4258→void GameMode::releaseUsingItem(Player* player) {
+  4259→    if (minecraft->level->isClientSide) {
+  4260→        PlayerActionPacket packet(PlayerActionPacket::RELEASE_USE_ITEM, 0, 0, 0, 0, player->entityId);
+  4261→        minecraft->raknetInstance->send(packet);
+  4262→    }
+  4263→    player->releaseUsingItem();
+  4264→}
+  4265→```
+  4266→
+  4267→### GameMode::tick — VERIFIED (GameMode.cpp:158–160)
+  4268→```cpp
+  4269→void GameMode::tick() {
+  4270→    oDestroyProgress = destroyProgress;
+  4271→}
+  4272→```
+  4273→**Destroy progress decay — EXACT:** `GameMode::tick()` only saves the previous-tick `destroyProgress` into `oDestroyProgress` (for render interpolation). It does NOT decay `destroyProgress` here — decay/reset happens in `SurvivalMode::continueDestroyBlock` when the player looks away from the target block (see below). The render code interpolates between `oDestroyProgress` and `destroyProgress` by `a` (frame-time fraction).
+  4274→
+  4275→### GameMode::render(a) — VERIFIED (GameMode.cpp:162–173)
+  4276→```cpp
+  4277→void GameMode::render(float a) {
+  4278→#ifndef STANDALONE_SERVER
+  4279→    if (destroyProgress <= 0) {
+  4280→        minecraft->gui.progress = 0;
+  4281→        minecraft->levelRenderer->destroyProgress = 0;
+  4282→    } else {
+  4283→        float dp = oDestroyProgress + (destroyProgress - oDestroyProgress) * a;
+  4284→        minecraft->gui.progress = dp;
+  4285→        minecraft->levelRenderer->destroyProgress = dp;
+  4286→    }
+  4287→#endif
+  4288→}
+  4289→```
+  4290→**Destroy progress to GUI — EXACT:** Linear interpolation `dp = oDestroyProgress + (destroyProgress - oDestroyProgress) * a` where `a` is the frame-time fraction (0..1). `minecraft->gui.progress` drives the on-screen break crack overlay; `minecraft->levelRenderer->destroyProgress` drives the block crack texture stage. When `destroyProgress <= 0`, both are reset to 0 (no overlay).
+  4291→
+  4292→---
+  4293→
+  4294→### SurvivalMode.h — fields — VERIFIED (lines 9–29)
+  4295→```cpp
+  4296→class SurvivalMode: public GameMode
+  4297→{
+  4298→    typedef GameMode super;
+  4299→public:
+  4300→    SurvivalMode(Minecraft* minecraft);
+  4301→
+  4302→    bool destroyBlock(int x, int y, int z, int face);
+  4303→    void startDestroyBlock(int x, int y, int z, int face);
+  4304→    void continueDestroyBlock(int x, int y, int z, int face);
+  4305→    void stopDestroyBlock();
+  4306→
+  4307→    bool canHurtPlayer() { return true; }
+  4308→    bool isSurvivalType() { return true; }
+  4309→
+  4310→    void initAbilities(Abilities& abilities);
+  4311→private:
+  4312→    int xDestroyBlock;     // target block coords (where the player is breaking)
+  4313→    int yDestroyBlock;
+  4314→    int zDestroyBlock;
+  4315→};
+  4316→```
+  4317→
+  4318→### SurvivalMode constructor — VERIFIED (SurvivalMode.cpp:11–17)
+  4319→```cpp
+  4320→SurvivalMode::SurvivalMode(Minecraft* minecraft)
+  4321→:   super(minecraft),
+  4322→    xDestroyBlock(-1),
+  4323→    yDestroyBlock(-1),
+  4324→    zDestroyBlock(-1)
+  4325→{
+  4326→}
+  4327→```
+  4328→
+  4329→### SurvivalMode::initAbilities — VERIFIED (SurvivalMode.cpp:83–88)
+  4330→```cpp
+  4331→void SurvivalMode::initAbilities(Abilities& abilities) {
+  4332→    abilities.flying = false;
+  4333→    abilities.mayfly = false;
+  4334→    abilities.instabuild = false;
+  4335→    abilities.invulnerable = false;
+  4336→}
+  4337→```
+  4338→
+  4339→### SurvivalMode::startDestroyBlock — VERIFIED (SurvivalMode.cpp:90–98)
+  4340→```cpp
+  4341→void SurvivalMode::startDestroyBlock(int x, int y, int z, int face) {
+  4342→    if (minecraft->player->getCarriedItem() != NULL && minecraft->player->getCarriedItem()->id == Item::bow->id)
+  4343→        return;
+  4344→
+  4345→    int t = minecraft->level->getTile(x, y, z);
+  4346→    if (t > 0 && destroyProgress == 0) Tile::tiles[t]->attack(minecraft->level, x, y, z, minecraft->player);
+  4347→    if (t > 0 && Tile::tiles[t]->getDestroyProgress(minecraft->player) >= 1)
+  4348→        destroyBlock(x, y, z, face);
+  4349→}
+  4350→```
+  4351→
+  4352→**First hit logic — EXACT:**
+  4353→1. If holding a bow → return (no block breaking, only arrow charging).
+  4354→2. If first hit (destroyProgress == 0) and tile is non-air, call `tile->attack(level, x, y, z, player)` (e.g. redstone ore lights up).
+  4355→3. If the tile's `getDestroyProgress(player) >= 1.0` (i.e. instantly breakable: flowers, saplings, torch, web, tnt, mushrooms, reeds, crops, topSnow, etc. — anything where `(toolSpeed / destroySpeed) / 30 >= 1`, e.g. destroySpeed = 0 makes this infinite… actually `0/0` is NaN. Wait, destroySpeed = 0 is for instant-break tiles, and the formula divides by destroySpeed... Hmm, actually when `destroySpeed = 0`, `1 / 0 / 100 = inf` (can't destroy branch) OR `(toolSpeed / 0) / 30 = inf` — but inf >= 1 is true, so the block is destroyed instantly on the first hit).
+  4356→
+  4357→Actually checking the code more carefully: `if (t > 0 && Tile::tiles[t]->getDestroyProgress(minecraft->player) >= 1) destroyBlock(x, y, z, face);` — so the first-hit only destroys if `getDestroyProgress(player)` >= 1.0. For most "instant-break" tiles (destroySpeed = 0.0 like torch, flower, sapling, tnt), this hits the `if (destroySpeed < 0) return 0;` check first — torch returns 0 which is NOT >= 1, so it won't instantly break. So actually only tiles with `destroySpeed > 0` AND `toolSpeed/destroySpeed >= 30` (very fast tool vs very weak block) trigger instant break on first hit.
+  4358→
+  4359→Wait — for torch (destroySpeed = 0), the function checks `destroySpeed < 0` (false, 0 is not < 0), then `!player->canDestroy(this)` — torch material is wood which is `isAlwaysDestroyable = true`, so returns `(getDestroySpeed / 0.0) / 30.0` = +inf (or NaN if speed is 0). +inf >= 1 is true → instant break. (UNVERIFIED — division by 0 behavior in C++ is implementation-defined; in practice on x86 with floats, it yields +inf. Could be NaN if speed is also 0.) So torches/flowers/saplings DO instantly break on first hit.
+  4360→
+  4361→### SurvivalMode::continueDestroyBlock — VERIFIED (SurvivalMode.cpp:19–55)
+  4362→```cpp
+  4363→void SurvivalMode::continueDestroyBlock(int x, int y, int z, int face) {
+  4364→    if (destroyDelay > 0) {
+  4365→        destroyDelay--;
+  4366→        return;
+  4367→    }
+  4368→
+  4369→    if (x == xDestroyBlock && y == yDestroyBlock && z == zDestroyBlock) {
+  4370→        int t = minecraft->level->getTile(x, y, z);
+  4371→        if (t == 0) return;
+  4372→        Tile* tile = Tile::tiles[t];
+  4373→
+  4374→        destroyProgress += tile->getDestroyProgress(minecraft->player);
+  4375→
+  4376→        if ((++destroyTicks & 3) == 1) {
+  4377→#ifndef STANDALONE_SERVER
+  4378→            if (tile != NULL) {
+  4379→                minecraft->soundEngine->play(tile->soundType->getStepSound(),
+  4380→                    x + 0.5f, y + 0.5f, z + 0.5f,
+  4381→                    (tile->soundType->getVolume() + 1) / 8,
+  4382→                    tile->soundType->getPitch() * 0.5f);
+  4383→            }
+  4384→#endif
+  4385→        }
+  4386→
+  4387→        if (destroyProgress >= 1) {
+  4388→            destroyBlock(x, y, z, face);
+  4389→            destroyProgress = 0;
+  4390→            oDestroyProgress = 0;
+  4391→            destroyTicks = 0;
+  4392→            destroyDelay = 5;
+  4393→        }
+  4394→    } else {
+  4395→        destroyProgress = 0;
+  4396→        oDestroyProgress = 0;
+  4397→        destroyTicks = 0;
+  4398→        xDestroyBlock = x;
+  4399→        yDestroyBlock = y;
+  4400→        zDestroyBlock = z;
+  4401→    }
+  4402→}
+  4403→```
+  4404→
+  4405→**Continue break logic — EXACT:**
+  4406→1. If `destroyDelay > 0`: decrement and skip (this is a post-break cooldown of 5 ticks, set after a successful break).
+  4407→2. If still targeting the same block as before (`x == xDestroyBlock && y == yDestroyBlock && z == zDestroyBlock`):
+  4408→   - Get current tile; if air, return.
+  4409→   - `destroyProgress += tile->getDestroyProgress(player)` — accumulate per-tick break progress.
+  4410→   - Every 4 ticks (`++destroyTicks & 3 == 1` → ticks 1, 5, 9, 13...), play step sound (volume `(vol+1)/8`, pitch `pitch * 0.5`) at the block.
+  4411→   - If `destroyProgress >= 1`: destroy the block, reset `destroyProgress`/`oDestroyProgress`/`destroyTicks` to 0, and set `destroyDelay = 5` (5-tick post-break cooldown before the next block can break).
+  4412→3. If targeting a different block (player moved their crosshair): reset all break state and save the new target coords. No progress is accumulated on this tick.
+  4413→
+  4414→### SurvivalMode::destroyBlock — VERIFIED (SurvivalMode.cpp:57–76)
+  4415→```cpp
+  4416→bool SurvivalMode::destroyBlock(int x, int y, int z, int face) {
+  4417→    int t = minecraft->level->getTile(x, y, z);
+  4418→    int data = minecraft->level->getData(x, y, z);
+  4419→    bool changed = GameMode::destroyBlock(x, y, z, face);
+  4420→    bool couldDestroy = minecraft->player->canDestroy(Tile::tiles[t]);
+  4421→
+  4422→    ItemInstance* item = minecraft->player->inventory->getSelected();
+  4423→    if (item != NULL) {
+  4424→        item->mineBlock(t, x, y, z);
+  4425→        if (item->count == 0) {
+  4426→            minecraft->player->inventory->clearSlot(minecraft->player->inventory->selected);
+  4427→        }
+  4428→    }
+  4429→    if (changed && couldDestroy) {
+  4430→        ItemInstance instance(t, 1, data);
+  4431→        Tile::tiles[t]->playerDestroy(minecraft->level, minecraft->player, x, y, z, data);
+  4432→    }
+  4433→    return changed;
+  4434→}
+  4435→```
+  4436→
+  4437→**Survival block destruction — EXACT:**
+  4438→1. Read tile id + data BEFORE destroying.
+  4439→2. Call `GameMode::destroyBlock(x, y, z, face)` (does the actual setTile(x,y,z,0), particle, sound, packet).
+  4440→3. Compute `couldDestroy = player->canDestroy(Tile::tiles[t])` — using the saved tile (before it was set to 0).
+  4441→4. Get currently-held item; if non-null, call `item->mineBlock(t, x, y, z)` (decrements tool durability). If item count reaches 0, clear the slot.
+  4442→5. If the block actually changed AND the player could destroy it, call `tile->playerDestroy(level, player, x, y, z, data)` — which by default calls `spawnResources` (drops the block as an item).
+  4443→
+  4444→Note: `playerDestroy` is only called if `couldDestroy` is true. This means if the player's tool couldn't destroy the tile's material (e.g. wooden pickaxe on stone — wait, actually any pickaxe can destroy stone; if the player is using bare hands on stone, `canDestroy` returns false because stone material is `notAlwaysDestroyable` and bare-hand item returns false for `canDestroySpecial`). So bare-hand on stone breaks the block (setTile succeeds) but drops nothing.
+  4445→
+  4446→### SurvivalMode::stopDestroyBlock — VERIFIED (SurvivalMode.cpp:78–81)
+  4447→```cpp
+  4448→void SurvivalMode::stopDestroyBlock() {
+  4449→    destroyProgress = 0;
+  4450→    destroyDelay = 0;
+  4451→}
+  4452→```
+  4453→Called when the player releases the mouse button. Resets progress and cancels any post-break delay.
+  4454→
+  4455→---
+  4456→
+  4457→### CreativeMode.h — fields — VERIFIED (lines 8–25)
+  4458→```cpp
+  4459→class CreativeMode: public GameMode
+  4460→{
+  4461→    typedef GameMode super;
+  4462→public:
+  4463→    CreativeMode(Minecraft* minecraft);
+  4464→
+  4465→    void startDestroyBlock(int x, int y, int z, int face);
+  4466→    void continueDestroyBlock(int x, int y, int z, int face);
+  4467→    void stopDestroyBlock();
+  4468→
+  4469→    bool isCreativeType();
+  4470→
+  4471→    void initAbilities(Abilities& abilities);
+  4472→
+  4473→    void releaseUsingItem(Player* player);
+  4474→private:
+  4475→    void creativeDestroyBlock(int x, int y, int z, int face);
+  4476→};
+  4477→```
+  4478→
+  4479→### CreativeMode.cpp — VERIFIED (lines 16–72)
+  4480→```cpp
+  4481→static const int DestructionTickDelay = 10;
+  4482→
+  4483→CreativeMode::CreativeMode(Minecraft* minecraft)
+  4484→:   super(minecraft)
+  4485→{
+  4486→}
+  4487→
+  4488→void CreativeMode::startDestroyBlock(int x, int y, int z, int face) {
+  4489→    if (minecraft->player->getCarriedItem() != NULL && minecraft->player->getCarriedItem()->id == Item::bow->id)
+  4490→        return;
+  4491→
+  4492→    creativeDestroyBlock(x, y, z, face);
+  4493→    destroyDelay = DestructionTickDelay;       // = 10
+  4494→}
+  4495→
+  4496→void CreativeMode::creativeDestroyBlock(int x, int y, int z, int face) {
+  4497→    minecraft->level->extinguishFire(x, y, z, face);
+  4498→    destroyBlock(x, y, z, face);
+  4499→}
+  4500→
+  4501→void CreativeMode::continueDestroyBlock(int x, int y, int z, int face) {
+  4502→    destroyDelay--;
+  4503→    if (destroyDelay <= 0) {
+  4504→        destroyDelay = DestructionTickDelay;     // reset to 10
+  4505→        creativeDestroyBlock(x, y, z, face);
+  4506→    }
+  4507→}
+  4508→
+  4509→void CreativeMode::stopDestroyBlock() {
+  4510→}
+  4511→
+  4512→void CreativeMode::initAbilities(Abilities& abilities) {
+  4513→    abilities.mayfly = true;
+  4514→    abilities.instabuild = true;
+  4515→    abilities.invulnerable = true;
+  4516→}
+  4517→
+  4518→bool CreativeMode::isCreativeType() {
+  4519→    return true;
+  4520→}
+  4521→
+  4522→void CreativeMode::releaseUsingItem(Player* player) {
+  4523→    if (player->getCarriedItem() != NULL) {
+  4524→        int oldItemId = player->getCarriedItem()->id;
+  4525→        int oldAux = player->getAuxData();
+  4526→        super::releaseUsingItem(player);
+  4527→        if (player->getCarriedItem() != NULL && player->getCarriedItem()->id == oldItemId) {
+  4528→            player->getCarriedItem()->setAuxValue(oldAux);
+  4529→        }
+  4530→    } else {
+  4531→        super::releaseUsingItem(player);
+  4532→    }
+  4533→}
+  4534→```
+  4535→
+  4536→**Creative instant break + 10-tick repeat — EXACT:**
+  4537→
+  4538→`DestructionTickDelay = 10` ticks = 0.5 seconds at 20 TPS.
+  4539→
+  4540→**`startDestroyBlock(x,y,z,face)`:**
+  4541→1. If holding a bow → return (no break).
+  4542→2. `creativeDestroyBlock(x,y,z,face)` — first destroys the block instantly.
+  4543→3. Sets `destroyDelay = 10` (the cooldown before the next block can be auto-broken).
+  4544→
+  4545→`creativeDestroyBlock(x,y,z,face)`:
+  4546→1. `level->extinguishFire(x,y,z,face)` — clears any fire on the adjacent face of the broken block.
+  4547→2. Calls `GameMode::destroyBlock(x,y,z,face)` — does the actual `setTile(x,y,z,0)`, sound, packet.
+  4548→
+  4549→**`continueDestroyBlock(x,y,z,face)` (mouse still held):**
+  4550→1. Decrement `destroyDelay`.
+  4551→2. When `destroyDelay <= 0`: reset to 10 and break another block at the new crosshair position.
+  4552→
+  4553→So in Creative, holding left-click breaks a block every 10 ticks (= 2 blocks per second), as long as the player keeps the crosshair on a tile.
+  4554→
+  4555→`stopDestroyBlock`: no-op (no break state to clear).
+  4556→
+  4557→`initAbilities`: `mayfly=true`, `instabuild=true`, `invulnerable=true`. Note `flying` is NOT set here (defaults to false in Abilities; the player must double-tap jump to start flying — see Entry 6 LocalPlayer::aiStep).
+  4558→
+  4559→`releaseUsingItem`: in Creative, restore the item's aux value after releasing use (so using the item doesn't change its variant — e.g. dyeing sheep doesn't consume or change the dye color).
+  4560→
+  4561→### Summary of break timing per game mode
+  4562→
+  4563→**Survival:** 
+  4564→- First hit (left-click press): if `getDestroyProgress(player) >= 1`, instant break; else just call `tile->attack`.
+  4565→- Hold left-click: per-tick accumulate `destroyProgress += tile->getDestroyProgress(player)`. Play step sound every 4 ticks. Break when `destroyProgress >= 1`.
+  4566→- After break: 5-tick `destroyDelay` cooldown (`destroyDelay = 5` in continueDestroyBlock).
+  4567→- Look away or release: reset progress to 0.
+  4568→
+  4569→**Time-to-break** ≈ `30 * tile.destroySpeed / tool.getDestroySpeed(tile)` ticks ≈ `1.5 * destroySpeed / toolSpeed` seconds (at 20 TPS).
+  4570→
+  4571→For example:
+  4572→- Hand (speed 1) on stone (destroySpeed 1.5): `30 * 1.5 / 1 = 45 ticks = 2.25s`.
+  4573→- Wooden pickaxe (speed 2 on stone) on stone: `30 * 1.5 / 2 = 22.5 ticks ≈ 1.13s`.
+  4574→- Diamond pickaxe (speed 4 on stone, matching material) on stone: `30 * 1.5 / 4 = 11.25 ticks ≈ 0.56s`.
+  4575→- Hand on obsidian (destroySpeed 10): bare hand `canDestroy(obsidian)` returns false (obsidian material = stone, `notAlwaysDestroyable`; bare hand `canDestroySpecial` returns false). So formula = `1 / 10 / 100 = 0.001` per tick → 1000 ticks = 50s to break obsidian with bare hand.
+  4576→- Diamond pickaxe (level 3) on obsidian (speed 4): `30 * 10 / 4 = 75 ticks = 3.75s`.
+  4577→- Bedrock (destroySpeed = -1): `getDestroyProgress` returns 0 → never breaks.
+  4578→
+  4579→**Creative:**
+  4580→- First hit: instant break + set `destroyDelay = 10`.
+  4581→- Hold: every 10 ticks, auto-break the block under the crosshair (= 2 blocks/sec).
+  4582→
+  4583→### Items id space (note)
+  4584→
+  4585→Tile IDs 0–255 are also Item IDs 256–511 (tile items); Item IDs 256+ are non-tile items. The mapping `Item::items[i]` for `i in 0..255` is the tile-bound item slot. The `Item::items[cloth->id]` etc. lines in `Tile::initTiles` (Tile.cpp:279–287) override the default `TileItem` for tiles that need custom item behavior (cloth with color, sapling with type, etc.). This happens AFTER all tiles are registered.
+  4586→
+  4587→
+  4588→---
+  4589→
+  4590→## Entry 13: LevelGen — world generation & MobSpawner (line-by-line read)
+  4591→
+  4592→**Files:** `world/level/levelgen/RandomLevelSource.{h,cpp}`, `world/level/MobSpawner.{h,cpp}`, `world/level/biome/Biome.{h,cpp}`, `world/entity/MobCategory.{h,cpp}`
+  4593→
+  4594→### RandomLevelSource.h — constants — VERIFIED (lines 33–38, 60–95)
+  4595→```cpp
+  4596→class RandomLevelSource: public ChunkSource {
+  4597→    static const float SNOW_CUTOFF;   // = 0.5f  (temperature below which snow falls)
+  4598→    static const float SNOW_SCALE;   // = 0.3f  (altitude-based temperature drop per 64 blocks above y=64)
+  4599→
+  4600→public:
+  4601→    static const int CHUNK_HEIGHT = 8;     // sub-chunk height for heightmap interpolation
+  4602→    static const int CHUNK_WIDTH  = 4;     // sub-chunk width for heightmap interpolation
+  4603→    // (Note: These are NOT the world chunk size! The world LevelChunk is 16x16x128.)
+  4604→    // These are noise-grid cell sizes used by prepareHeights / getHeights.
+  4605→
+  4606→private:
+  4607→    ChunkMap chunkMap;
+  4608→    Random random;
+  4609→    PerlinNoise lperlinNoise1;    // initialized with (&random, 16)
+  4610→    PerlinNoise lperlinNoise2;   // (&random, 16)
+  4611→    PerlinNoise perlinNoise1;    // (&random, 8)
+  4612→    PerlinNoise perlinNoise2;    // (&random, 4)
+  4613→    PerlinNoise perlinNoise3;    // (&random, 4)
+  4614→    PerlinNoise scaleNoise;     // (&random, 10)
+  4615→    PerlinNoise depthNoise;     // (&random, 16)
+  4616→    PerlinNoise forestNoise;    // (&random, 8)
+  4617→    Level* level;
+  4618→    bool spawnMobs;
+  4619→    float* buffer;               // MAX_BUFFER_SIZE = 1024 floats
+  4620→    float sandBuffer[16 * 16];
+  4621→    float gravelBuffer[16 * 16];
+  4622→    float depthBuffer[16 * 16];
+  4623→    float* pnr, *ar, *br, *sr, *dr, *fi, *fis;
+  4624→    LargeCaveFeature caveFeature;
+  4625→    int waterDepths[16+16][16+16];    // 32×32 water depth map (initialized to 0)
+  4626→};
+  4627→```
+  4628→
+  4629→### RandomLevelSource constructor — VERIFIED (RandomLevelSource.cpp:19–42)
+  4630→```cpp
+  4631→RandomLevelSource::RandomLevelSource(Level* level, long seed, int version, bool spawnMobs)
+  4632→:   random(seed),
+  4633→    level(level),
+  4634→    lperlinNoise1(&random, 16),
+  4635→    lperlinNoise2(&random, 16),
+  4636→    perlinNoise1(&random, 8),
+  4637→    perlinNoise2(&random, 4),
+  4638→    perlinNoise3(&random, 4),
+  4639→    scaleNoise(&random, 10),
+  4640→    depthNoise(&random, 16),
+  4641→    forestNoise(&random, 8),
+  4642→    spawnMobs(spawnMobs),
+  4643→    pnr(NULL), ar(NULL), br(NULL), sr(NULL), dr(NULL), fi(NULL), fis(NULL)
+  4644→{
+  4645→    for (int i=0; i<32; ++i)
+  4646→    for (int j=0; j<32; ++j)
+  4647→        waterDepths[i][j] = 0;
+  4648→
+  4649→    buffer = new float[MAX_BUFFER_SIZE];      // MAX_BUFFER_SIZE = 1024
+  4650→
+  4651→    Random randomCopy = random;
+  4652→    printf("random.get : %d\n", randomCopy.nextInt());
+  4653→}
+  4654→```
+  4655→
+  4656→Noise generator octaves: 8 PerlinNoise instances seeded from the same `random` in this order: `lperlinNoise1(16), lperlinNoise2(16), perlinNoise1(8), perlinNoise2(4), perlinNoise3(4), scaleNoise(10), depthNoise(16), forestNoise(8)`. The integer arg is the number of octaves.
+  4657→
+  4658→### RandomLevelSource::getChunk (the worldgen entry point) — VERIFIED (RandomLevelSource.cpp:488–511)
+  4659→```cpp
+  4660→LevelChunk* RandomLevelSource::getChunk(int xOffs, int zOffs) {
+  4661→    int hashedPos = ChunkPos::hashCode(xOffs, zOffs);
+  4662→    ChunkMap::iterator it = chunkMap.find(hashedPos);
+  4663→    if (it != chunkMap.end())
+  4664→        return it->second;     // cached
+  4665→
+  4666→    random.setSeed((long)(xOffs * 341872712l + zOffs * 132899541l));
+  4667→
+  4668→    unsigned char* blocks = new unsigned char[LevelChunk::ChunkBlockCount];   // 32768 bytes
+  4669→    LevelChunk* levelChunk = new LevelChunk(level, blocks, xOffs, zOffs);
+  4670→    chunkMap.insert(std::make_pair(hashedPos, levelChunk));
+  4671→
+  4672→    Biome** biomes = level->getBiomeSource()->getBiomeBlock(xOffs * 16, zOffs * 16, 16, 16);
+  4673→    float* temperatures = level->getBiomeSource()->temperatures;
+  4674→    prepareHeights(xOffs, zOffs, blocks, 0, temperatures);
+  4675→    buildSurfaces(xOffs, zOffs, blocks, biomes);
+  4676→
+  4677→    levelChunk->recalcHeightmap();
+  4678→
+  4679→    return levelChunk;
+  4680→}
+  4681→```
+  4682→
+  4683→**Worldgen chunk creation:**
+  4684→1. Per-chunk RNG seed: `xOffs * 341872712 + zOffs * 132899541`.
+  4685→2. Allocate `32768` bytes for blocks.
+  4686→3. Create `LevelChunk(level, blocks, xOffs, zOffs)` — fresh `data`/`skyLight`/`blockLight` initialized to 0.
+  4687→4. Get biome block (16×16 grid of `Biome*` for this chunk).
+  4688→5. `prepareHeights(xOffs, zOffs, blocks, 0, temperatures)` — fills `blocks` with `rock` (1) or `calmWater` (9) (and `ice` (79) on cold surfaces) based on the noise heightmap.
+  4689→6. `buildSurfaces(xOffs, zOffs, blocks, biomes)` — overwrites the surface layers with biome-appropriate top/material (grass+dirt, sand, etc.) and adds bedrock at y=0..4.
+  4690→7. `levelChunk->recalcHeightmap()` — computes `heightmap` and initial `skyLight` for each column (top-down brightness from 15).
+  4691→8. Cave generation is commented out (`//caveFeature.apply(...)`); LargeCaveFeature is a member but not invoked here.
+  4692→
+  4693→### RandomLevelSource::prepareHeights — VERIFIED (RandomLevelSource.cpp:65–136)
+  4694→```cpp
+  4695→void RandomLevelSource::prepareHeights(int xOffs, int zOffs, unsigned char* blocks, void* biomes, float* temperatures) {
+  4696→    int xChunks = 16 / CHUNK_WIDTH;                       // 16/4 = 4
+  4697→    int waterHeight = Level::DEPTH - 64;                  // 128 - 64 = 64
+  4698→    int xSize = xChunks + 1;                               // 5
+  4699→    int ySize = 128 / CHUNK_HEIGHT + 1;                   // 128/8 + 1 = 17
+  4700→    int zSize = xChunks + 1;                               // 5
+  4701→    buffer = getHeights(buffer, xOffs * xChunks, 0, zOffs * xChunks, xSize, ySize, zSize);
+  4702→
+  4703→    for (int xc = 0; xc < xChunks; xc++) {
+  4704→        for (int zc = 0; zc < xChunks; zc++) {
+  4705→            for (int yc = 0; yc < 128 / CHUNK_HEIGHT; yc++) {     // 16 iterations
+  4706→                float yStep = 1 / (float) CHUNK_HEIGHT;            // 1/8
+  4707→                float s0 = buffer[((xc + 0) * zSize + (zc + 0)) * ySize + (yc + 0)];
+  4708→                float s1 = buffer[((xc + 0) * zSize + (zc + 1)) * ySize + (yc + 0)];
+  4709→                float s2 = buffer[((xc + 1) * zSize + (zc + 0)) * ySize + (yc + 0)];
+  4710→                float s3 = buffer[((xc + 1) * zSize + (zc + 1)) * ySize + (yc + 0)];
+  4711→
+  4712→                float s0a = (buffer[((xc + 0) * zSize + (zc + 0)) * ySize + (yc + 1)] - s0) * yStep;
+  4713→                float s1a = (buffer[((xc + 0) * zSize + (zc + 1)) * ySize + (yc + 1)] - s1) * yStep;
+  4714→                float s2a = (buffer[((xc + 1) * zSize + (zc + 0)) * ySize + (yc + 1)] - s2) * yStep;
+  4715→                float s3a = (buffer[((xc + 1) * zSize + (zc + 1)) * ySize + (yc + 1)] - s3) * yStep;
+  4716→
+  4717→                for (int y = 0; y < CHUNK_HEIGHT; y++) {     // 8 iterations
+  4718→                    float xStep = 1 / (float) CHUNK_WIDTH;    // 1/4
+  4719→
+  4720→                    float _s0 = s0;
+  4721→                    float _s1 = s1;
+  4722→                    float _s0a = (s2 - s0) * xStep;
+  4723→                    float _s1a = (s3 - s1) * xStep;
+  4724→
+  4725→                    for (int x = 0; x < CHUNK_WIDTH; x++) {    // 4 iterations
+  4726→                        int offs = (x + xc * CHUNK_WIDTH) << 11 | (0 + zc * CHUNK_WIDTH) << 7 | (yc * CHUNK_HEIGHT + y);
+  4727→                        int step = 1 << 7;                       // 128 — stride for adjacent Y within block array
+  4728→                        float zStep = 1 / (float) CHUNK_WIDTH;   // 1/4
+  4729→
+  4730→                        float val = _s0;
+  4731→                        float vala = (_s1 - _s0) * zStep;
+  4732→                        for (int z = 0; z < CHUNK_WIDTH; z++) {  // 4 iterations
+  4733→                            float temp = temperatures[(xc * CHUNK_WIDTH + x) * 16 + (zc * CHUNK_WIDTH + z)];
+  4734→                            int tileId = 0;
+  4735→                            if (yc * CHUNK_HEIGHT + y < waterHeight) {     // below y=64
+  4736→                                if (temp < SNOW_CUTOFF && yc * CHUNK_HEIGHT + y >= waterHeight - 1) {
+  4737→                                    tileId = Tile::ice->id;          // 79
+  4738→                                } else {
+  4739→                                    tileId = Tile::calmWater->id;   // 9
+  4740→                                }
+  4741→                            }
+  4742→                            if (val > 0) {
+  4743→                                tileId = Tile::rock->id;             // 1
+  4744→                            }
+  4745→                            blocks[offs] = (unsigned char) tileId;
+  4746→                            offs += step;
+  4747→                            val += vala;
+  4748→                        }
+  4749→                        _s0 += _s0a;
+  4750→                        _s1 += _s1a;
+  4751→                    }
+  4752→
+  4753→                    s0 += s0a;
+  4754→                    s1 += s1a;
+  4755→                    s2 += s2a;
+  4756→                    s3 += s3a;
+  4757→                }
+  4758→            }
+  4759→        }
+  4760→    }
+  4761→}
+  4762→```
+  4763→
+  4764→**Terrain heightmap algorithm — EXACT:**
+  4765→1. Chunk is subdivided into a 4×4 grid of 4×4-block cells (with 1-cell overlap → 5×5 control points).
+  4766→2. `getHeights(buffer, xOffs*4, 0, zOffs*4, 5, 17, 5)` produces a 5×17×5 noise grid (5×5 columns × 17 vertical control points, height-step = 8).
+  4767→3. Trilinear interpolation fills all 32768 block positions in the chunk.
+  4768→4. **Fill rule:**
+  4769→   - If `val > 0` → place `rock` (id 1).
+  4770→   - Else if below y=64 (waterHeight) and temperature is < 0.5 and at the topmost water level → `ice` (id 79).
+  4771→   - Else if below y=64 → `calmWater` (id 9).
+  4772→   - Else → air (id 0).
+  4773→
+  4774→So `val > 0` from the noise = solid rock. `val <= 0` below sea level = water. Above sea level = air. Sea level = 64.
+  4775→
+  4776→### RandomLevelSource::getHeights — VERIFIED (RandomLevelSource.cpp:513–602)
+  4777→```cpp
+  4778→float* RandomLevelSource::getHeights(float* buffer, int x, int y, int z, int xSize, int ySize, int zSize) {
+  4779→    const int size = xSize * ySize * zSize;
+  4780→    if (size > MAX_BUFFER_SIZE) {
+  4781→        LOGI("RandomLevelSource::getHeights: TOO LARGE BUFFER REQUESTED: %d (max %d)\n", size, MAX_BUFFER_SIZE);
+  4782→    }
+  4783→
+  4784→    float s = 1 * 684.412f;          // standard Minecraft height scale
+  4785→    float hs = 1 * 684.412f;
+  4786→
+  4787→    float* temperatures = level->getBiomeSource()->temperatures;
+  4788→    float* downfalls = level->getBiomeSource()->downfalls;
+  4789→    sr = scaleNoise.getRegion(sr, x, z, xSize, zSize, 1.121f, 1.121f, 0.5f);
+  4790→    dr = depthNoise.getRegion(dr, x, z, xSize, zSize, 200.0f, 200.0f, 0.5f);
+  4791→
+  4792→    pnr = perlinNoise1.getRegion(pnr, (float)x, (float)y, (float)z, xSize, ySize, zSize, s / 80.0f, hs / 160.0f, s / 80.0f);
+  4793→    ar = lperlinNoise1.getRegion(ar, (float)x, (float)y, (float)z, xSize, ySize, zSize, s, hs, s);
+  4794→    br = lperlinNoise2.getRegion(br, (float)x, (float)y, (float)z, xSize, ySize, zSize, s, hs, s);
+  4795→
+  4796→    int p = 0;
+  4797→    int pp = 0;
+  4798→
+  4799→    int wScale = 16 / xSize;
+
+[showing lines 4200-4799 of 11684; use offset=4800 with limit to continue reading]

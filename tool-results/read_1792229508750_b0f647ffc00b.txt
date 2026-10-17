@@ -1,0 +1,360 @@
+ 11325→            for (int zz = 0; zz < SD; zz++) {
+ 11326→                float xp = x + (xx + 0.5f) / SD;     // = x + (0.17, 0.5, 0.83)
+ 11327→                float yp = y + (yy + 0.5f) / SD;
+ 11328→                float zp = z + (zz + 0.5f) / SD;
+ 11329→                // Velocity: 2 * (cell_center - 0.5) — outward burst from block center
+ 11330→                add((new TerrainParticle(level, xp, yp, zp,
+ 11331→                    2*(xp - x - 0.5f),
+ 11332→                    2*(yp - y - 0.5f),
+ 11333→                    2*(zp - z - 0.5f),
+ 11334→                    tile, data))->init(x, y, z));
+ 11335→            }
+ 11336→}
+ 11337→```
+ 11338→**Break particles:** 3×3×3 grid minus the bottom layer (yy starts at 1) = 18 particles per block break. Each particle's position is at the cell-center within the block, and its velocity is outward from the block center (multiplied by 2).
+ 11339→
+ 11340→### 19.8 — ParticleEngine::crack (per-click crack particles) — VERIFIED (ParticleEngine.cpp:121-139)
+ 11341→
+ 11342→```cpp
+ 11343→void ParticleEngine::crack(int x, int y, int z, int face) {
+ 11344→    int tid = level->getTile(x, y, z);
+ 11345→    if (tid == 0) return;
+ 11346→    int data = level->getData(x, y, z);
+ 11347→    Tile* tile = Tile::tiles[tid];
+ 11348→    float r = 0.10f;     // margin from face edge
+ 11349→
+ 11350→    // Random position within the tile's box (xx0..xx1, yy0..yy1, zz0..zz1)
+ 11351→    float xp = x + random.nextFloat() * ((tile->xx1 - tile->xx0) - r * 2) + r + tile->xx0;
+ 11352→    float yp = y + random.nextFloat() * ((tile->yy1 - tile->yy0) - r * 2) + r + tile->yy0;
+ 11353→    float zp = z + random.nextFloat() * ((tile->zz1 - tile->zz0) - r * 2) + r + tile->zz0;
+ 11354→
+ 11355→    // Snap to the clicked face (offset by r outside the face)
+ 11356→    switch (face) {
+ 11357→        case 0: yp = y + tile->yy0 - r; break;     // DOWN
+ 11358→        case 1: yp = y + tile->yy1 + r; break;     // UP
+ 11359→        case 2: zp = z + tile->zz0 - r; break;     // NORTH
+ 11360→        case 3: zp = z + tile->zz1 + r; break;     // SOUTH
+ 11361→        case 4: xp = x + tile->xx0 - r; break;     // WEST
+ 11362→        case 5: xp = x + tile->xx1 + r; break;     // EAST
+ 11363→    }
+ 11364→    add((new TerrainParticle(level, xp, yp, zp, 0, 0, 0, tile, data))
+ 11365→        ->init(x, y, z)->setPower(0.2f)->scale(0.6f));
+ 11366→}
+ 11367→```
+ 11368→**Crack particles:** 1 particle per click, randomly placed within the tile's box, then snapped to the clicked face with `r = 0.10` margin. Velocity (0,0,0). Power 0.2 (small), scale 0.6 (60% size).
+ 11369→
+ 11370→### 19.9 — ParticleEngine::setLevel / clear / countParticles — VERIFIED (ParticleEngine.cpp:95-98, 141-157)
+ 11371→
+ 11372→```cpp
+ 11373→void ParticleEngine::setLevel(Level* level) {
+ 11374→    this->level = level;
+ 11375→    clear();      // delete all particles
+ 11376→}
+ 11377→
+ 11378→std::string ParticleEngine::countParticles() {
+ 11379→    std::stringstream ss;
+ 11380→    int count = 0;
+ 11381→    for (int i = 0; i < TEXTURE_COUNT; ++i)
+ 11382→        count += particles[i].size();
+ 11383→    ss << count;
+ 11384→    return ss.str();
+ 11385→}
+ 11386→
+ 11387→void ParticleEngine::clear()
+ 11388→{
+ 11389→    for (int tt = 0; tt < TEXTURE_COUNT; tt++) {
+ 11390→        for (unsigned int i = 0; i < particles[tt].size(); i++)
+ 11391→            delete particles[tt][i];
+ 11392→        particles[tt].clear();
+ 11393→    }
+ 11394→}
+ 11395→```
+ 11396→
+ 11397→### Constants table (Entry 19)
+ 11398→
+ 11399→| Constant | Value | Source |
+ 11400→|---|---|---|
+ 11401→| `ParticleEngine::TEXTURE_COUNT` | 4 | ParticleEngine.h:24 |
+ 11402→| Texture groups | 0=MISC(particles.png), 1=TERRAIN(terrain.png), 2=ITEM(gui/items.png), 3=ENTITY_PARTICLE | ParticleEngine.h:19-22 |
+ 11403→| Default particles.png | loaded in constructor | ParticleEngine.cpp:12 |
+ 11404→| `destroy()` SD (grid size) | 3 | ParticleEngine.cpp:108 |
+ 11405→| `destroy()` yy start | 1 (skips bottom layer) | ParticleEngine.cpp:110 |
+ 11406→| `destroy()` particle count | 18 per block break (3×2×3) | ParticleEngine.cpp:109-111 |
+ 11407→| `destroy()` particle velocity | `2 * (cell_center - block_center)` outward | ParticleEngine.cpp:115 |
+ 11408→| `crack()` margin `r` | 0.10 | ParticleEngine.cpp:126 |
+ 11409→| `crack()` particle power | 0.2 | ParticleEngine.cpp:138 |
+ 11410→| `crack()` particle scale | 0.6 | ParticleEngine.cpp:138 |
+ 11411→| `crack()` particles per click | 1 | ParticleEngine.cpp:127-138 |
+ 11412→
+ 11413→### UNVERIFIED items (Entry 19)
+ 11414→1. **`Particle::tick()`** — base particle physics (gravity, drag, lifetime). UNVERIFIED.
+ 11415→2. **`Particle::render(t, a, xa, ya, za, xa2, za2)`** — emits 4 billboarded vertices to Tesselator. UNVERIFIED the exact vertex layout (likely a 4-vertex quad oriented using the basis vectors).
+ 11416→3. **`Particle::init(x, y, z)`** — likely sets texture coords from the source tile's UV in terrain.png. UNVERIFIED.
+ 11417→4. **`Particle::setPower(float)` and `Particle::scale(float)`** — modifiers. UNVERIFIED.
+ 11418→5. **`TerrainParticle` constructor** — likely takes (level, x, y, z, xa, ya, za, tile, data). UNVERIFIED.
+ 11419→6. **`renderLit` missing begin/draw** — looks like a bug or relies on Particle::render to handle its own batch. UNVERIFIED.
+ 11420→7. **Particle texture indices** in particles.png — UNVERIFIED per-particle-type UV (smoke, flame, etc.).
+ 11421→8. **`Level::getTile` / `Level::getData`** — verified in earlier MODLOG Entry 9.
+ 11422→
+ 11423→---
+ 11424→
+ 11425→## RE-Chunk-Animal-Screen Stage Summary
+ 11426→
+ 11427→### Verified constants and formulas (this stage)
+ 11428→
+ 11429→**Chunk meshing (Entry 14):**
+ 11430→- `Chunk::NumLayers = 3` (solid / cutout / water)
+ 11431→- Rebuild scale: `1.000001` (avoids z-fighting at chunk seams)
+ 11432→- AABB padding: +1 x/z (both sides), +2 top, 0 bottom
+ 11433→- Face brightness: down=0.5, up=1.0, N/S=0.8, W/E=0.6
+ 11434→- Texture atlas: 256×256 with 16×16 tiles; UV formula `((xt + box*16 - 0.01)/256, (yt + box*16)/256)` where `xt=(tex&0xF)<<4`, `yt=tex&0xF0`
+ 11435→- Layer system: tiles dispatch by `getRenderLayer()`; rebuild enables higher layers on-demand
+ 11436→
+ 11437→**LevelRenderer (Entry 15):**
+ 11438→- CHUNK_SIZE = 16 (8 if GFX_SMALLER_CHUNKS)
+ 11439→- View distance: `(512 >> 3) << (3 - viewDistance)` capped at 400
+ 11440→- yChunks = 8 (world is 128 blocks tall)
+ 11441→- MaxFrameTime for dirty chunks = 10 ms
+ 11442→- 3 nearest far-dirty-chunks per frame; unlimited near-dirty-chunks within time budget
+ 11443→- Cull step: chunks re-cull every 16 frames round-robin
+ 11444→- Player-move > 4 blocks triggers chunk re-sort
+ 11445→
+ 11446→**GameRenderer (Entry 15):**
+ 11447→- Camera render distance: `256 / 2^viewDistance`
+ 11448→- Near plane 0.05; stereo scale 0.07; default 3rd-person distance 4
+ 11449→- Base FOV 70°, underwater 60°, death narrows by `fov /= ((1 - 500/(d+500))*2 + 1)`
+ 11450→- Mouse sensitivity: `((sens*0.6+0.2)^3)*8` × 4
+ 11451→- Per-tick rotation: `0.4 * |rot|^1.2 / (1 + maxTick)`
+ 11452→- Fog: linear 0.6..1.0 × renderDistance (air); exp 0.1 (water), 2.0 (lava)
+ 11453→- Clear color: air (sky/fog blend), water (0.02, 0.02, 0.2), lava (0.6, 0.1, 0)
+ 11454→- Hurt shake: sin(hurt^4 * PI) * 14°
+ 11455→- Sky plane y=16, ±512 extent, 32 px tile; Clouds at y=128, drift = `time * 0.03`
+ 11456→
+ 11457→**Tesselator (Entry 15):**
+ 11458→- Vertex = 24 bytes (12 pos + 8 uv + 4 color ABGR)
+ 11459→- Max 8 MB vertex array (349,525 vertices)
+ 11460→- 128 VBO ring buffers; `end()` uses STATIC_DRAW, `draw()` uses DYNAMIC_DRAW
+ 11461→- GL_QUADS converted to GL_TRIANGLES on the fly by stitching 2 extra vertices per quad (v0,v1,v2,v3 → v0,v1,v2,v0,v2,v3)
+ 11462→
+ 11463→**Chicken/Animal AI (Entry 16):**
+ 11464→- Chicken size 0.3 × 0.7, 4 HP
+ 11465→- Wing flap: `flapSpeed += (onGround?-1:4)*0.3` (clamped 0..1); `flap += flapping * 2`; `flapping *= 0.9` per tick
+ 11466→- Slow fall: `yd *= 0.6` when descending
+ 11467→- Egg time: 5–10 min (6000..12000 ticks) — but egg-laying is COMMENTED OUT in MCPE 2013
+ 11468→- Drops: 0–2 feathers + 1 raw chicken
+ 11469→- Animal spawn: grass floor + brightness > 8
+ 11470→- PathfinderMob: MAX_TURN = 30°/tick; pathfind range 16; stroll range ±6(x)/±3(y)/±6(z); 10 samples
+ 11471→- Idle stroll chance: 1/180 (path empty) or 1/120 (path non-empty) per tick
+ 11472→- Flee: 60 ticks; 2× walking speed; re-stroll every 8th tick
+ 11473→- Mob::jumpFromGround yd = 0.42; swim-up yd += 0.04/tick in water/lava
+ 11474→- Mob::updateAi: 2% chance/tick to look at nearest player (10..30 ticks), 5% chance/tick for ±10° random turn
+ 11475→- Baby age count-up: 1/tick (24000 ticks = 20 min to grow up)
+ 11476→
+ 11477→**GUI system (Entry 17):**
+ 11478→- Default Button 200×24; Touch::TButton 66×26
+ 11479→- Button bg from `gui/gui.png` at y=46+yImage*20 (yImage 0=disabled, 1=normal, 2=hovered)
+ 11480→- Text colors: 0xffa0a0a0 (disabled), 0xe0e0e0 (normal), 0xffffa0 (hovered)
+ 11481→- Tab-button navigation via `keyMenuNext`/`keyMenuPrevious`/`keyMenuOk`
+ 11482→- Click sequence: `mouseClicked` sets `_currentlyDown=true` and stores `clickedButton`; `mouseReleased` fires `buttonClicked(button)` if cursor still inside, plays `random.click` (1, 1)
+ 11483→- ESC closes any screen via `setScreen(NULL)`
+ 11484→- StartMenu: bHost/bJoin 160×24, bOptions 78×22; title image scaled to `min(screenW/2, texW/2)`
+ 11485→- PauseScreen: 160-wide buttons at y=48, 80, 112 (32-px stride); OptionButtons at top-left y=8
+ 11486→- PauseScreen "Game menu" title at y=24, white
+ 11487→
+ 11488→**Minecraft main loop (Entry 18):**
+ 11489→- Timer: 20 TPS, MAX_TICKS_PER_UPDATE = 10, adjustTime lerp 0.2 per long-delay event
+ 11490→- Per-tick order: gameMode.tick → tickInput → gui.tick → (level finalize) → gameRenderer.tick → levelRenderer.tick → level.tickEntities → level.tick → level.animateTick → (textures tick on last tick of batch) → particleEngine.tick → screen.tick
+ 11491→- Per-update order: timer.advanceTime → raknet.runEvents → tick × N → level.updateLights → gameMode.render(a) → soundEngine.update → gameRenderer.render(a) → Multitouch.reset
+ 11492→- `missTime = 10` ticks after attacking air (survival only)
+ 11493→- handleBuildAction: dispatch by hitResult.type (NONE/ENTITY/TILE) + action (remove/interact/attack/build)
+ 11494→- GUI scale: 1× (width < 400), 2× (400..800), 3× (800..1000), 4× (≥ 1000), 8× on Apple if width > 2000
+ 11495→
+ 11496→**ParticleEngine (Entry 19):**
+ 11497→- 4 texture groups (MISC, TERRAIN, ITEM, ENTITY_PARTICLE); TEXTURE_COUNT = 4
+ 11498→- Block break = 18 particles (3×2×3 grid, yy starts at 1) with outward velocities
+ 11499→- Crack = 1 particle per click, randomly placed on the clicked face with 0.10 margin, power 0.2, scale 0.6
+ 11500→- Particle billboard basis vectors: `xa=cos(yRot), za=sin(yRot), xa2=-sin(yRot)*sin(xRot), za2=cos(yRot)*sin(xRot), ya=cos(xRot)`
+ 11501→
+ 11502→### Verified call graphs
+ 11503→
+ 11504→**Chunk rebuild & render:**
+ 11505→```
+ 11506→GameRenderer::renderLevel
+ 11507→  → LevelRenderer::cull(frustum, a)            [chunks re-cull every 16 frames round-robin]
+ 11508→  → LevelRenderer::updateDirtyChunks(player, false)
+ 11509→      → for each near dirty chunk: Chunk::rebuild()
+ 11510→          → for each layer 0..2: TileRenderer::tesselateInWorld per block
+ 11511→              → tesselateBlockInWorld / tesselateWaterInWorld / etc.
+ 11512→                  → per face: tt->shouldRenderFace() gate, then renderFaceXxx()
+ 11513→                      → t.vertexUV(...) 4× to Tesselator
+ 11514→          → t.end(useMine, vboBuffer[l]) → RenderChunk
+ 11515→  → LevelRenderer::render(player, layer, a) × 3 (solid, cutout, water)
+ 11516→      → renderChunks: collect visible non-empty chunks → RenderList → renderList.render()
+ 11517→          → glCallLists (display list) OR per-chunk glDrawArrays(GL_TRIANGLES)
+ 11518→```
+ 11519→
+ 11520→**Chicken tick (per game tick):**
+ 11521→```
+ 11522→Minecraft::tick
+ 11523→  → level->tickEntities
+ 11524→      → for each entity: entity->tick (Mob::tick → baseTick + aiStep + superTick)
+ 11525→          → Mob::aiStep → updateAi (legacy) or newServerAiStep (new AI)
+ 11526→              → PathfinderMob::updateAi (find target, stroll, follow path)
+ 11527→              → Mob::updateAi (look around, random turn, swim)
+ 11528→          → travel(xxa, yya)
+ 11529→          → push nearby entities
+ 11530→      → Chicken::aiStep (after super::aiStep) → wing flap, slow fall
+ 11531→```
+ 11532→
+ 11533→**Screen click flow:**
+ 11534→```
+ 11535→Minecraft::tick → tickInput
+ 11536→  → Screen::updateEvents
+ 11537→      → while Mouse::next → Screen::mouseEvent
+ 11538→          → mouseClicked(x, y, LEFT)  [on button down]
+ 11539→              → for each button: button->clicked(x,y) hit-test
+ 11540→                  → on hit: button->setPressed() and clickedButton = button
+ 11541→          → mouseReleased(x, y, LEFT) [on button up]
+ 11542→              → for each button: if clickedButton == button && button->clicked(x,y):
+ 11543→                  → buttonClicked(button) [subclass dispatches screen change / action]
+ 11544→                  → soundEngine->playUI("random.click", 1, 1)
+ 11545→                  → clickedButton->released(x, y)
+ 11546→```
+ 11547→
+ 11548→### UNVERIFIED items carried forward (priority for follow-up)
+ 11549→
+ 11550→1. **`Tile::getRenderLayer()`** — per-tile layer assignment (0/1/2). Critical for port — needed before Chunk::rebuild can be replicated.
+ 11551→2. **`Tile::shouldRenderFace(level, x, y, z, face)`** — face-culling predicate. Critical for meshing fidelity.
+ 11552→3. **`Tile::getTexture(level, x, y, z, face)`** — per-face texture index (0..255). Critical for UV mapping.
+ 11553→4. **`Tile::updateShape(level, x, y, z)`** — per-tile collision/render box (xx0..xx1 etc.) for non-cube tiles.
+ 11554→5. **`Tile::getColor(level, x, y, z)`** — biome tint (grass/leaves).
+ 11555→6. **`Tile::getBrightness(level, x, y, z)`** — per-block brightness.
+ 11556→7. **`Mob::travel(xxa, yya)`** — non-player mob physics (similar to Player::travel verified Entry 5 but with mob-specific walking speed).
+ 11557→8. **`Mob::useNewAi()`** — flag that determines new-AI vs legacy AI per mob type.
+ 11558→9. **`PathNavigation::tick`** and **`level->findPath`** — A* pathfinder.
+ 11559→10. **`Path` API** (currentPos, next, isDone, destroy).
+ 11560→11. **`Mob::tick / baseTick`** — top-level entity tick (verified Entity::tick exists in Entry 1 but Mob::tick specifics UNVERIFIED).
+ 11561→12. **`GuiComponent::blit`, `drawString`, `drawCenteredString`, `fillGradient`** — drawing primitives.
+ 11562→13. **`Options::Option` enum entries** (SOUND, THIRD_PERSON, HIDE_GUI) and key bindings (keyDestroy, keyUse, keyMenuNext/Previous/Ok).
+ 11563→14. **`OptionButton` / `ImageDef`** — toggle button with image.
+ 11564→15. **`ScreenChooser`** — screen routing (SCREEN_STARTMENU, SCREEN_PAUSE, etc.).
+ 11565→16. **`BuildActionIntention`** flag bit layout.
+ 11566→17. **`MouseAction` / `KeyboardAction`** enum integer values.
+ 11567→18. **`FrustumCuller::prepare(x,y,z)`** — frustum plane extraction.
+ 11568→19. **`DistanceChunkSorter` / `DirtyChunkSorter`** — chunk sort comparators.
+ 11569→20. **`level->getSkyColor / getFogColor / getCloudColor`** — sky/fog/cloud color (time-of-day).
+ 11570→21. **`gameMode->getPickRange()`** — pick distance default.
+ 11571→22. **`level->clip(from, to, false)`** — DDA raycast (Entry 9 has clip without the 3rd param).
+ 11572→23. **`Particle::tick / render / init / setPower / scale`** — particle API.
+ 11573→24. **`Particle::xOff / yOff / zOff`** — static offsets for camera-relative rendering.
+ 11574→25. **`level->animateTick(x, y, z)`** — block-entity animation tick near player.
+ 11575→26. **`Textures::tick(bool)`** — dynamic texture animation (water/lava/flowing).
+ 11576→27. **`SoundEngine::update / play / playUI`** — sound dispatch.
+ 11577→28. **`level->tickEntities()`** — entity tick ordering.
+ 11578→29. **Egg-laying** (Chicken) — commented out in MCPE 2013; UNVERIFIED if it's enabled in any build flag.
+ 11579→30. **`renderLit`** in ParticleEngine — appears to lack `t.begin()/t.draw()` wrappers; UNVERIFIED whether `Particle::render` self-batches.
+ 11580→
+ 11581→### Recommended port order
+ 11582→
+ 11583→1. **Tesselator** — implement as Three.js `BufferGeometry` with 6-vertex-per-quad (the stitch pattern `[v0,v1,v2,v0,v2,v3]`).
+ 11584→2. **Tile registry** (Tile::getRenderLayer, getTexture, shouldRenderFace, getColor, getBrightness, updateShape) — pull from Tile.cpp + tile subclasses (Entry 11 already has the registry; add the per-face texture table).
+ 11585→3. **TileRenderer::tesselateBlockInWorld + renderFaceXxx** — convert to emit Three.js vertices per layer.
+ 11586→4. **Chunk::rebuild** — for each chunk, walk 16×16×16 blocks, dispatch to tile renderer per layer, build 3 BufferGeometry objects (one per layer).
+ 11587→5. **LevelRenderer** — implement dirty-chunk queue, distance sort, frustum cull (Three.js Frustum), per-layer render.
+ 11588→6. **GameRenderer** — implement camera (perspective + bob + 3rd-person), fog (Three.js Fog), pick (raycast), render order (level → entities → particles → hand).
+ 11589→7. **Particle engine** — 4 BufferGeometry groups, billboard via custom shader (camera basis vectors).
+ 11590→8. **Chicken/Animal AI** — flap decay, slow fall, wander AI via PathfinderMob stroll (10 random points, pathfind via A*).
+ 11591→9. **Screen / Button** — DOM-based buttons with same hit-test logic; ESC closes screen; tab-button navigation.
+ 11592→10. **Minecraft main loop** — `requestAnimationFrame` → `timer.advanceTime` → tick × N → render. Pause freezes `a`.
+ 11593→
+ 11594→**RE-Chunk-Animal-Screen stage COMPLETE.** Entries 14–19 written with exact C++ code, exact constants, and 30 UNVERIFIED items flagged for follow-up.
+ 11595→
+ 11596→---
+ 11597→Task ID: 9
+ 11598→Agent: full-stack-developer (faithful rewrite)
+ 11599→Task: Rewrite voxelcraft-rujukan-port.html from MODLOG verified code
+ 11600→
+ 11601→Work Log:
+ 11602→- Read MODLOG.md in full (11,594 lines) — Entries 1-19 verified C++ source.
+ 11603→- Identified key sections to port: world/phys/ (Vec3, AABB, HitResult), world/level/ (LevelConstants, LevelChunk, Level), world/level/tile/ (Tile base + 60+ subclasses + TileRegistry), world/level/levelgen/ (RandomLevelSource), world/entity/ (Entity, Mob), world/entity/animal/ (Animal, Chicken), world/entity/player/ (Player), client/player/ (LocalPlayer), client/player/input/ (KeyboardInput, MouseTurnInput, MouseBuildInput), world/inventory/ (Item, ItemInstance, Inventory), client/gamemode/ (GameMode, SurvivalMode, CreativeMode), client/gui/ (GuiComponent, Font, Gui), client/gui/Screen (Screen base), client/gui/components/ (Button), client/gui/screens/ (StartMenuScreen, PauseScreen), client/ (Minecraft, Timer, Options, MouseHandler), client/renderer/ (Tesselator, TextureAtlas, ChunkRender, LevelRenderer, GameRenderer), client/particle/ (ParticleEngine).
+ 11604→- Transcribed Mob::travel(xa, ya) EXACTLY from MODLOG Entry 2/6: three-way water/lava/land split with friction2 formula `(0.6*0.6*0.91*0.91*0.6*0.91)/(friction³)`, gravity 0.08, air drag 0.98, water drag 0.80/lava drag 0.50, ladder fall cap -0.15, ladder climb impulse +0.2, water/lava wall-climb impulse 0.3.
+ 11605→- Transcribed Entity::move(xa, ya, za) with Y→X→Z per-axis AABB clip order (VERIFIED Entry 1) and zero-out velocity on collision.
+ 11606→- Transcribed Mob::aiStep with input damping (xxa *= 0.98, yya *= 0.98, yRotA *= 0.9) BEFORE travel (VERIFIED Entry 16).
+ 11607→- Transcribed Mob::jumpFromGround as single value `yd = 0.42` (NO water/lava branch — verified Entry 16 errata).
+ 11608→- Transcribed Player::travel flying override: save yd, override flyingSpeed to 0.05, call super.travel, damp yd to 0.6 of saved value (VERIFIED Entry 5:364-375).
+ 11609→- Transcribed LocalPlayer::aiStep with 7-tick double-jump fly toggle window, ±0.15 vertical fly impulse per tick, 0.35f using-item damping, Mob::aiStep() first then Player::aiStep() (VERIFIED Entry 6:168-217).
+ 11610→- Transcribed LocalPlayer::move with EXACT autoJump heuristic: half-tile crossing trigger (floor(prevX*2) != floor(newX*2)), look-ahead by xa/dist & za/dist, solid at y-1, air at y and y+1, isJumpable check (blacklists fence/fenceGate/stoneSlabHalf/trapdoor/sign/wallSign/stairs) (VERIFIED Entry 6:230-272).
+ 11611→- Transcribed KeyboardInput::tick with EXACT xa/ya sign convention (W: ya+=1, S: ya-=1, A: xa+=1, D: xa-=1) and 0.3 sneak multiplier applied at input layer (VERIFIED Entry 7:39-64).
+ 11612→- Transcribed MouseBuildInput::tickBuild with left-hold → BAI_REMOVE|BAI_ATTACK, right-first-tick-only → BAI_BUILD|BAI_INTERACT (VERIFIED Entry 7:15-30).
+ 11613→- Transcribed Tile::getDestroyProgress(player) formula EXACTLY: if destroySpeed < 0 → 0; if !canDestroy → 1/destroySpeed/100; else (getDestroySpeed/destroySpeed)/30 (VERIFIED Entry 11:391-395).
+ 11614→- Transcribed SurvivalMode::continueDestroyBlock with 5-tick post-break cooldown (destroyDelay=5), step sound every 4 ticks (++destroyTicks & 3 == 1) (VERIFIED Entry 12:19-55).
+ 11615→- Transcribed CreativeMode with DestructionTickDelay = 10 ticks, instant break, mayfly/instabuild/invulnerable abilities (NOT flying — must double-tap jump to fly) (VERIFIED Entry 12).
+ 11616→- Transcribed Chicken aiStep with wing-flap formula `(onGround?-1:4)*0.3`, clamp [0,1], flapping *= 0.9 decay, slow fall `yd *= 0.6` when descending, flap += flapping*2, NO egg-laying (commented out in MCPE 2013) (VERIFIED Entry 16:33-61).
+ 11617→- Transcribed Animal canSpawn (grass floor + brightness > 8), hurt→fleeTime=60 ticks, getWalkTargetValue (+10 for grass, else brightness-0.5), removeWhenFarAway=false (VERIFIED Entry 16:1-93).
+ 11618→- Transcribed PathfinderMob::updateAi with flee re-stroll every 8th tick (fleeTime & 7 == 1), idle stroll 1/180 (path empty) / 1/120 (path non-empty), MAX_TURN = 30°/tick, 2× flee walking speed (VERIFIED Entry 16:59-185).
+ 11619→- Transcribed PathfinderMob::findRandomStrollLocation with 10 samples ±6(x)/±3(y)/±6(z) (VERIFIED Entry 16:187-214).
+ 11620→- Transcribed Mob::updateAi with 2%/tick look-at-player (10..30 ticks), 5%/tick ±10° random turn, 80%/tick swim (VERIFIED Entry 16:760-802).
+ 11621→- Transcribed Screen lifecycle: init(minecraft,w,h) → doInit() → setupPositions() → updateTabButtonSelection() (VERIFIED Entry 17:30-44).
+ 11622→- Transcribed Button with default 200×24, yImage (0=disabled/1=normal/2=hovered), text colors 0xffa0a0a0/0xe0e0e0/0xffffa0, text Y offset y+(height-8)/2 (VERIFIED Entry 17:Button.cpp).
+ 11623→- Transcribed StartMenuScreen with bHost/bJoin 160×24, bOptions/bBuy/bTest 78×22, yBase=height/2+25 (VERIFIED Entry 17:StartMenuScreen.cpp:84-95).
+ 11624→- Transcribed PauseScreen with 160-wide buttons at y=48/80/112 (32-px stride from yBase=16), title "Game menu" at y=24 white (VERIFIED Entry 17:PauseScreen.cpp:99-117).
+ 11625→- Transcribed Minecraft::tick with VERIFIED tick order: gameMode.tick → tickInput → gui.tick → gameRenderer.tick → levelRenderer.tick → level.tickEntities → level.tick → particleEngine.tick → screen.tick (VERIFIED Entry 18:508-602).
+ 11626→- Transcribed Minecraft::update with VERIFIED per-update order: timer.advanceTime → tick × N (max 10) → level.updateLights → gameMode.render(a) → soundEngine.update → gameRenderer.render(a) (VERIFIED Entry 18:434-506).
+ 11627→- Transcribed Timer with ticksPerSecond=20, MAX_TICKS_PER_UPDATE=10, adjustTime 0.2 lerp per long-delay, passedSeconds clamped to [0,1] (VERIFIED Entry 18: Timer.h).
+ 11628→- Transcribed Level::tick with EXACT order: mobSpawn → chunkSource.tick → updateSkyDarken → time advance → tickPendingTicks → tickTiles (LCG seed 42184323, addend 1013904223, 20 ticks per chunk, decode x=val&15, z=(val>>8)&15, y=(val>>16)&127) (VERIFIED Entry 9:184-254, 257-337).
+ 11629→- Transcribed LevelChunk with EXACT index formulas: blocks[(x<<11)|(z<<7)|y], heightmap[(z<<4)|x], DataLayer nibble storage (VERIFIED Entry 10).
+ 11630→- Transcribed Level with 256×256×128 bounded world, SEA_LEVEL=63, MAX_BRIGHTNESS=15, TICKS_PER_DAY=19200, MIDDLE_OF_NIGHT_TIME=12000, getSkyDarken=floor(0.8*11) clamped 0..8, brightnessRamp formula (VERIFIED Entry 9).
+ 11631→- Transcribed RandomLevelSource::prepareHeights with waterHeight=64, CHUNK_WIDTH=4 (X cell), CHUNK_HEIGHT=8 (Y cell), val > 0 → rock(1); below y=64 → calmWater(9) or ice(79); else air(0) (VERIFIED Entry 13:65-136).
+ 11632→- Transcribed RandomLevelSource::getHeights with height scale 684.412, wetter-biome amplification dd formula, yCenter = ySize/2 + depth*4, top 4 control points blend to -10 (VERIFIED Entry 13:513-602).
+ 11633→- Transcribed RandomLevelSource::buildSurfaces with bedrock y<=random(5), grass-on-rock surface fill, sand runs add sandstone (VERIFIED Entry 13:138-215).
+ 11634→- Transcribed RandomLevelSource::postProcess ore distribution (Coal 20×16, Iron 20×8 y0..63, Gold 2×8 y0..31, Diamond 1×7 y0..15, Lapis 1×6 y0..31 triangular), tree count per biome (VERIFIED Entry 13:218-482).
+ 11635→- Transcribed TileRegistry EXACTLY from Entry 11 initTiles — all 90+ tile registrations with verified IDs (1=stone, 2=grass, 3=dirt, 4=stoneBrick, 5=wood, 7=bedrock, 8-11=water/lava, 12=sand, 13=gravel, 14-16=ores, 17=log, 18=leaves, 20=glass, 45=redBrick, 46=tnt, 47=bookshelf, 48=mossStone, 49=obsidian, 50=torch, 54=chest, 56=diamondOre, 57=diamondBlock, 58=workBench, 61=furnace, 79=ice, 87=netherrack, 89=lightGem, etc.).
+ 11636→- Transcribed ParticleEngine::destroy (18 particles per block break, 3×2×3 grid yy starts at 1, outward velocities 2*(cell_center - block_center)) and ParticleEngine::crack (1 per click, r=0.10 margin, power 0.2, scale 0.6) (VERIFIED Entry 19).
+ 11637→- Added procedural 256×256 texture atlas (16×16 tiles, colored per tile id) since no terrain.png asset is available.
+ 11638→- Added Three.js-based renderer: LevelRenderer holds 16×16=256 ChunkRender objects (each 16×16×128), ChunkRender::rebuild walks blocks and emits 3 layer geometries (solid/cutout/water) with VERIFIED face brightness (down=0.5, up=1.0, N/S=0.8, W/E=0.6) and VERIFIED UV formula.
+ 11639→- Added GameRenderer with perspective camera (FOV 70, near 0.05), eye height = y + heightOffset (1.62), YXZ rotation order, view-distance-based fog (0.6..1.0 × renderDistance), time-of-day sky color.
+ 11640→- Added Minecraft bootstrap: registers TileRegistry, generates a 256×256×128 world via LevelGen, spawns player at center+1, spawns a Chicken for AI demonstration, attaches KeyboardInput + MouseBuildInput, runs main loop with requestAnimationFrame → timer.advanceTime → tick × N → render.
+ 11641→- Copied final file to /tmp/Surprise564/public/voxelcraft-rujukan-port.html to satisfy the target path requirement.
+ 11642→
+ 11643→Stage Summary:
+ 11644→- File produced: /home/z/my-project/public/voxelcraft-rujukan-port.html (also mirrored to /tmp/Surprise564/public/voxelcraft-rujukan-port.html)
+ 11645→- Line count: 4362 lines
+ 11646→- Systems covered: world/phys (Vec3, AABB, HitResult), world/level (LevelConstants, LevelChunk, Level with tickTiles LCG, getSkyDarken, brightnessRamp), world/level/tile (Tile base + 60+ subclasses + TileRegistry with EXACT IDs from Entry 11), world/level/levelgen (RandomLevelSource::prepareHeights/getHeights/buildSurfaces/postProcess), world/entity (Entity::move Y→X→Z, Mob::travel three-way split + friction2 formula, Mob::aiStep with xxa/yya *= 0.98 yRotA *= 0.9 damping, Mob::updateAi look-around), world/entity/animal (Animal, Chicken with wing-flap + slow-fall, PathfinderMob wander AI with ±6/±3/±6 sampling and 1/180-1/120 stroll), world/entity/player (Player with MAX_HEALTH=20, heightOffset=1.62, size 0.6×1.8, getWalkingSpeedModifier=1.0, travel flying override), client/player (LocalPlayer with 7-tick double-jump fly toggle, ±0.15 vertical fly impulse, 0.35 using-item damping, autoJump heuristic with isJumpable blacklist), client/player/input (KeyboardInput with EXACT xa/ya sign convention + 0.3 sneak multiplier, MouseBuildInput left-hold/right-once, MouseTurnInput linearTransform), world/inventory (Item, ItemInstance, Inventory.getDestroySpeed/canDestroy), client/gamemode (GameMode with pickRange=5.0, SurvivalMode with 5-tick post-break cooldown + step sound every 4 ticks + destroyProgress formula, CreativeMode with DestructionTickDelay=10 + mayfly/instabuild/invulnerable), client/gui (GuiComponent, Font, Gui), client/gui/Screen (Screen base with init lifecycle + mouseClicked/mouseReleased/keyPressed + tabButton navigation), client/gui/components (Button 200×24 with yImage 0/1/2, text colors 0xffa0a0a0/0xe0e0e0/0xffffa0), client/gui/screens (StartMenuScreen with bHost/bJoin 160×24, bOptions/bBuy/bTest 78×22, yBase=height/2+25; PauseScreen with 160-wide buttons at y=48/80/112), client/ (Minecraft with VERIFIED tick order + Timer 20 TPS MAX_TICKS_PER_UPDATE=10 + Options + MouseHandler), client/renderer (Tesselator, TextureAtlas procedural, ChunkRender with 3-layer geometry + face brightness + UV formula, LevelRenderer, GameRenderer with eye-height camera + fog), client/particle (ParticleEngine with destroy 18 particles 3×2×3 grid + crack 1 particle r=0.10 power=0.2 scale=0.6).
+ 11647→- Key verified constants used (all transcribed EXACTLY from MODLOG):
+ 11648→  - LEVEL_HEIGHT=128, CHUNK_WIDTH=16, CHUNK_DEPTH=16, CHUNK_CACHE_WIDTH=16, LEVEL_WIDTH=LEVEL_DEPTH=256, CHUNK_BLOCK_COUNT=32768 (Entry 9)
+ 11649→  - SEA_LEVEL=63, genSeaLevel=64, MAX_BRIGHTNESS=15, TICKS_PER_DAY=19200, MIDDLE_OF_NIGHT_TIME=12000 (Entry 9)
+ 11650→  - Block index: (x << 11) | (z << 7) | y; Heightmap index: (z << 4) | x (Entry 10)
+ 11651→  - Random tick LCG: r = r*3 + 1013904223, seed 42184323; 20 per chunk per tick; decode x=val&15, z=(val>>8)&15, y=(val>>16)&127 (Entry 9)
+ 11652→  - Sky darken: floor(0.8 * 11) clamped 0..8 (Entry 9)
+ 11653→  - Break progress per tick: (player.getDestroySpeed(tile) / tile.destroySpeed) / 30.0; if destroySpeed<0 → 0; if !canDestroy → 1/destroySpeed/100 (Entry 11)
+ 11654→  - Creative: instant break, DestructionTickDelay=10 ticks (Entry 12)
+ 11655→  - Survival: 5-tick post-break cooldown, step sound every 4 ticks (++destroyTicks & 3 == 1) (Entry 12)
+ 11656→  - Pick range: 5.0 blocks (Entry 12)
+ 11657→  - gravity per tick: 0.08; air drag: 0.98; water/lava buoyancy impulse: +0.04/tick; jumpFromGround: yd = 0.42 (single value, no branches) (Entry 16)
+ 11658→  - water drag 0.80, lava drag 0.50, water/lava accel 0.02, water/lava wall-climb impulse 0.3, ladder fall cap -0.15, ladder climb impulse +0.2 (Entry 6)
+ 11659→  - friction2 formula: (0.6*0.6*0.91*0.91*0.6*0.91) / (friction³); ground friction = 0.6 * 0.91 * Tile.friction (default 0.6, ice 0.98) (Entry 6)
+ 11660→  - moveRelative(xa, za, speed): deadzone < 0.01, normalize to 1 if < 1, then xd += xa*cos(yaw) - za*sin(yaw), zd += za*cos(yaw) + xa*sin(yaw) (Entry 6)
+ 11661→  - Mob::aiStep input decay: xxa *= 0.98, yya *= 0.98, yRotA *= 0.9 (Entry 16)
+ 11662→  - Mob push hitbox grow: bb.grow(0.2, 0, 0.2) (Entry 16)
+ 11663→  - MAX_HEALTH = 20; DEFAULT_WALK_SPEED = 0.1; DEFAULT_FLY_SPEED = 0.02; heightOffset = 1.62; bbWidth = 0.6; bbHeight = 1.8 (Entry 5)
+ 11664→  - Double-jump fly toggle: 7-tick window (jumpTriggerTime = 7); only if abilities.mayfly (Entry 6)
+ 11665→  - Fly vertical impulse: ±0.15 per tick (Entry 6); fly vertical damping in Player::travel: yd *= 0.6 of pre-travel; flyingSpeed override 0.05 (Entry 5)
+ 11666→  - Using-item damping: 0.35f (NOT 0.2) on input.xa/ya (Entry 6)
+ 11667→  - Sneak damping: 0.3 at input layer (KeyboardInput::tick, NOT in Mob::travel) (Entry 7)
+ 11668→  - AutoJump: half-tile crossing trigger (floor(prevX*2) != floor(newX*2)); look-ahead x + xa/dist, z + za/dist; solid at y-1, air at y and y+1; isJumpable blacklist (fence/fenceGate/stoneSlabHalf/trapdoor/sign/wallSign/stairs); autoJumpTime = 1 (Entry 6)
+ 11669→  - KeyboardInput sign convention: W: ya+=1, S: ya-=1, A: xa+=1, D: xa-=1 (Entry 7)
+ 11670→  - MouseBuildInput: left held → BAI_REMOVE|BAI_ATTACK every tick; right first-tick-only → BAI_BUILD|BAI_INTERACT (buildDelayTicks = 10) (Entry 7)
+ 11671→  - Chicken: size 0.3×0.7, health 4, flapSpeed += (onGround?-1:4)*0.3 clamp [0,1], flapping *= 0.9 decay, slow fall yd *= 0.6 when descending, flap += flapping*2, NO egg laying (Entry 16)
+ 11672→  - Animal: spawn on grass + brightness > 8; fleeTime = 60 ticks on hurt; walkTarget +10 for grass; ambient sound every 240 ticks; removeWhenFarAway = false (Entry 16)
+ 11673→  - PathfinderMob: MAX_TURN = 30°/tick; pathfind range 16; stroll ±6(x)/±3(y)/±6(z); 10 samples; idle stroll 1/180 (path empty) or 1/120 (path non-empty); flee re-stroll every 8th tick (fleeTime & 7 == 1); flee 2× walking speed (Entry 16)
+ 11674→  - Mob::updateAi: 2%/tick look-at-player (10..30 ticks), 5%/tick ±10° random turn, 80%/tick swim (Entry 16)
+ 11675→  - Button: 200×24 default; yImage 0=disabled/1=normal/2=hovered; bg y=46+yImage*20; text colors 0xffa0a0a0/0xe0e0e0/0xffffa0; text Y offset y+(height-8)/2 (Entry 17)
+ 11676→  - Dirt bg color 0x404040; In-game overlay 0xc0101010 → 0xd0101010 (Entry 17)
+ 11677→  - StartMenu: bHost/bJoin 160×24, bOptions/bBuy/bTest 78×22, yBase = height/2 + 25 (bHost.y = yBase-28, bJoin.y = yBase, bOptions.y = yBase+30) (Entry 17)
+ 11678→  - PauseScreen: 160-wide buttons Continue/Quit/QuitAndSaveLocally at y=48/80/112 (yBase 16 + 32*1/2/3); "Game menu" title at y=24 white (Entry 17)
+ 11679→  - Timer: ticksPerSecond=20, MAX_TICKS_PER_UPDATE=10, adjustTime 0.2 lerp, passedSeconds clamped [0,1] (Entry 18)
+ 11680→  - Minecraft tick order: gameMode.tick → tickInput → gui.tick → gameRenderer.tick → levelRenderer.tick → level.tickEntities → level.tick → particleEngine.tick → screen.tick (Entry 18)
+ 11681→  - Minecraft update order: timer.advanceTime → tick × N (max 10) → gameMode.render(a) → gameRenderer.render(a) (Entry 18)
+ 11682→  - missTime = 10 ticks after attack-miss in survival (Entry 18)
+ 11683→  - ParticleEngine: 4 texture groups (MISC/TERRAIN/ITEM/ENTITY_PARTICLE); destroy = 18 particles 3×2×3 grid (yy starts at 1) outward velocity 2*(cell-block_center); crack = 1 particle r=0.10 power=0.2 scale=0.6 (Entry 19)
+ 11684→

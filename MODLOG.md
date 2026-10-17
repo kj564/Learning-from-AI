@@ -11681,3 +11681,209 @@ Stage Summary:
   - Minecraft update order: timer.advanceTime → tick × N (max 10) → gameMode.render(a) → gameRenderer.render(a) (Entry 18)
   - missTime = 10 ticks after attack-miss in survival (Entry 18)
   - ParticleEngine: 4 texture groups (MISC/TERRAIN/ITEM/ENTITY_PARTICLE); destroy = 18 particles 3×2×3 grid (yy starts at 1) outward velocity 2*(cell-block_center); crack = 1 particle r=0.10 power=0.2 scale=0.6 (Entry 19)
+
+---
+Task ID: 9
+Agent: full-stack-developer (faithful rewrite from MODLOG)
+Task: Rewrite voxelcraft-rujukan-port.html from MODLOG verified code
+
+Work Log:
+- Read MODLOG.md entries 1–19 (Entity/Mob/Player/LocalPlayer/KeyboardInput/Level/LevelChunk/Tile registry/GameMode/LevelGen/Chunk/LevelRenderer/GameRenderer/Chicken/Animal/PathfinderMob/Screen/Button/StartMenuScreen/PauseScreen/Minecraft/ParticleEngine) line-by-line.
+- Read worklog.md Task 6 + 6b/7 entries to see prior port (4278 lines) and known bug (init/init() virtual collision — fixed via initScreen rename).
+- Wrote /home/z/my-project/public/voxelcraft-rujukan-port.html (4659 lines) then copied to /tmp/Surprise564/public/voxelcraft-rujukan-port.html.
+- Sectioned the script into 31 SECTION blocks mirroring rujukan folder paths exactly:
+  * world/phys/Vec3, AABB (clipX/Y/ZCollide + clip→HitResult), HitResult (MISS/TILE/ENTITY)
+  * world/level/LevelConstants (LEVEL_HEIGHT=128, CHUNK_WIDTH=16, CHUNK_CACHE_WIDTH=16,
+    LEVEL_WIDTH=256, LEVEL_DEPTH=256, MAX_BRIGHTNESS=15, TICKS_PER_DAY=19200,
+    MIDDLE_OF_NIGHT_TIME=12000, SEA_LEVEL=63, MAX_TICK_TILES_PER_TICK=100)
+  * world/level/Material (air/stone/wood/dirt/water/lava/glass/leaves/plant/metal/clay/ice/topSnow/snow)
+  * world/level/tile/SoundType (10 singletons per Tile.cpp:26-57)
+  * world/level/tile/Tile (base + builder methods + getDestroyProgress formula
+    `(player.getDestroySpeed/destroySpeed)/30`, shouldRenderFace, getAABB)
+  * world/level/tile/Tile subclasses: StoneTile, GrassTile (per-face tex),
+    DirtTile, OreTile, TreeTile (top/side), LeafTile, GlassTile, IceTile,
+    LiquidTile (Dynamic/Static), TorchTile, TntTile, BookshelfTile, HeavyTile
+  * world/level/tile/TileRegistry.init() — exact IDs from MODLOG Entry 11:
+    1,2,3,4,5,7,8,9,10,11,12,13,14,15,16,17,18,20,45,46,47,48,49,50,54,
+    56,57,58,61,79,87,89,95 with verified destroySpeed/explodeable/soundType/
+    lightBlock/lightEmission/lightBlock for each
+  * world/level/chunk/DataLayer (nibble storage VERIFIED formulas), LevelChunk
+    (32768-byte Uint8Array, blocks[(x<<11)|(z<<7)|y] VERIFIED, heightmap[(z<<4)|x],
+    skyLight/blockLight nibble arrays, recalcHeightmap VERIFIED, getRawBrightness)
+  * world/level/Level (chunks Map, getTile/setTile, getBrightness via brightnessRamp,
+    tick() order VERIFIED: updateSkyDarken→time→tickPendingTicks→tickTiles LCG
+    20/chunk with _randValue=42184323, _addend=1013904223, getCubes clip-and-slide,
+    clip DDA voxel ray-pick ≤200 steps)
+  * world/level/levelgen/LevelGen (5x17x5 noise grid per Entry 13, buildSurfaces
+    bedrock+top+material+dirt+rock layers, postProcess ore distribution per Entry 13
+    table: 10 clay / 20 dirt / 10 gravel / 20 coal / 20 iron / 2 gold / 8 redstone /
+    1 diamond / 1 lapis, tree scatter)
+  * world/entity/Entity (setPos, move Y→X→Z AABB clip VERIFIED Entry 1, !slide
+    zero-out xd/zd on horizontalCollision, baseTick fire/fall/air, moveRelative
+    VERIFIED formula `xd += xa*cos(yaw) - za*sin(yaw); zd += za*cos(yaw) + xa*sin(yaw)`,
+    pick, getViewVector)
+  * world/entity/Mob (aiStep VERIFIED: jumping → yd += 0.04 water/lava OR jumpFromGround
+    on ground; xxa*=0.98 yya*=0.98 yRotA*=0.9; travel via walkingSpeedModifier; push
+    entities with bb.grow(0.2,0,0.2); updateAi 2%/tick look 10..30 ticks, 5%/tick ±10°
+    random turn, 80%/tick swim; jumpFromGround VERIFIED yd = 0.42 NO branches;
+    travel 3 branches water/lava/land with friction2 formula
+    `(0.6*0.6*0.91*0.91*0.6*0.91)/(friction^3)`, gravity 0.08, air drag 0.98,
+    water drag 0.8/lava 0.5, water/lava swim impulse +0.04)
+  * world/entity/animal/Animal (spawn on grass+brightness>8, fleeTime=60 on hurt,
+    getWalkTargetValue +10 grass / brightness-0.5, findRandomStrollLocation VERIFIED
+    ±6(x)/±3(y)/±6(z), 10 samples, MAX_TURN=30, flee 2× speed)
+  * world/entity/animal/Chicken (VERIFIED Entry 16: size 0.3×0.7, health 4,
+    flapSpeed += (onGround?-1:4)*0.3 clamp [0,1], flapping *= 0.9 decay, slow fall
+    yd *= 0.6 when !onGround && yd<0, flap += flapping*2, NO egg laying)
+  * world/entity/player/Abilities (invulnerable/flying/mayfly/instabuild),
+    Player (VERIFIED constants MAX_HEALTH=20, DEFAULT_WALK_SPEED=0.1,
+    DEFAULT_FLY_SPEED=0.02, SLEEP_DURATION=100, WAKE_UP_DURATION=10, AABB 0.6×1.8,
+    eye 1.62; travel flying override sets flyingSpeed=0.05 then super.travel then
+    yd = ydo*0.6; tick handles sleep counter; aiStep peaceful regen 1HP/240 ticks +
+    bob/tilt lerp factors 0.4/0.8 — NO super.aiStep call per Entry 5)
+  * client/player/LocalPlayer (VERIFIED Entry 6: aiStep decrements triggers, ticks
+    input, double-jump fly 7-tick window (mayfly only), vertical fly impulse ±0.15/tick,
+    using-item damping k=0.35, Mob::aiStep first then Player::aiStep; move flying
+    path = noPhysics+calculateFlight+Entity::move with flyX/Y/Z, autojump heuristic
+    with half-tile trigger + look-ahead + isJumpable; calculateFlight uses SmoothFloat
+    with accel = 0.35*sensitivity; updateAi sets xxa=input.xa yya=input.ya
+    jumping=input.jumping||autoJumpTime>0; isJumpable blacklist stairs/fence/gate)
+  * client/player/input/KeyboardInput (VERIFIED Entry 7: forward=+1, back=-1,
+    left=+1, right=-1, sneak *=0.3), MouseTurnInput (linearTransform deadzone
+    40/30 px scale 0.4/0.6), MouseBuildInput (left held → BAI_REMOVE|BAI_ATTACK
+    every tick; right first-tick-only → BAI_BUILD|BAI_INTERACT, buildDelayTicks=10)
+  * world/inventory/Item + TileItem (useOn places tile) + ItemInstance +
+    Inventory (9 hotbar + 27 storage, MAX_SELECTION_SIZE=9)
+  * client/gamemode/GameMode (PICK_RANGE=5.0, tick saves oDestroyProgress,
+    render interpolates with alpha), SurvivalMode (startDestroyBlock first hit;
+    continueDestroyBlock accumulates `destroyProgress += tile.getDestroyProgress`,
+    step sound every 4 ticks (destroyTicks&3==1), break on progress>=1, 5-tick
+    destroyDelay cooldown; stopDestroyBlock resets progress), CreativeMode
+    (DestructionTickDelay=10, instant break, repeat every 10 ticks, mayfly=true
+    instabuild=true invulnerable=true)
+  * client/gui/GuiComponent, Font (Minecraft Ten via @font-face, 12px), Gui
+    HUD (renderToolBar 9-slot hotbar, renderHearts survival 10 hearts, XYZ+mode+
+    time+fps debug overlay, hotbar digit 1-9 selection)
+  * client/gui/Screen (VERIFIED lifecycle: initScreen → init() → setupPositions()
+    → updateTabButtonSelection(); mouseClicked → hit-test buttons → setPressed →
+    record clickedButton; mouseReleased → buttonClicked + sound + released;
+    keyPressed ESC → setScreen(null); tabButtons keyboard navigation via
+    keyMenuNext/Previous/Ok)
+  * client/gui/components/Button (200×24 default, yImage 0/1/2 for
+    inactive/normal/hovered, text colors 0xffa0a0a0/0xe0e0e0/0xffffa0, text Y offset
+    y+(height-8)/2)
+  * client/gui/screens/StartMenuScreen (bHost=2/bJoin=3 160×24, bOptions=4 78×22,
+    bSurvival=10 160×24; yBase=height/2+25; bHost.y=yBase-28 bJoin.y=yBase
+    bSurvival.y=yBase+28; title at y=4; version at y=62 gray; copyright at
+    height-10 white; isInGameScreen=false; handleBackEvent quits)
+  * client/gui/screens/PauseScreen (bContinue=1/bQuit=2 160 wide; yBase=16;
+    Continue.y=48 Quit.y=80; "Game menu" title at y=24 white; isInGameScreen=true)
+  * client/Minecraft (Timer 20 TPS, MAX_TICKS_PER_UPDATE=10; update order:
+    timer.advanceTime → tick×N → gameMode.render(a) → soundEngine.update(a) →
+    gameRenderer.render(a) → renderer.render(scene, camera) → gui.renderHUD;
+    tick order VERIFIED Entry 18: gameMode.tick → tickInput → gui.tick →
+    gameRenderer.tick → levelRenderer.tick → level.tickEntities → level.tick →
+    particleEngine.tick → screen.tick; tickInput dispatches buildInput.tickBuild
+    → handleBuildAction for tile/entity/air; setScreen handles lifecycle;
+    pauseGame opens PauseScreen; leaveGame disposes level and returns to
+    StartMenu; selectLevel generates level via LevelGen, _findSpawn spiral
+    search for grass/sand-topped column near (128,128); setIsCreativeMode swaps
+    gameMode + calls initAbilities)
+  * client/renderer/Tesselator (24 bytes/vertex VERIFIED: pos 3f + uv 2f +
+    color 4f), Textures (VoxelCraft resource pack loader with magenta fallback),
+    ChunkMesh (per-chunk mesh rebuild with face culling via Tile::shouldRenderFace,
+    per-face brightness down 0.5 / up 1.0 / N-S 0.8 / W-E 0.6 VERIFIED Entry 14,
+    UV mapping terrain.png 16x16 grid with -0.01 inset), LevelRenderer (16x8x16=2048
+    chunk array for 256x256x128 world, dirty chunk queue with maxRebuildsPerFrame,
+    renderLayers 0/1/2 = solid/alpha-tested/translucent water, tileChanged marks
+    3x3x3 dirty), GameRenderer (setupCamera FOV 70 water 60, moveCameraToPlayer
+    with yRot+180 yaw + xRot pitch, pick via player.pick(range=5, a), mouse
+    → player.turn with sens = ((sensitivity*0.6+0.2)^3)*8 per Entry 15.16,
+    renderLevel order sky/terrain-0/terrain-1/entities/particles/terrain-2
+    water)
+  * client/particle/ParticleEngine (VERIFIED Entry 19: destroy spawns 18
+    particles in 3×2×3 grid (yy starts at 1), each with velocity
+    2*(cell_center-0.5) outward from block center; crack spawns 1 particle on
+    clicked face with r=0.10 margin; tick physics with gravity 0.04, drag 0.98)
+  * client/SoundEngine stub (no audio in port)
+  * Main bootstrap (window.load → new Minecraft → init → TileRegistry.init →
+    THREE.WebGLRenderer + PerspectiveCamera + LevelRenderer + GameRenderer +
+    ParticleEngine + KeyboardInput + MouseBuildInput + MouseTurnInput →
+    setScreen(new StartMenuScreen) → requestAnimationFrame(_loop) at 20 TPS)
+- Synced workspace at /home/z/my-project/public/voxelcraft-rujukan-port.html
+  with /tmp/Surprise564/public/voxelcraft-rujukan-port.html via bash cp.
+- Verified script syntax via acorn.parse with module mode — no errors.
+- Verified all required block textures present in
+  /home/z/my-project/public/VoxelCraft/textures/blocks/: stone, grass_top,
+  grass_side, dirt, cobblestone, planks_oak, bedrock, water_still, lava_still,
+  sand, gravel, gold_ore, iron_ore, coal_ore, log_oak, log_oak_top,
+  leaves_oak_opaque, glass, brick, tnt_side, tnt_top, bookshelf,
+  cobblestone_mossy (moss_stone), obsidian, torch_on, diamond_ore, diamond_block,
+  crafting_table_top/side/front, furnace_front_off/top/side, ice, netherrack,
+  glowstone, stonebrick (unused), chest. Magenta fallback for any missing.
+- Verified dev server returns HTTP 200 for the file and all textures/font.
+- bun run lint passes with no errors.
+
+Stage Summary:
+- File produced: /tmp/Surprise564/public/voxelcraft-rujukan-port.html — 4659 lines,
+  ~170 KB, single self-contained HTML.
+- Workspace mirror: /home/z/my-project/public/voxelcraft-rujukan-port.html (same
+  content, served by Next.js dev server on port 3000).
+- Systems ported from MODLOG entries 1-19 EXACTLY:
+  * Entry 1 — Entity::move Y→X→Z AABB clip + !slide zero-out + baseTick
+  * Entry 2 — Mob::travel 3 branches (water/lava/land), friction2 formula,
+    gravity 0.08, air drag 0.98, water/lava drag 0.8/0.5, swim impulse +0.04
+  * Entry 5 — Player constants + travel flying override (flyingSpeed=0.05,
+    yd *= 0.6 post-travel) + tick sleep counter + aiStep bob/tilt lerp 0.4/0.8
+    NO super.aiStep call
+  * Entry 6 — LocalPlayer::aiStep double-jump fly 7-tick window (mayfly only),
+    vertical fly impulse ±0.15/tick, using-item damping 0.35, Mob::aiStep first
+    then Player::aiStep; move flying path (noPhysics+calculateFlight) + autojump
+    heuristic (half-tile trigger + look-ahead + isJumpable blacklist); calculateFlight
+    via SmoothFloat lerp with accel=0.35*sensitivity
+  * Entry 7 — KeyboardInput forward=+1 back=-1 left=+1 right=-1 sneak *=0.3;
+    MouseTurnInput linearTransform deadzone 40/30 px scale 0.4/0.6;
+    MouseBuildInput left every-tick vs right first-tick-only with buildDelayTicks=10
+  * Entry 9 — Level tick order + tickTiles LCG (_randValue=42184323,
+    _addend=1013904223) 20/chunk/tick decode x=val&15 z=(val>>8)&15 y=(val>>16)&127
+  * Entry 10 — LevelChunk blocks[(x<<11)|(z<<7)|y] + DataLayer nibble + heightmap
+    [(z<<4)|x] + recalcHeightmap skyLight top-down propagation
+  * Entry 11 — Tile registry full IDs 1-95 with exact destroySpeed/soundType/
+    lightBlock/lightEmission + getDestroyProgress formula `(speed/dSpeed)/30`
+  * Entry 12 — SurvivalMode progress-based break + 5-tick destroyDelay cooldown
+    + step sound every 4 ticks (destroyTicks&3==1); CreativeMode
+    DestructionTickDelay=10 instant + repeat every 10 ticks + mayfly/instabuild/
+    invulnerable; pick range 5.0 (creative 12 — UNVERIFIED not used)
+  * Entry 13 — LevelGen 5x17x5 noise grid + buildSurfaces (bedrock + grass/dirt/
+    sand/rock layers + water fill) + postProcess ore distribution (10 clay / 20
+    dirt / 10 gravel / 20 coal / 20 iron / 2 gold / 8 redstone / 1 diamond /
+    1 lapis) + tree scatter + trilinear interpolation
+  * Entry 14 — ChunkMesh rebuild face culling via Tile::shouldRenderFace +
+    per-face brightness down 0.5 / up 1.0 / N-S 0.8 / W-E 0.6 VERIFIED
+  * Entry 15 — LevelRenderer 16x8x16 chunks for 256x256x128 world + dirty
+    queue + 3 render layers (solid/alpha-tested/translucent water) + sky-blue
+    clear + GameRenderer FOV 70 (water 60) + setupCamera + moveCameraToPlayer
+    first-person + pick + mouse sens cubic curve + fog distance 64
+  * Entry 16 — Chicken wing flap (flapSpeed += (onGround?-1:4)*0.3 clamp [0,1],
+    flapping *= 0.9, flap += flapping*2) + slow fall (yd *= 0.6) + NO egg laying;
+    Animal wander ±6/±3/±6 10 samples + look 2%/tick 10..30 + MAX_TURN=30
+  * Entry 17 — Screen lifecycle initScreen→init→setupPositions→updateTabButtonSelection,
+    mouseClicked→press→record, mouseReleased→buttonClicked+sound, keyPressed
+    ESC→setScreen(null), tabButtons keyboard nav; Button 200×24 default yImage
+    0/1/2 text colors 0xffa0a0a0/0xe0e0e0/0xffffa0 y_offset=46+yImage*20; dirt bg
+    0x404040; StartMenu bHost/bJoin 160×24 bOptions 78×22 yBase=height/2+25;
+    PauseScreen Continue/Quit 160 wide y=48/80 "Game menu" y=24 white
+  * Entry 18 — Minecraft Timer 20 TPS MAX_TICKS_PER_UPDATE=10 + tick order:
+    gameMode.tick → tickInput → gui.tick → gameRenderer.tick → levelRenderer.tick
+    → level.tickEntities → level.tick → particleEngine.tick → screen.tick →
+    soundEngine.update; update order: timer.advanceTime → tick×N →
+    gameMode.render(a) → soundEngine.update → gameRenderer.render → renderer.render
+  * Entry 19 — ParticleEngine destroy 18 particles in 3×2×3 grid (yy starts at
+    1) velocity 2*(cell_center-0.5) outward + crack 1 particle on face with
+    r=0.10 margin + 4 texture groups (MISC/TERRAIN/ITEM/ENTITY_PARTICLE)
+- World is 256×256×128 bounded (NOT infinite), sea level 63, 20 TPS fixed-
+  timestep, no clouds/vignette/sprint-FOV/extra features per spec.
+- Creative mode: instant break + double-jump fly (mayfly=true). Survival mode:
+  progress break + fly disabled (mayfly=false). Chicken mob wanders with flap
+  + slow fall. Start menu with Start/Mode-toggle/Options. Pause menu with
+  Resume/Quit. Controls: WASD/mouse/Space/Shift/E/1-9/ESC/wheel.

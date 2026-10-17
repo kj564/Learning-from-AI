@@ -1,0 +1,702 @@
+  9020→    TIMER_POP();
+  9021→}
+  9022→```
+  9023→
+  9024→**Tick order in Mob::aiStep:**
+  9025→1. If immobile (dead) → zero inputs.
+  9026→2. If new AI (`useNewAi()`) → `newServerAiStep` (sensing + goalSelector + navigation + controls).
+  9027→3. Else (legacy AI used by PathfinderMob/Animal) → `updateAi` (see 16.11 & 16.16).
+  9028→4. Process jumping: water/lava adds 0.04 to yd; onGround → jumpFromGround (yd = 0.42).
+  9029→5. Decay inputs: `xxa *= 0.98`, `yya *= 0.98`, `yRotA *= 0.9`.
+  9030→6. Apply walking-speed modifier (e.g. fleeTime × 2), call `travel(xxa, yya)` (physics integration — uses walkingSpeed/flyingSpeed).
+  9031→7. Push nearby entities (bb grown by 0.2 in x and z).
+  9032→
+  9033→### 16.16 — Mob::updateAi — VERIFIED (Mob.cpp:760-802) — the look-around AI
+  9034→
+  9035→```cpp
+  9036→void Mob::updateAi() {
+  9037→    noActionTime++;
+  9038→
+  9039→    Player* player = level->getNearestPlayer(this, -1);
+  9040→    checkDespawn(player);
+  9041→
+  9042→    xxa = 0;
+  9043→    yya = 0;
+  9044→
+  9045→    float lookDistance = 8;
+  9046→    if (random.nextFloat() < 0.02f) {     // 2% chance/tick to look at a player
+  9047→        player = level->getNearestPlayer(this, lookDistance);
+  9048→        if (player != NULL) {
+  9049→            lookingAtId = player->entityId;
+  9050→            lookTime = 10 + random.nextInt(20);   // 10..30 ticks of looking
+  9051→        } else {
+  9052→            yRotA = (random.nextFloat() - 0.5f) * 20;   // ±10° random turn
+  9053→        }
+  9054→    }
+  9055→
+  9056→    if (lookingAtId != 0) {
+  9057→        Entity* lookingAt = level->getEntity(lookingAtId);
+  9058→        lookingAtId = 0;
+  9059→        if (lookingAt != NULL) {
+  9060→            lookAt(lookingAt, 10, (float)getMaxHeadXRot());
+  9061→            if (lookTime-- <= 0 || lookingAt->removed || lookingAt->distanceToSqr(this) > lookDistance * lookDistance) {
+  9062→                lookingAtId = 0;
+  9063→            } else {
+  9064→                lookingAtId = lookingAt->entityId;
+  9065→            }
+  9066→        }
+  9067→    } else {
+  9068→        if (random.nextFloat() < 0.05f) {     // 5% chance/tick for random turn when not looking at anyone
+  9069→            yRotA = (random.nextFloat() - 0.5f) * 20;
+  9070→        }
+  9071→        yRot += yRotA;
+  9072→        xRot = defaultLookAngle;
+  9073→    }
+  9074→
+  9075→    bool inWater = isInWater();
+  9076→    bool inLava = isInLava();
+  9077→    if (inWater || inLava) jumping = random.nextFloat() < 0.8f;   // 80% chance/tick to swim
+  9078→}
+  9079→```
+  9080→
+  9081→**Mob::updateAi (look-around AI):**
+  9082→- `noActionTime++` (reset to 0 when player comes near — UNVERIFIED in Mob.cpp but used by `PathfinderMob::updateAi` to gate strolls).
+  9083→- 2% chance/tick to look at nearest player within 8 blocks (for 10–30 ticks).
+  9084→- 5% chance/tick to randomly turn ±10° when not looking at anyone.
+  9085→- `yRotA` drives `yRot` (smooth rotation); `xRot = defaultLookAngle`.
+  9086→- In water/lava: 80% chance/tick to set `jumping = true`.
+  9087→
+  9088→### 16.17 — Mob::newServerAiStep — VERIFIED (Mob.cpp:804-837) — the new AI (not used for animals)
+  9089→
+  9090→```cpp
+  9091→void Mob::newServerAiStep() {
+  9092→    noActionTime++;
+  9093→
+  9094→    TIMER_PUSH("checkDespawn");
+  9095→    checkDespawn();
+  9096→    jumping = false;
+  9097→
+  9098→    TIMER_POP_PUSH("sensing");
+  9099→    if (sensing) sensing->tick();
+  9100→
+  9101→    if (random.nextInt(5) == 0) {       // 1/5 chance/tick to tick goal selectors
+  9102→        TIMER_POP_PUSH("targetSelector");
+  9103→        if (targetSelector) targetSelector->tick();
+  9104→
+  9105→        TIMER_POP_PUSH("goalSelector");
+  9106→        if (goalSelector) goalSelector->tick();
+  9107→    }
+  9108→
+  9109→    TIMER_POP_PUSH("navigation");
+  9110→    if (navigation) navigation->tick();
+  9111→
+  9112→    TIMER_POP_PUSH("controls");
+  9113→    if (moveControl) moveControl->tick();
+  9114→    if (jumpControl) jumpControl->tick();
+  9115→
+  9116→    TIMER_POP();
+  9117→}
+  9118→```
+  9119→**Note:** This new-AI path uses goal selectors and controls. For Animal (which inherits PathfinderMob, and PathfinderMob does NOT override `useNewAi()` to return true), the legacy `updateAi` is used. `useNewAi()` is false by default in MCPE 2013 for animals (UNVERIFIED the exact override condition).
+  9120→
+  9121→### 16.18 — Mob::jumpFromGround / isImmobile / getMaxHeadXRot / lookAt / rotlerp — VERIFIED (Mob.cpp:839-904)
+  9122→
+  9123→```cpp
+  9124→bool Mob::isImmobile() { return health <= 0; }
+  9125→
+  9126→void Mob::jumpFromGround() { yd = 0.42f; }   // jump velocity
+  9127→
+  9128→bool Mob::removeWhenFarAway() { return true; }   // (overridden by Animal to false)
+  9129→
+  9130→int Mob::getMaxHeadXRot() { return 10; }     // max head tilt per lookAt call (10°)
+  9131→
+  9132→void Mob::lookAt( Entity* e, float yMax, float xMax )
+  9133→{
+  9134→    float xd = e->x - x;
+  9135→    float yd;
+  9136→    float zd = e->z - z;
+  9137→
+  9138→    if (false) {     // (e->isMob()) -- disabled, treats target as point
+  9139→        Mob* mob = (Mob*) e;
+  9140→        yd = (y + getHeadHeight()) - (mob->y + mob->getHeadHeight());
+  9141→    } else {
+  9142→        yd = (e->bb.y0 + e->bb.y1) / 2 - (y + getHeadHeight());
+  9143→    }
+  9144→
+  9145→    float sd = Mth::sqrt(xd * xd + zd * zd);
+  9146→
+  9147→    float yRotD = (float) (atan2(zd, xd) * 180 / Mth::PI) - 90;
+  9148→    float xRotD = (float) (atan2(yd, sd) * 180 / Mth::PI);
+  9149→    xRot = -rotlerp(xRot, xRotD, xMax);
+  9150→    yRot =  rotlerp(yRot, yRotD, yMax);
+  9151→}
+  9152→
+  9153→bool Mob::isLookingAtAnEntity() { return lookingAtId != 0; }
+  9154→
+  9155→float Mob::rotlerp( float a, float b, float max )
+  9156→{
+  9157→    float diff = b - a;
+  9158→    while (diff < -180) diff += 360;
+  9159→    while (diff >= 180)  diff -= 360;
+  9160→    if (diff >  max) diff =  max;
+  9161→    if (diff < -max) diff = -max;
+  9162→    return a + diff;
+  9163→}
+  9164→```
+  9165→**Jump velocity:** 0.42 blocks/tick (~1.45 m/s upward). This is the same value as Java Minecraft.
+  9166→**Look-at:** lerps `yRot` and `xRot` toward target by `yMax`/`xMax` degrees per tick (typically 10°/tick for animals).
+  9167→
+  9168→### 16.19 — ChickenRenderer::getBob — VERIFIED (ChickenRenderer.cpp:16-23)
+  9169→
+  9170→```cpp
+  9171→float ChickenRenderer::getBob( Mob* mob_, float a )
+  9172→{
+  9173→    Chicken* mob = (Chicken*) mob_;
+  9174→    float flap = mob->oFlap+(mob->flap-mob->oFlap)*a;
+  9175→    float flapSpeed = mob->oFlapSpeed+(mob->flapSpeed-mob->oFlapSpeed)*a;
+  9176→
+  9177→    return (Mth::sin(flap)+1)*flapSpeed;     // bob = (sin(phase) + 1) * speed; always non-negative
+  9178→}
+  9179→```
+  9180→**Wing bob value:** `(sin(flap_phase) + 1) * flap_speed` — this is passed to `ChickenModel::setupAnim` as the `bob` argument, which sets `wing0.zRot = bob`, `wing1.zRot = -bob` (wings flap up/down inversely).
+  9181→
+  9182→### 16.20 — ChickenModel::setupAnim / render — VERIFIED (ChickenModel.cpp:49-101)
+  9183→
+  9184→```cpp
+  9185→void ChickenModel::render( Entity* entity, float time, float r, float bob, float yRot, float xRot, float scale )
+  9186→{
+  9187→    setupAnim(time, r, bob, yRot, xRot, scale);
+  9188→
+  9189→    if (young) {
+  9190→        float ss = 2;     // baby scale = 1/2 (rendered at half size)
+  9191→        glPushMatrix();
+  9192→        glTranslatef(0, 5 * scale, 2 * scale);
+  9193→        head.render(scale);
+  9194→        beak.render(scale);
+  9195→        redThing.render(scale);
+  9196→        glPopMatrix();
+  9197→        glPushMatrix();
+  9198→        glScalef(1 / ss, 1 / ss, 1 / ss);
+  9199→        glTranslatef(0, 24 * scale, 0);
+  9200→        body.render(scale);
+  9201→        leg0.render(scale);
+  9202→        leg1.render(scale);
+  9203→        wing0.render(scale);
+  9204→        wing1.render(scale);
+  9205→        glPopMatrix();
+  9206→    } else {
+  9207→        head.render(scale);
+  9208→        beak.render(scale);
+  9209→        redThing.render(scale);
+  9210→        body.render(scale);
+  9211→        leg0.render(scale);
+  9212→        leg1.render(scale);
+  9213→        wing0.render(scale);
+  9214→        wing1.render(scale);
+  9215→    }
+  9216→}
+  9217→
+  9218→void ChickenModel::setupAnim( float time, float r, float bob, float yRot, float xRot, float scale )
+  9219→{
+  9220→    head.xRot = -((xRot / (float) (180 / Mth::PI)));
+  9221→    head.yRot = yRot / (float) (180 / Mth::PI);
+  9222→
+  9223→    beak.xRot = head.xRot;
+  9224→    beak.yRot = head.yRot;
+  9225→
+  9226→    redThing.xRot = head.xRot;
+  9227→    redThing.yRot = head.yRot;
+  9228→
+  9229→    body.xRot = 90 / (float) (180 / Mth::PI);     // body tilted 90° (chicken's body is horizontal)
+  9230→
+  9231→    const float pend = Mth::cos(time * 0.6662f) * 1.4f * r;   // leg swing, same as Java
+  9232→    leg0.xRot =  pend;
+  9233→    leg1.xRot = -pend;
+  9234→
+  9235→    wing0.zRot = bob;     // wing flap
+  9236→    wing1.zRot = -bob;
+  9237→}
+  9238→```
+  9239→
+  9240→**Chicken model parts:**
+  9241→- `head`   addBox(-2, -6, -2, 4, 6, 3)   at (0, 15, -4) — 4×6×3 box
+  9242→- `beak`   addBox(-2, -4, -4, 4, 2, 2)   at (0, 15, -4)
+  9243→- `redThing` addBox(-1, -2, -3, 2, 2, 2) at (0, 15, -4) — the wattle
+  9244→- `body`   addBox(-3, -4, -3, 6, 8, 6)   at (0, 16, 0) — 6×8×6 box
+  9245→- `leg0`   addBox(-1, 0, -3, 3, 5, 3)   at (-2, 19, 1)
+  9246→- `leg1`   addBox(-1, 0, -3, 3, 5, 3)   at (1, 19, 1)
+  9247→- `wing0`  addBox(0, 0, -3, 1, 4, 6)    at (-4, 13, 0)
+  9248→- `wing1`  addBox(-1, 0, -3, 1, 4, 6)   at (4, 13, 0)
+  9249→
+  9250→**Animation params:**
+  9251→- `time` = `partialTick` (for leg swing), `r` = `walkAnimSpeed` (limb-swing amount)
+  9252→- `bob` = `ChickenRenderer::getBob` = `(sin(flap) + 1) * flapSpeed` (drives wing0.zRot = bob, wing1.zRot = -bob)
+  9253→- `yRot`, `xRot` = entity rotation, applied to head/beak/wattle
+  9254→- `body.xRot = PI/2` (body is horizontal)
+  9255→- Leg swing: `pend = cos(time * 0.6662) * 1.4 * r`, applied as `leg0 = +pend`, `leg1 = -pend` (alternating)
+  9256→- Baby: rendered at half scale (1/2), with head/beak translated +5/+2 in y/z to keep proportions, and body translated +24 in y inside the scale.
+  9257→
+  9258→### Constants table (Entry 16)
+  9259→
+  9260→| Constant | Value | Source |
+  9261→|---|---|---|
+  9262→| Chicken size (width × height) | 0.3 × 0.7 | Chicken.cpp:18 |
+  9263→| Chicken max health | 4 HP (2 hearts) | Chicken.cpp:30 |
+  9264→| Chicken initial flapping | 1.0 | Chicken.cpp:12 |
+  9265→| Chicken eggTime | random(6000) + 6000 ticks (5–10 min) | Chicken.cpp:19 |
+  9266→| SharedConstants::TicksPerSecond | 20 (verified Entry 1) | — |
+  9267→| Wing-flap increment | `flapping * 2` per tick | Chicken.cpp:51 |
+  9268→| Wing-flap decay | `flapping *= 0.9` per tick | Chicken.cpp:45 |
+  9269→| flapSpeed increment | ±0.3 per tick (−1 on ground, +4 in air) | Chicken.cpp:40 |
+  9270→| flapSpeed clamp | [0, 1] | Chicken.cpp:41-42 |
+  9271→| Chicken slow-fall | `yd *= 0.6` when `yd < 0` and !onGround | Chicken.cpp:47-49 |
+  9272→| Chicken feather drop | random(3) → 0..2 feathers | Chicken.cpp:100 |
+  9273→| Chicken raw meat drop | 1 (always) | Chicken.cpp:107 |
+  9274→| Animal spawn floor | `Tile::grass` | Animal.cpp:28 |
+  9275→| Animal spawn brightness | `getRawBrightness > 8` | Animal.cpp:28 |
+  9276→| Animal ambient sound interval | 12 sec = 240 ticks | Animal.cpp:33 |
+  9277→| Animal fleeTime on hurt | 3 sec = 60 ticks | Animal.cpp:17 |
+  9278→| Animal walk-target for grass floor | +10 | Animal.cpp:38 |
+  9279→| Animal walk-target base | `brightness - 0.5` | Animal.cpp:39 |
+  9280→| Animal despawn | never (`removeWhenFarAway = false`) | Animal.cpp:87 |
+  9281→| AgableMob initial age | -1, then setAge(0) → adult | AgableMob.cpp:5-8 |
+  9282→| Baby age count-up | age < 0 → age + 1 per tick | AgableMob.cpp:42 |
+  9283→| Adult breed cooldown | age > 0 → age - 1 per tick | AgableMob.cpp:44 |
+  9284→| PathfinderMob::MAX_TURN | 30°/tick | PathfinderMob.h:24 |
+  9285→| PathfinderMob path-find range | 16 blocks | PathfinderMob.cpp:20 |
+  9286→| PathfinderMob stroll range (x/z) | ±6 blocks | PathfinderMob.cpp:196, 198 |
+  9287→| PathfinderMob stroll range (y)   | ±3 blocks | PathfinderMob.cpp:197 |
+  9288→| PathfinderMob stroll samples | 10 random points | PathfinderMob.cpp:195 |
+  9289→| PathfinderMob stroll path range | 10 blocks | PathfinderMob.cpp:211 |
+  9290→| Idle stroll chance (path empty) | 1/180 per tick | PathfinderMob.cpp:100 |
+  9291→| Idle stroll chance (path non-empty) | 1/120 per tick | PathfinderPathfinder.cpp:103 |
+  9292→| Flee stroll chance | 1/8 per tick (when `(fleeTime & 7) == 1`) | PathfinderMob.cpp:104 |
+  9293→| No-action gate | noActionTime < 100 ticks | PathfinderMob.cpp:108 |
+  9294→| CheckCantSeeTarget give-up | target > 32 blocks away | PathfinderMob.cpp:222 |
+  9295→| Flee walking-speed modifier | × 2 | PathfinderMob.cpp:238 |
+  9296→| Mob::ATTACK_DURATION | 5 | Mob.h:27 |
+  9297→| Mob::SWING_DURATION | 8 | Mob.h:28 |
+  9298→| Mob::jumpFromGround yd | 0.42 | Mob.cpp:846 |
+  9299→| Mob::getMaxHeadXRot | 10° | Mob.cpp:856 |
+  9300→| Mob input decay | `xxa *= 0.98`, `yya *= 0.98`, `yRotA *= 0.9` | Mob.cpp:727-729 |
+  9301→| Mob swim-up yd increment | +0.04/tick in water or lava | Mob.cpp:719-721 |
+  9302→| Mob::updateAi look chance | 2% per tick | Mob.cpp:770 |
+  9303→| Mob::updateAi look duration | 10 + random(20) ticks (10..30) | Mob.cpp:774 |
+  9304→| Mob::updateAi random-turn chance | 5% per tick | Mob.cpp:792 |
+  9305→| Mob::updateAi random-turn amount | ±10° ((rand-0.5)*20) | Mob.cpp:776, 793 |
+  9306→| Mob::updateAi swim chance | 80% per tick in water/lava | Mob.cpp:801 |
+  9307→| Mob push-box grow | 0.2 in x and z | Mob.cpp:745 |
+  9308→| New-AI goal-selector tick chance | 1/5 per tick | Mob.cpp:814 |
+  9309→| ChickenRenderer::getBob formula | `(sin(flap) + 1) * flapSpeed` | ChickenRenderer.cpp:22 |
+  9310→| ChickenModel leg swing | `cos(time * 0.6662) * 1.4 * r` | ChickenModel.cpp:95 |
+  9311→| ChickenModel body tilt | 90° (PI/2) | ChickenModel.cpp:93 |
+  9312→| ChickenModel baby scale | 1/2 | ChickenModel.cpp:54-55 |
+  9313→
+  9314→### UNVERIFIED items (Entry 16)
+  9315→1. **`Mob::useNewAi()`** — virtual bool. UNVERIFIED the exact override logic — likely returns false for animals (legacy AI). Need Mob.cpp full check or animal-specific subclass.
+  9316→2. **`Mob::travel(xxa, yya)`** — physics integration (similar to Player::travel, verified in Entry 5). UNVERIFIED for non-player mobs — may have a different walking-speed formula.
+  9317→3. **`Mob::tick()`** and **`Mob::baseTick()`** — top-level entity tick. UNVERIFIED (would be in Mob.cpp lines 148-265).
+  9318→4. **`Mob::checkDespawn`** — despawn logic. UNVERIFIED.
+  9319→5. **`Sensing::tick`** — sensing component. UNVERIFIED.
+  9320→6. **`PathNavigation::tick`** and **`level->findPath`** — pathfinder A* implementation. UNVERIFIED the exact algorithm.
+  9321→7. **`Path::currentPos`, `next`, `isDone`, `destroy`** — Path API. UNVERIFIED.
+  9322→8. **`Mob::getWalkingSpeedModifier`** base — likely 1.0. UNVERIFIED.
+  9323→9. **`Mob::isInWater()` / `isInLava()`** — material check at the entity's position. UNVERIFIED the exact predicate.
+  9324→10. **Egg laying** — commented out in MCPE 2013 chicken; the `eggTime` field is set but never decremented in active code. UNVERIFIED if any build flag enables it.
+  9325→11. **Chicken cooked-meat drop on fire** — also commented out. UNVERIFIED.
+  9326→12. **`SharedConstants::TicksPerSecond * 60 * 5`** — verified to be 6000 ticks (5 minutes at 20 TPS) assuming `TicksPerSecond = 20`, which was verified in Entry 1.
+  9327→
+  9328→## Entry 17: Screen.cpp / Button.cpp / StartMenuScreen.cpp / PauseScreen.cpp — GUI system
+  9329→
+  9330→### 17.1 — Screen.h — VERIFIED (Screen.h:1-80)
+  9331→
+  9332→```cpp
+  9333→class Screen: public GuiComponent
+  9334→{
+  9335→public:
+  9336→    Screen();
+  9337→
+  9338→    virtual void render(int xm, int ym, float a);
+  9339→
+  9340→    void init(Minecraft* minecraft, int width, int height);
+  9341→    virtual void init();
+  9342→
+  9343→    void setSize(int width, int height);
+  9344→    virtual void setupPositions() {};     // subclasses override to position buttons
+  9345→
+  9346→    virtual void updateEvents();
+  9347→    virtual void mouseEvent();
+  9348→    virtual void keyboardEvent();
+  9349→    virtual void keyboardTextEvent();
+  9350→    virtual bool handleBackEvent(bool isDown);
+  9351→
+  9352→    virtual void tick() {}
+  9353→    virtual void removed() {}
+  9354→
+  9355→    virtual void renderBackground();
+  9356→    virtual void renderBackground(int vo);
+  9357→    virtual void renderDirtBackground(int vo);
+  9358→
+  9359→    virtual bool renderGameBehind();          // can the game render behind this screen?
+  9360→    virtual bool hasClippingArea(IntRectangle& out);
+  9361→    virtual bool isPauseScreen();
+  9362→    virtual bool isErrorScreen();
+  9363→    virtual bool isInGameScreen();
+  9364→    virtual bool closeOnPlayerHurt();
+  9365→
+  9366→    virtual void confirmResult(bool result, int id) {}
+  9367→    virtual void lostFocus();
+  9368→    virtual void toGUICoordinate(int& x, int& y);
+  9369→protected:
+  9370→    void updateTabButtonSelection();
+  9371→    virtual void buttonClicked(Button* button) {}
+  9372→    virtual void mouseClicked(int x, int y, int buttonNum);
+  9373→    virtual void mouseReleased(int x, int y, int buttonNum);
+  9374→    virtual void keyPressed(int eventKey);
+  9375→    virtual void keyboardNewChar(char inputChar) {}
+  9376→public:
+  9377→    int width;
+  9378→    int height;
+  9379→    bool passEvents;          // if true, events go to game even when screen is open
+  9380→protected:
+  9381→    Minecraft* minecraft;
+  9382→    std::vector<Button*> buttons;
+  9383→    std::vector<TextBox*> textBoxes;
+  9384→
+  9385→    std::vector<Button*> tabButtons;     // buttons reachable via keyboard tab navigation
+  9386→    int tabButtonIndex;
+  9387→    Font* font;
+  9388→private:
+  9389→    Button* clickedButton;
+  9390→};
+  9391→```
+  9392→
+  9393→### 17.2 — Screen constructor — VERIFIED (Screen.cpp:11-20)
+  9394→
+  9395→```cpp
+  9396→Screen::Screen()
+  9397→:   passEvents(false),
+  9398→    clickedButton(NULL),
+  9399→    tabButtonIndex(0),
+  9400→    width(1),
+  9401→    height(1),
+  9402→    minecraft(NULL),
+  9403→    font(NULL)
+  9404→{
+  9405→}
+  9406→```
+  9407→
+  9408→### 17.3 — Screen::init (the lifecycle entry) — VERIFIED (Screen.cpp:30-44)
+  9409→
+  9410→```cpp
+  9411→void Screen::init( Minecraft* minecraft, int width, int height )
+  9412→{
+  9413→    this->minecraft = minecraft;
+  9414→    this->font = minecraft->font;
+  9415→    this->width = width;
+  9416→    this->height = height;
+  9417→    init();             // virtual — subclass adds buttons here
+  9418→    setupPositions();   // virtual — subclass positions buttons here
+  9419→    updateTabButtonSelection();
+  9420→}
+  9421→
+  9422→void Screen::init()    // default no-op
+  9423→{
+  9424→}
+  9425→
+  9426→void Screen::setSize( int width, int height )
+  9427→{
+  9428→    this->width = width;
+  9429→    this->height = height;
+  9430→    setupPositions();
+  9431→}
+  9432→```
+  9433→
+  9434→**Screen lifecycle:**
+  9435→1. `Minecraft::setScreen(screen)` is called.
+  9436→2. `screen->init(this, screenWidth, screenHeight)` runs: stores minecraft/font/size, calls `init()` (subclass adds buttons to `buttons`/`tabButtons`), then `setupPositions()` (subclass sets x/y for each button), then `updateTabButtonSelection()` (sets `selected` on the tabButtons).
+  9437→3. Each frame: `screen->updateEvents()` polls Mouse/Keyboard and dispatches to `mouseEvent()`/`keyboardEvent()`/`keyboardTextEvent()`.
+  9438→4. Each frame after the world: `screen->render(xMouse, yMouse, a)` is called.
+  9439→5. Each Minecraft tick: `screen->tick()` (if implemented).
+  9440→6. On screen close: `screen->removed()` then `delete screen`.
+  9441→
+  9442→### 17.4 — Screen::render (base) — VERIFIED (Screen.cpp:22-28)
+  9443→
+  9444→```cpp
+  9445→void Screen::render( int xm, int ym, float a )
+  9446→{
+  9447→    for (unsigned int i = 0; i < buttons.size(); i++) {
+  9448→        Button* button = buttons[i];
+  9449→        button->render(minecraft, xm, ym);
+  9450→    }
+  9451→}
+  9452→```
+  9453→**Base render:** just iterates and renders each button. Subclasses call `Screen::render` after their own background/text.
+  9454→
+  9455→### 17.5 — Screen::updateEvents / mouseEvent / keyboardEvent — VERIFIED (Screen.cpp:58-102)
+  9456→
+  9457→```cpp
+  9458→void Screen::updateEvents()
+  9459→{
+  9460→    if (passEvents)
+  9461→        return;     // passEvents means game keeps reading events, screen doesn't consume them
+  9462→
+  9463→    while (Mouse::next())
+  9464→        mouseEvent();
+  9465→
+  9466→    while (Keyboard::next())
+  9467→        keyboardEvent();
+  9468→    while (Keyboard::nextTextChar())
+  9469→        keyboardTextEvent();
+  9470→}
+  9471→
+  9472→void Screen::mouseEvent()
+  9473→{
+  9474→    const MouseAction& e = Mouse::getEvent();
+  9475→    if (!e.isButton())
+  9476→        return;
+  9477→
+  9478→    if (Mouse::getEventButtonState()) {
+  9479→        int xm = e.x * width / minecraft->width;
+  9480→        int ym = e.y * height / minecraft->height - 1;
+  9481→        mouseClicked(xm, ym, Mouse::getEventButton());
+  9482→    } else {
+  9483→        int xm = e.x * width / minecraft->width;
+  9484→        int ym = e.y * height / minecraft->height - 1;
+  9485→        mouseReleased(xm, ym, Mouse::getEventButton());
+  9486→    }
+  9487→}
+  9488→
+  9489→void Screen::keyboardEvent()
+  9490→{
+  9491→    if (Keyboard::getEventKeyState()) {
+  9492→        keyPressed(Keyboard::getEventKey());
+  9493→    }
+  9494→}
+  9495→
+  9496→void Screen::keyboardTextEvent()
+  9497→{
+  9498→    keyboardNewChar(Keyboard::getChar());
+  9499→}
+  9500→```
+  9501→
+  9502→**Mouse event scaling:** screen-space `e.x / minecraft->width * width` (rescales from window pixels to GUI-scaled pixels). The `-1` on y is a half-pixel correction.
+  9503→**Event dispatch:** mouse down/up → `mouseClicked` / `mouseReleased`. Key down → `keyPressed` (no key-up dispatch). Text char → `keyboardNewChar`.
+  9504→
+  9505→### 17.6 — Screen::renderBackground / renderDirtBackground — VERIFIED (Screen.cpp:103-133)
+  9506→
+  9507→```cpp
+  9508→void Screen::renderBackground() { renderBackground(0); }
+  9509→
+  9510→void Screen::renderBackground( int vo )
+  9511→{
+  9512→    if (minecraft->isLevelGenerated()) {
+  9513→        // dark transparent overlay over the game
+  9514→        fillGradient(0, 0, width, height, 0xc0101010, 0xd0101010);
+  9515→    } else {
+  9516→        renderDirtBackground(vo);
+  9517→    }
+  9518→}
+  9519→
+  9520→void Screen::renderDirtBackground( int vo )
+  9521→{
+  9522→    glDisable2(GL_FOG);
+  9523→    Tesselator& t = Tesselator::instance;
+  9524→    minecraft->textures->loadAndBindTexture("gui/background.png");
+  9525→    glColor4f2(1, 1, 1, 1);
+  9526→    float s = 32;     // tile size 32 px
+  9527→    float fvo = (float) vo;
+  9528→    t.begin();
+  9529→    t.color(0x404040);
+  9530→    t.vertexUV(0, (float)height, 0, 0, height / s + fvo);
+  9531→    t.vertexUV((float)width, (float)height, 0, width / s, (float)height / s + fvo);
+  9532→    t.vertexUV((float)width, 0, 0, (float)width / s, 0 + fvo);
+  9533→    t.vertexUV(0, 0, 0, 0, 0 + fvo);
+  9534→    t.draw();
+  9535→}
+  9536→```
+  9537→
+  9538→**Background:** if a level is loaded, render a dark gradient overlay (`fillGradient` with `0xc0101010` and `0xd0101010` — alpha 0xc0/0xd0, RGB 0x101010). Otherwise tile `gui/background.png` (32×32 tiles) across the screen with a darkening tint `0x404040` (RGB 64,64,64 — about 25% brightness).
+  9539→
+  9540→### 17.7 — Screen::isPauseScreen / isErrorScreen / isInGameScreen / closeOnPlayerHurt / renderGameBehind / hasClippingArea — VERIFIED (Screen.cpp:135-243)
+  9541→
+  9542→```cpp
+  9543→bool Screen::isPauseScreen()  { return true; }     // pause the game when this screen is up
+  9544→bool Screen::isErrorScreen()  { return false; }    // bypass setScreen's error-screen filter
+  9545→bool Screen::isInGameScreen() { return true; }     // is this an in-game screen (saves level when opened)
+  9546→bool Screen::closeOnPlayerHurt() { return false; }
+  9547→
+  9548→bool Screen::renderGameBehind() { return true; }   // game still renders behind this screen
+  9549→bool Screen::hasClippingArea( IntRectangle& out ) { return false; }   // no scissor test by default
+  9550→
+  9551→void Screen::lostFocus() {
+  9552→    for(std::vector<TextBox*>::iterator it = textBoxes.begin(); it != textBoxes.end(); ++it) {
+  9553→        TextBox* tb = *it;
+  9554→        tb->loseFocus(minecraft);
+  9555→    }
+  9556→}
+  9557→
+  9558→void Screen::toGUICoordinate( int& x, int& y ) {
+  9559→    x = x * width / minecraft->width;
+  9560→    y = y * height / minecraft->height - 1;
+  9561→}
+  9562→```
+  9563→
+  9564→### 17.8 — Screen::keyPressed (ESC + tab-button navigation) — VERIFIED (Screen.cpp:154-182)
+  9565→
+  9566→```cpp
+  9567→void Screen::keyPressed( int eventKey )
+  9568→{
+  9569→    if (eventKey == Keyboard::KEY_ESCAPE) {
+  9570→        minecraft->setScreen(NULL);     // ESC closes any screen
+  9571→        //minecraft->grabMouse();
+  9572→    }
+  9573→    if (minecraft->useTouchscreen())
+  9574→        return;     // touchscreens don't have tab-button navigation
+  9575→
+  9576→    const int tabButtonCount = tabButtons.size();
+  9577→    if (!tabButtonCount)
+  9578→        return;
+  9579→
+  9580→    Options& o = minecraft->options;
+  9581→    if (eventKey == o.keyMenuNext.key)
+  9582→        if (++tabButtonIndex == tabButtonCount) tabButtonIndex = 0;
+  9583→    if (eventKey == o.keyMenuPrevious.key)
+  9584→        if (--tabButtonIndex == -1) tabButtonIndex = tabButtonCount-1;
+  9585→    if (eventKey == o.keyMenuOk.key) {
+  9586→        Button* button = tabButtons[tabButtonIndex];
+  9587→        if (button->active) {
+  9588→            minecraft->soundEngine->playUI("random.click", 1, 1);
+  9589→            buttonClicked(button);
+  9590→        }
+  9591→    }
+  9592→
+  9593→    updateTabButtonSelection();
+  9594→}
+  9595→
+  9596→void Screen::updateTabButtonSelection()
+  9597→{
+  9598→    if (minecraft->useTouchscreen())
+  9599→        return;
+  9600→
+  9601→    for (unsigned int i = 0; i < tabButtons.size(); ++i)
+  9602→        tabButtons[i]->selected = (i == tabButtonIndex);
+  9603→}
+  9604→```
+  9605→
+  9606→**ESC behavior:** always closes the current screen via `minecraft->setScreen(NULL)`. The minecraft then re-grabs the mouse.
+  9607→**Tab navigation:** three configurable keys (`keyMenuNext`, `keyMenuPrevious`, `keyMenuOk`) for keyboard-only navigation through `tabButtons`. Selection is highlighted via `Button::selected`.
+  9608→
+  9609→### 17.9 — Screen::mouseClicked / mouseReleased — VERIFIED (Screen.cpp:193-234)
+  9610→
+  9611→```cpp
+  9612→void Screen::mouseClicked( int x, int y, int buttonNum )
+  9613→{
+  9614→    if (buttonNum == MouseAction::ACTION_LEFT) {
+  9615→        for (unsigned int i = 0; i < buttons.size(); ++i) {
+  9616→            Button* button = buttons[i];
+  9617→            if (button->clicked(minecraft, x, y)) {       // hit-test
+  9618→                button->setPressed();     // _currentlyDown = true
+  9619→                clickedButton = button;
+  9620→            }
+  9621→        }
+  9622→    }
+  9623→}
+  9624→
+  9625→void Screen::mouseReleased( int x, int y, int buttonNum )
+  9626→{
+  9627→    if (!clickedButton || buttonNum != MouseAction::ACTION_LEFT) return;
+  9628→
+  9629→    // Active branch (always taken in MCPE 2013 builds):
+  9630→    for (unsigned int i = 0; i < buttons.size(); ++i) {
+  9631→        Button* button = buttons[i];
+  9632→        if (clickedButton == button && button->clicked(minecraft, x, y)) {
+  9633→            buttonClicked(button);     // dispatch to subclass
+  9634→            minecraft->soundEngine->playUI("random.click", 1, 1);
+  9635→            clickedButton->released(x, y);    // _currentlyDown = false
+  9636→        }
+  9637→    }
+  9638→    clickedButton = NULL;
+  9639→}
+  9640→```
+  9641→
+  9642→**Mouse click sequence:**
+  9643→1. On `mouseClicked` (left button down): hit-test all buttons. The first button whose bounds contain the cursor has `_currentlyDown = true` set (becomes "pressed") and is recorded as `clickedButton`.
+  9644→2. On `mouseReleased` (left button up): only the `clickedButton` is checked. If the cursor is still inside its bounds, fire `buttonClicked(button)` and play the click sound, then release.
+  9645→3. **Note:** if multiple buttons overlap, only the LAST pressed one (because `clickedButton` is overwritten) wins the click.
+  9646→
+  9647→### 17.10 — Button.h — VERIFIED (Button.h:1-80)
+  9648→
+  9649→```cpp
+  9650→class Button: public GuiElement
+  9651→{
+  9652→public:
+  9653→    Button(int id, const std::string& msg);                              // default 200×24
+  9654→    Button(int id, int x, int y, const std::string& msg);                 // 200×24
+  9655→    Button(int id, int x, int y, int w, int h, const std::string& msg);
+  9656→
+  9657→    virtual void render(Minecraft* minecraft, int xm, int ym);
+  9658→    virtual bool clicked(Minecraft* minecraft, int mx, int my);
+  9659→    virtual void released(int mx, int my);
+  9660→    virtual void setPressed();
+  9661→    bool isInside(int xm, int ym);
+  9662→protected:
+  9663→    virtual int getYImage(bool hovered);
+  9664→    virtual void renderBg(Minecraft* minecraft, int xm, int ym);
+  9665→    virtual void renderFace(Minecraft* minecraft, int xm, int ym);
+  9666→    bool hovered(Minecraft* minecraft, int xm, int ym);
+  9667→public:
+  9668→    std::string msg;
+  9669→    int id;
+  9670→    bool selected;
+  9671→protected:
+  9672→    bool _currentlyDown;
+  9673→};
+  9674→
+  9675→// BlankButton — invisible button (for touch zones)
+  9676→class BlankButton: public Button {
+  9677→    // visible = false set in constructor
+  9678→};
+  9679→
+  9680→// Touch::TButton — touch-screen variant (66×26, different texture)
+  9681→namespace Touch {
+  9682→class TButton: public Button {
+  9683→protected:
+  9684→    virtual void renderBg(Minecraft* minecraft, int xm, int ym);
+  9685→};
+  9686→
+  9687→// Touch::THeader — non-clickable header strip
+  9688→class THeader: public Button {
+  9689→public:
+  9690→    int xText;
+  9691→};
+  9692→}
+  9693→```
+  9694→
+  9695→### 17.11 — Button.cpp — VERIFIED (Button.cpp:1-218)
+  9696→
+  9697→```cpp
+  9698→Button::Button(int id, const std::string& msg)
+  9699→:       GuiElement(true, true, 0, 0, 200, 24),     // active=true, visible=true, 200×24
+  9700→    id(id),
+  9701→    msg(msg),
+  9702→    selected(false),
+  9703→    _currentlyDown(false)
+  9704→{
+  9705→}
+  9706→
+  9707→Button::Button( int id, int x, int y, const std::string& msg )
+  9708→:       GuiElement(true, true, x, y, 200, 24),  // 200×24 default
+  9709→    id(id), msg(msg), selected(false), _currentlyDown(false)
+  9710→{
+  9711→}
+  9712→
+  9713→Button::Button( int id, int x, int y, int w, int h, const std::string& msg )
+  9714→:       GuiElement(true, true, x, y, w, h),
+  9715→    id(id), msg(msg), selected(false), _currentlyDown(false)
+  9716→{
+  9717→}
+  9718→
+  9719→void Button::render( Minecraft* minecraft, int xm, int ym )
+
+[showing lines 9020-9719 of 11684; use offset=9720 with limit to continue reading]

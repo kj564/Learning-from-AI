@@ -1,0 +1,602 @@
+  4792→    pnr = perlinNoise1.getRegion(pnr, (float)x, (float)y, (float)z, xSize, ySize, zSize, s / 80.0f, hs / 160.0f, s / 80.0f);
+  4793→    ar = lperlinNoise1.getRegion(ar, (float)x, (float)y, (float)z, xSize, ySize, zSize, s, hs, s);
+  4794→    br = lperlinNoise2.getRegion(br, (float)x, (float)y, (float)z, xSize, ySize, zSize, s, hs, s);
+  4795→
+  4796→    int p = 0;
+  4797→    int pp = 0;
+  4798→
+  4799→    int wScale = 16 / xSize;
+  4800→    for (int xx = 0; xx < xSize; xx++) {
+  4801→        int xp = xx * wScale + wScale / 2;
+  4802→        for (int zz = 0; zz < zSize; zz++) {
+  4803→            int zp = zz * wScale + wScale / 2;
+  4804→            float temperature = temperatures[xp * 16 + zp];
+  4805→            float downfall = downfalls[xp * 16 + zp] * temperature;
+  4806→            float dd = 1 - downfall;
+  4807→            dd = dd * dd;
+  4808→            dd = dd * dd;
+  4809→            dd = 1 - dd;
+  4810→            // dd ∈ [0, 1] — amplification factor based on downfall*temperature (wetter biomes are taller)
+  4811→
+  4812→            float scale = ((sr[pp] + 256.0f) / 512);   // ∈ ~[0, 1]
+  4813→            scale *= dd;
+  4814→            if (scale > 1) scale = 1;
+  4815→
+  4816→            float depth = (dr[pp] / 8000.0f);
+  4817→            if (depth < 0) depth = -depth * 0.3f;
+  4818→            depth = depth * 3.0f - 2.0f;
+  4819→            if (depth < 0) {
+  4820→                depth = depth / 2;
+  4821→                if (depth < -1) depth = -1;
+  4822→                depth = depth / 1.4f;
+  4823→                depth /= 2;
+  4824→                scale = 0;
+  4825→            } else {
+  4826→                if (depth > 1) depth = 1;
+  4827→                depth = depth / 8;
+  4828→            }
+  4829→            if (scale < 0) scale = 0;
+  4830→            scale = (scale) + 0.5f;
+  4831→            depth = depth * ySize / 16;
+  4832→            float yCenter = ySize / 2.0f + depth * 4;
+  4833→            pp++;
+  4834→
+  4835→            for (int yy = 0; yy < ySize; yy++) {
+  4836→                float val = 0;
+  4837→                float yOffs = (yy - (yCenter)) * 12 / scale;
+  4838→                if (yOffs < 0) yOffs *= 4;
+  4839→
+  4840→                float bb = ar[p] / 512;
+  4841→                float cc = br[p] / 512;
+  4842→                float v = (pnr[p] / 10 + 1) / 2;
+  4843→                if (v < 0) val = bb;
+  4844→                else if (v > 1) val = cc;
+  4845→                else val = bb + (cc - bb) * v;
+  4846→                val -= yOffs;
+  4847→
+  4848→                if (yy > ySize - 4) {     // top 4 control points get blended down to -10 (sky cap)
+  4849→                    float slide = (yy - (ySize - 4)) / (4 - 1.0f);
+  4850→                    val = val * (1 - slide) + -10 * slide;
+  4851→                }
+  4852→
+  4853→                buffer[p] = val;
+  4854→                p++;
+  4855→            }
+  4856→        }
+  4857→    }
+  4858→    return buffer;
+  4859→}
+  4860→```
+  4861→
+  4862→**Noise formula — EXACT:**
+  4863→- Height scale `s = 684.412` (the standard Minecraft 1.2+ terrain noise scale).
+  4864→- Three primary noises:
+  4865→  - `pnr` (perlinNoise1, 8 octaves) at scale `s/80 = 8.555` horizontal, `hs/160 = 4.277` vertical, `s/80` z — used for "interpolation" between the other two noises.
+  4866→  - `ar` (lperlinNoise1, 16 octaves) at scale `s = 684.412` — low-frequency main noise.
+  4867→  - `br` (lperlinNoise2, 16 octaves) at scale `s` — second low-frequency noise.
+  4868→- `sr` (scaleNoise, 10 octaves) at scale 1.121 → biome-temperature-modulated "scale" factor.
+  4869→- `dr` (depthNoise, 16 octaves) at scale 200 → biome depth modulation.
+  4870→
+  4871→For each column:
+  4872→- `dd = (1 - (1 - (1 - downfall*temperature)^2)^2)` — wetter-biome amplification factor (Rainforest gets tall; Desert stays flat).
+  4873→- `scale = clamp(scaleNoise/512 + 256) * dd, 0, 1) + 0.5` — overall terrain height scale.
+  4874→- `depth = depthNoise * 3 - 2` then clamped/normalized — controls terrain base elevation.
+  4875→- `yCenter = ySize/2 + depth*4` — center of terrain.
+  4876→
+  4877→For each y level (control point):
+  4878→- `yOffs = (yy - yCenter) * 12 / scale`; if `yOffs < 0` → multiply by 4 (steeper below sea level).
+  4879→- Blend `bb` (= `lperlinNoise1 / 512`) and `cc` (= `lperlinNoise2 / 512`) by `v = (perlinNoise1/10 + 1) / 2`, clamped to [0,1].
+  4880→- `val = blend(bb, cc, v) - yOffs`.
+  4881→- Top 4 control points (ySize-4 to ySize-1) blend linearly to -10 (forces sky at the top).
+  4882→
+  4883→Result `buffer[p] = val`: positive val = solid rock, negative = air or water.
+  4884→
+  4885→### RandomLevelSource::buildSurfaces — VERIFIED (RandomLevelSource.cpp:138–215)
+  4886→```cpp
+  4887→void RandomLevelSource::buildSurfaces(int xOffs, int zOffs, unsigned char* blocks, Biome** biomes) {
+  4888→    int waterHeight = Level::DEPTH - 64;     // 64
+  4889→
+  4890→    float s = 1 / 32.0f;
+  4891→    perlinNoise2.getRegion(sandBuffer,   (float)(xOffs * 16), (float)(zOffs * 16), 0, 16, 16, 1, s, s, 1);
+  4892→    perlinNoise2.getRegion(gravelBuffer, (float)(xOffs * 16), 109.01340f,         (float)(zOffs * 16), 16, 1, 16, s, 1, s);
+  4893→    perlinNoise3.getRegion(depthBuffer, (float)(xOffs * 16), (float)(zOffs * 16), 0, 16, 16, 1, s * 2, s * 2, s * 2);
+  4894→
+  4895→    for (int x = 0; x < 16; x++) {
+  4896→        for (int z = 0; z < 16; z++) {
+  4897→            float temp = 1; // @todo: read temp from BiomeSource
+  4898→            Biome* b = biomes[x + z * 16];
+  4899→            bool sand = (sandBuffer[x + z * 16] + random.nextFloat() * 0.2f) > 0;
+  4900→            bool gravel = (gravelBuffer[x + z * 16] + random.nextFloat() * 0.2f) > 3;
+  4901→            int runDepth = (int) (depthBuffer[x + z * 16] / 3 + 3 + random.nextFloat() * 0.25f);
+  4902→
+  4903→            int run = -1;
+  4904→            char top = b->topMaterial;
+  4905→            char material = b->material;
+  4906→
+  4907→            for (int y = 127; y >= 0; y--) {
+  4908→                int offs = (z * 16 + x) * 128 + y;     // NOTE: this is column-major (z,x)*128+y ordering, NOT the (x<<11|z<<7|y) used elsewhere
+  4909→
+  4910→                if (y <= 0 + random.nextInt(5)) {
+  4911→                    blocks[offs] = (char) Tile::unbreakable->id;    // 7 — bedrock layer y=0..4
+  4912→                } else {
+  4913→                    int old = blocks[offs];
+  4914→
+  4915→                    if (old == 0) {
+  4916→                        run = -1;
+  4917→                    } else if (old == Tile::rock->id) {
+  4918→                        if (run == -1) {
+  4919→                            if (runDepth <= 0) {
+  4920→                                top = 0;
+  4921→                                material = (char) Tile::rock->id;
+  4922→                            } else if (y >= waterHeight - 4 && y <= waterHeight + 1) {
+  4923→                                // shore line / underwater band
+  4924→                                top = b->topMaterial;
+  4925→                                material = b->material;
+  4926→                                if (gravel) {
+  4927→                                    top = 0;
+  4928→                                    material = (char) Tile::gravel->id;
+  4929→                                }
+  4930→                                if (sand) {
+  4931→                                    top = (char) Tile::sand->id;
+  4932→                                    material = (char) Tile::sand->id;
+  4933→                                }
+  4934→                            }
+  4935→
+  4936→                            if (y < waterHeight && top == 0) {
+  4937→                                if (temp < 0.15f)
+  4938→                                    top = (char) Tile::ice->id;
+  4939→                                else
+  4940→                                    top = (char) Tile::calmWater->id;
+  4941→                            }
+  4942→
+  4943→                            run = runDepth;
+  4944→                            if (y >= waterHeight - 1) blocks[offs] = top;
+  4945→                            else blocks[offs] = material;
+  4946→                        } else if (run > 0) {
+  4947→                            run--;
+  4948→                            blocks[offs] = material;
+  4949→
+  4950→                            // place a few sandstone blocks beneath sand runs
+  4951→                            if (run == 0 && material == Tile::sand->id) {
+  4952→                                run = random.nextInt(4);
+  4953→                                material = (char) Tile::sandStone->id;
+  4954→                            }
+  4955→                        }
+  4956→                    }
+  4957→                }
+  4958→            }
+  4959→        }
+  4960→    }
+  4961→}
+  4962→```
+  4963→
+  4964→**Surface fill algorithm — EXACT:**
+  4965→1. Bedrock layer: y ≤ `random.nextInt(5)` (i.e., 0..4) → `unbreakable` (id 7).
+  4966→2. Walk down each column starting from y=127:
+  4967→   - If block is air (0): reset `run = -1`.
+  4968→   - If block is rock (1):
+  4969→     - First rock encountered (run == -1): determine surface material based on biome:
+  4970→       - If `runDepth <= 0` (very thin or no sub-surface): top=0, material=rock (no topsoil).
+  4971→       - Else if y ∈ [waterHeight-4, waterHeight+1] = [60, 65]: use biome top material (e.g. grass) and subsurface (dirt); with chance of gravel (if gravel buffer > 3) or sand (if sand buffer > 0).
+  4972→       - Else: use biome top+material (grass+dirt by default).
+  4973→     - Below water level (y < 64) if top is 0: replace with `calmWater` (9) or `ice` (79) if cold.
+  4974→     - The topmost block (y >= waterHeight - 1 = 63) gets `top` material (grass block); below that, `material` (dirt).
+  4975→   - Continue down `runDepth` blocks of `material`. If material is sand, when the run ends, start a 0..3 block sandstone run.
+  4976→
+  4977→**Important note**: this code uses `offs = (z * 16 + x) * 128 + y` — a different column-major layout than the `(x << 11) | (z << 7) | y` used by `LevelChunk` (which is `x` outer, `z` middle, `y` inner). This is because the blocks array passed in is a temporary freshly-allocated buffer that hasn't been bound to a LevelChunk yet — the worldgen produces blocks in (z,x,y) ordering, but since this is per-chunk (16×16×128), the column-major layout still uniquely identifies each block. **However**, the LevelChunk constructor that takes `(level, blocks, x, z)` uses the same blocks array but accesses it via `blocks[x << 11 | z << 7 | y]`. **This means the blocks array layout is INCONSISTENT between how buildSurfaces writes it and how LevelChunk reads it!** UNVERIFIED — there's possibly a bug here OR buildSurfaces is intentionally producing blocks in the "wrong" order such that the chunk's interpretation rotates them. (Actually re-reading: `(z * 16 + x) * 128 + y` ≡ `(x * 128) + (z * 16 * 128) + y` ≡ `(z * 2048) + (x * 128) + y`. Compare to `(x << 11) | (z << 7) | y = x * 2048 + z * 128 + y`. These are DIFFERENT orderings: buildSurfaces indexes by `z * 2048 + x * 128 + y`, but LevelChunk reads `x * 2048 + z * 128 + y`. So the block at worldgen position (x, z, y) ends up at LevelChunk position (z, x, y) — i.e. **the world's x and z are TRANSPOSED**! This is a known MCPE worldgen quirk; prepareHeights uses the LevelChunk indexing (`x << 11 | z << 7 | y`) but buildSurfaces uses the transposed indexing — meaning buildSurfaces modifies blocks at "wrong" positions relative to where the actual rock was placed by prepareHeights. **This may be an MCPE 2013 bug that the port should reproduce faithfully** OR the biomes array is indexed `[x + z * 16]` and the code accidentally swaps x/z. UNVERIFIED — needs the actual chunk render/index code to confirm.)
+  4978→
+  4979→Actually re-reading more carefully — the actual production code is:
+  4980→```cpp
+  4981→int offs = (z * 16 + x) * 128 + y;
+  4982→```
+  4983→which expands to `offs = z * 2048 + x * 128 + y`. Compared with LevelChunk's `x * 2048 + z * 128 + y`, this means the buildSurfaces code is interpreting the block array with x and z swapped relative to LevelChunk. This could be intentional (the code is consistent with itself for surface-building) but causes the surface to be applied at transposed coordinates relative to where prepareHeights placed the rock. Since both prepareHeights (writing) and the LevelChunk reads use `(x<<11) | (z<<7) | y`, but buildSurfaces reads/writes using `(z<<11) | (x<<7) | y` — the surface materials get applied to the wrong columns. **This appears to be a real MCPE 2013 bug that the port should faithfully reproduce** if exact-seed reproduction is required; otherwise it can be fixed in the port by changing buildSurfaces to use `x * 2048 + z * 128 + y`. UNVERIFIED — needs confirmation against an actual generated world save.
+  4984→
+  4985→### RandomLevelSource::postProcess — VERIFIED (RandomLevelSource.cpp:218–482) — ore distribution, trees, flowers, water
+  4986→
+  4987→```cpp
+  4988→void RandomLevelSource::postProcess(ChunkSource* parent, int xt, int zt) {
+  4989→    level->isGeneratingTerrain = true;
+  4990→    HeavyTile::instaFall = true;       // sand/gravel fall instantly during worldgen
+  4991→    int xo = xt * 16;
+  4992→    int zo = zt * 16;
+  4993→
+  4994→    Biome* biome = level->getBiomeSource()->getBiome(xo + 16, zo + 16);
+  4995→
+  4996→    random.setSeed(level->getSeed());
+  4997→    int xScale = random.nextInt() / 2 * 2 + 1;     // odd number
+  4998→    int zScale = random.nextInt() / 2 * 2 + 1;     // odd number
+  4999→    random.setSeed(((xt * xScale) + (zt * zScale)) ^ level->getSeed());
+  5000→
+  5001→    // 10 ClayFeature (32 balls of clay each)
+  5002→    for (int i = 0; i < 10; i++) {
+  5003→        int x = xo + random.nextInt(16);
+  5004→        int y = random.nextInt(128);
+  5005→        int z = zo + random.nextInt(16);
+  5006→        ClayFeature feature(32);
+  5007→        feature.place(level, &random, x, y, z);
+  5008→    }
+  5009→
+  5010→    // 20 dirt ore veins (size 32)
+  5011→    for (int i = 0; i < 20; i++) {
+  5012→        int x = xo + random.nextInt(16);
+  5013→        int y = random.nextInt(128);
+  5014→        int z = zo + random.nextInt(16);
+  5015→        OreFeature feature(Tile::dirt->id, 32);
+  5016→        feature.place(level, &random, x, y, z);
+  5017→    }
+  5018→
+  5019→    // 10 gravel ore veins (size 32)
+  5020→    for (int i = 0; i < 10; i++) {
+  5021→        int x = xo + random.nextInt(16);
+  5022→        int y = random.nextInt(128);
+  5023→        int z = zo + random.nextInt(16);
+  5024→        OreFeature feature(Tile::gravel->id, 32);
+  5025→        feature.place(level, &random, x, y, z);
+  5026→    }
+  5027→
+  5028→    // 20 coal ore veins (size 16) — full Y range 0..127
+  5029→    for (int i = 0; i < 20; i++) {
+  5030→        int x = xo + random.nextInt(16);
+  5031→        int y = random.nextInt(128);
+  5032→        int z = zo + random.nextInt(16);
+  5033→        OreFeature feature(Tile::coalOre->id, 16);
+  5034→        feature.place(level, &random, x, y, z);
+  5035→    }
+  5036→
+  5037→    // 20 iron ore veins (size 8) — Y range 0..63
+  5038→    for (int i = 0; i < 20; i++) {
+  5039→        int x = xo + random.nextInt(16);
+  5040→        int y = random.nextInt(64);
+  5041→        int z = zo + random.nextInt(16);
+  5042→        OreFeature feature(Tile::ironOre->id, 8);
+  5043→        feature.place(level, &random, x, y, z);
+  5044→    }
+  5045→
+  5046→    // 2 gold ore veins (size 8) — Y range 0..31
+  5047→    for (int i = 0; i < 2; i++) {
+  5048→        int x = xo + random.nextInt(16);
+  5049→        int y = random.nextInt(32);
+  5050→        int z = zo + random.nextInt(16);
+  5051→        OreFeature feature(Tile::goldOre->id, 8);
+  5052→        feature.place(level, &random, x, y, z);
+  5053→    }
+  5054→
+  5055→    // 8 redstone ore veins (size 7) — Y range 0..15
+  5056→    for (int i = 0; i < 8; i++) {
+  5057→        int x = xo + random.nextInt(16);
+  5058→        int y = random.nextInt(16);
+  5059→        int z = zo + random.nextInt(16);
+  5060→        OreFeature feature(Tile::redStoneOre->id, 7);
+  5061→        feature.place(level, &random, x, y, z);
+  5062→    }
+  5063→
+  5064→    // 1 diamond ore vein (size 7) — Y range 0..15
+  5065→    for (int i = 0; i < 1; i++) {
+  5066→        int x = xo + random.nextInt(16);
+  5067→        int y = random.nextInt(16);
+  5068→        int z = zo + random.nextInt(16);
+  5069→        OreFeature feature(Tile::emeraldOre->id, 7);
+  5070→        feature.place(level, &random, x, y, z);
+  5071→    }
+  5072→
+  5073→    // 1 lapis ore vein (size 6) — Y range 0..31 (sum of two random.nextInt(16) calls = triangular distribution)
+  5074→    for (int i = 0; i < 1; i++) {
+  5075→        int x = xo + random.nextInt(16);
+  5076→        int y = random.nextInt(16) + random.nextInt(16);
+  5077→        int z = zo + random.nextInt(16);
+  5078→        OreFeature feature(Tile::lapisOre->id, 6);
+  5079→        feature.place(level, &random, x, y, z);
+  5080→    }
+  5081→
+  5082→    // Tree count based on biome
+  5083→    const float ss = 0.5f;
+  5084→    int oFor = (int) ((forestNoise.getValue(xo * ss, zo * ss) / 8 + random.nextFloat() * 4 + 4) / 3);
+  5085→    int forests = 0;     // (java: 0)
+  5086→    if (random.nextInt(10) == 0) forests += 1;
+  5087→
+  5088→    if (biome == Biome::forest)          forests += oFor + 2;
+  5089→    if (biome == Biome::rainForest)      forests += oFor + 2;
+  5090→    if (biome == Biome::seasonalForest)  forests += oFor + 1;
+  5091→    if (biome == Biome::taiga)           forests += oFor + 1;
+  5092→    if (biome == Biome::desert)          forests -= 20;
+  5093→    if (biome == Biome::tundra)          forests -= 20;
+  5094→    if (biome == Biome::plains)          forests -= 20;
+  5095→
+  5096→    for (int i = 0; i < forests; i++) {
+  5097→        int x = xo + random.nextInt(16) + 8;
+  5098→        int z = zo + random.nextInt(16) + 8;
+  5099→        int y = level->getHeightmap(x, z);
+  5100→        Feature* tree = biome->getTreeFeature(&random);
+  5101→        if (tree) {
+  5102→            tree->init(1, 1, 1);
+  5103→            tree->place(level, &random, x, y, z);
+  5104→            delete tree;
+  5105→        }
+  5106→    }
+  5107→
+  5108→    // 2 flower features (flower->id = 37)
+  5109→    for (int i = 0; i < 2; i++) {
+  5110→        int x = xo + random.nextInt(16) + 8;
+  5111→        int y = random.nextInt(128);
+  5112→        int z = zo + random.nextInt(16) + 8;
+  5113→        FlowerFeature feature(Tile::flower->id);
+  5114→        feature.place(level, &random, x, y, z);
+  5115→    }
+  5116→
+  5117→    // 50% rose features (rose->id = 38)
+  5118→    if (random.nextInt(2) == 0) {
+  5119→        int x = xo + random.nextInt(16) + 8;
+  5120→        int y = random.nextInt(128);
+  5121→        int z = zo + random.nextInt(16) + 8;
+  5122→        FlowerFeature feature(Tile::rose->id);
+  5123→        feature.place(level, &random, x, y, z);
+  5124→    }
+  5125→
+  5126→    // 25% mushroom1 features
+  5127→    if (random.nextInt(4) == 0) {
+  5128→        int x = xo + random.nextInt(16) + 8;
+  5129→        int y = random.nextInt(128);
+  5130→        int z = zo + random.nextInt(16) + 8;
+  5131→        FlowerFeature feature(Tile::mushroom1->id);
+  5132→        feature.place(level, &random, x, y, z);
+  5133→    }
+  5134→
+  5135→    // 12.5% mushroom2 features
+  5136→    if (random.nextInt(8) == 0) {
+  5137→        int x = xo + random.nextInt(16) + 8;
+  5138→        int y = random.nextInt(128);
+  5139→        int z = zo + random.nextInt(16) + 8;
+  5140→        FlowerFeature feature(Tile::mushroom2->id);
+  5141→        feature.place(level, &random, x, y, z);
+  5142→    }
+  5143→
+  5144→    // 10 reeds (sugarcane) features
+  5145→    for (int i = 0; i < 10; i++) {
+  5146→        int x = xo + random.nextInt(16) + 8;
+  5147→        int y = random.nextInt(128);
+  5148→        int z = zo + random.nextInt(16) + 8;
+  5149→        ReedsFeature feature;
+  5150→        feature.place(level, &random, x, y, z);
+  5151→    }
+  5152→
+  5153→    // Cacti — only in desert (+5)
+  5154→    int cacti = 0;
+  5155→    if (biome == Biome::desert) cacti += 5;
+  5156→    for (int i = 0; i < cacti; i++) {
+  5157→        int x = xo + random.nextInt(16) + 8;
+  5158→        int y = random.nextInt(128);
+  5159→        int z = zo + random.nextInt(16) + 8;
+  5160→        CactusFeature feature;
+  5161→        feature.place(level, &random, x, y, z);
+  5162→    }
+  5163→
+  5164→    // 50 water springs
+  5165→    for (int i = 0; i < 50; i++) {
+  5166→        int x = xo + random.nextInt(16) + 8;
+  5167→        int y = random.nextInt(random.nextInt(120) + 8);     // y ∈ [0, 127], triangular distribution
+  5168→        int z = zo + random.nextInt(16) + 8;
+  5169→        SpringFeature feature(Tile::water->id);
+  5170→        feature.place(level, &random, x, y, z);
+  5171→    }
+  5172→
+  5173→    // 20 lava springs (deeper, more triangular)
+  5174→    for (int i = 0; i < 20; i++) {
+  5175→        int x = xo + random.nextInt(16) + 8;
+  5176→        int y = random.nextInt(random.nextInt(random.nextInt(112) + 8) + 8);   // y ∈ [0, 119], deeply triangular
+  5177→        int z = zo + random.nextInt(16) + 8;
+  5178→        SpringFeature feature(Tile::lava->id);
+  5179→        feature.place(level, &random, x, y, z);
+  5180→    }
+  5181→
+  5182→    if (spawnMobs && !level->isClientSide)
+  5183→        MobSpawner::postProcessSpawnMobs(level, biome, xo + 8, zo + 8, 16, 16, &random);
+  5184→
+  5185→    // Snow placement based on temperature
+  5186→    float* temperatures = level->getBiomeSource()->getTemperatureBlock(xo + 8, zo + 8, 16, 16);
+  5187→    for (int x = xo + 8; x < xo + 8 + 16; x++)
+  5188→        for (int z = zo + 8; z < zo + 8 + 16; z++) {
+  5189→            int xp = x - (xo + 8);
+  5190→            int zp = z - (zo + 8); 
+  5191→            int y = level->getTopSolidBlock(x, z);
+  5192→            float temp = temperatures[xp * 16 + zp] - (y - 64) / 64.0f * SNOW_SCALE;     // SNOW_SCALE = 0.3
+  5193→            if (temp < SNOW_CUTOFF) {                                                    // SNOW_CUTOFF = 0.5
+  5194→                if (y > 0 && y < 128 && level->isEmptyTile(x, y, z) && level->getMaterial(x, y - 1, z)->blocksMotion()) {
+  5195→                    if (level->getMaterial(x, y - 1, z) != Material::ice)
+  5196→                        level->setTile(x, y, z, Tile::topSnow->id);
+  5197→                }
+  5198→            }
+  5199→        }
+  5200→
+  5201→    HeavyTile::instaFall = false;
+  5202→    level->isGeneratingTerrain = false;
+  5203→}
+  5204→```
+  5205→
+  5206→**Ore distribution table — VERIFIED, per 16×16 chunk:**
+  5207→
+  5208→| Ore (block) | Vein count | Vein size | Y range | Notes |
+  5209→|---|---|---|---|---|
+  5210→| Clay | 10 | 32 | 0..127 | ClayFeature |
+  5211→| Dirt | 20 | 32 | 0..127 | OreFeature(Tile::dirt->id) |
+  5212→| Gravel | 10 | 32 | 0..127 | |
+  5213→| Coal | 20 | 16 | 0..127 | full vertical range |
+  5214→| Iron | 20 | 8 | 0..63 | upper half |
+  5215→| Gold | 2 | 8 | 0..31 | lower quarter |
+  5216→| Redstone | 8 | 7 | 0..15 | bottom 16 blocks |
+  5217→| Diamond | 1 | 7 | 0..15 | bottom 16 blocks |
+  5218→| Lapis | 1 | 6 | 0..31 (triangular: 2× nextInt(16) sums) | heavily biased to lower Y |
+  5219→
+  5220→**Tree distribution — VERIFIED, per chunk, by biome:**
+  5221→
+  5222→| Biome | Tree count formula |
+  5223→|---|---|
+  5224→| Default | `forests = 0`; +1 with 10% chance (`random.nextInt(10) == 0`) |
+  5225→| Forest | `+ oFor + 2` |
+  5226→| Rainforest | `+ oFor + 2` |
+  5227→| SeasonalForest | `+ oFor + 1` |
+  5228→| Taiga | `+ oFor + 1` |
+  5229→| Desert | `- 20` (effectively no trees) |
+  5230→| Tundra | `- 20` |
+  5231→| Plains | `- 20` |
+  5232→
+  5233→Where `oFor = (int)((forestNoise.getValue(xo*0.5, zo*0.5)/8 + random.nextFloat()*4 + 4) / 3)` — a noise-driven 0..~3 base count. (forestNoise is PerlinNoise, 8 octaves, seeded at construction time.)
+  5234→
+  5235→Tree placement: position `(xo + rand(16) + 8, heightmap(x,z), zo + rand(16) + 8)` — always on the surface, biased to chunk interior (the +8 keeps trees off chunk borders).
+  5236→
+  5237→**Flower/mushroom distribution — VERIFIED:**
+  5238→- Flower (id 37): 2 per chunk, anywhere 0..127 Y.
+  5239→- Rose (id 38): 50% chance per chunk, 1 placement.
+  5240→- Mushroom1 (id 39): 25% chance per chunk.
+  5241→- Mushroom2 (id 40): 12.5% chance per chunk.
+  5242→- Reeds (sugarcane, id 83): 10 per chunk, any Y.
+  5243→- Cactus: 5 per chunk only in Desert biome (else 0).
+  5244→- Water spring: 50 per chunk, Y ∈ [0, 127] (triangular via `random.nextInt(random.nextInt(120) + 8)`).
+  5245→- Lava spring: 20 per chunk, Y ∈ [0, 119] (deeply triangular via nested nextInt).
+  5246→
+  5247→**Snow placement:** For each block in the chunk's 16×16 interior (xo+8 to xo+24, zo+8 to zo+24):
+  5248→- `y = level->getTopSolidBlock(x, z)` — top of the highest solid-blocked-non-leaf block.
+  5249→- `temp = temperature - (y - 64) / 64 * 0.3` — temperature drops by 0.3 per 64 blocks above sea level.
+  5250→- If `temp < 0.5` (cold enough) and the block at `(x, y, z)` is air AND the block below is solid-blocking AND not ice → place `topSnow` (id 78).
+  5251→
+  5252→**Mob spawn during worldgen:** `MobSpawner::postProcessSpawnMobs(level, biome, xo+8, zo+8, 16, 16, &random)` — called only if `spawnMobs` and server-side. See MobSpawner entry below.
+  5253→
+  5254→`HeavyTile::instaFall = true` during postProcess so sand/gravel features fall instantly during generation (no falling-tile entities spawned). Set back to false at the end.
+  5255→
+  5256→### RandomLevelSource::calcWaterDepths — VERIFIED (RandomLevelSource.cpp:604–648)
+  5257→Water depth computation around chunk borders — checks for water at sea level (y=63) on chunk boundaries, finds water pockets, and propagates data values 7..8 for "deep water" rendering. This is referenced as `void calcWaterDepths(ChunkSource* parent, int xt, int zt);` in the header but **is not actually called from getChunk or postProcess** — it's dead code in the 2013 MCPE source.
+  5258→
+  5259→### RandomLevelSource::hasChunk / tick / shouldSave / gatherStats / getMobsAt — VERIFIED (RandomLevelSource.cpp:650–684)
+  5260→```cpp
+  5261→bool RandomLevelSource::hasChunk(int x, int y) {
+  5262→    return true;     // always claims chunk is loaded (chunk cache handles actual loading)
+  5263→}
+  5264→
+  5265→bool RandomLevelSource::tick() {
+  5266→    return false;     // no async work
+  5267→}
+  5268→
+  5269→bool RandomLevelSource::shouldSave() {
+  5270→    return true;
+  5271→}
+  5272→
+  5273→std::string RandomLevelSource::gatherStats() {
+  5274→    return "RandomLevelSource";
+  5275→}
+  5276→
+  5277→Biome::MobList RandomLevelSource::getMobsAt(const MobCategory& mobCategory, int x, int y, int z) {
+  5278→    BiomeSource* biomeSource = level->getBiomeSource();
+  5279→    if (biomeSource == NULL) return Biome::MobList();
+  5280→    Biome* biome = biomeSource->getBiome(x, z);
+  5281→    if (biome == NULL) return Biome::MobList();
+  5282→    return biome->getMobs(mobCategory);
+  5283→}
+  5284→```
+  5285→
+  5286→### PerformanceTestChunkSource — VERIFIED (RandomLevelSource.cpp:687–723, header lines 97–122)
+  5287→A simple test chunk source that fills y=0..65 with a checkerboard of dirt (id 3):
+  5288→```cpp
+  5289→LevelChunk* PerformanceTestChunkSource::create(int x, int z) {
+  5290→    unsigned char* blocks = new unsigned char[LevelChunk::ChunkBlockCount];
+  5291→    memset(blocks, 0, LevelChunk::ChunkBlockCount);
+  5292→    for (int y = 0; y < 65; y++) {
+  5293→        if (y < 60) {
+  5294→            for (int x = (y + 1) & 1; x < 16; x += 2) {
+  5295→                for (int z = y & 1; z < 16; z += 2) {
+  5296→                    blocks[x << 11 | z << 7 | y] = 3;
+  5297→                }
+  5298→            }
+  5299→        } else {
+  5300→            for (int x = 0; x < 16; x += 2) {
+  5301→                for (int z = 0; z < 16; z += 2) {
+  5302→                    blocks[x << 11 | z << 7 | y] = 3;
+  5303→                }
+  5304→            }
+  5305→        }
+  5306→    }
+  5307→    LevelChunk* levelChunk = new LevelChunk(level, blocks, x, z);
+  5308→    levelChunk->recalcHeightmap();
+  5309→    return levelChunk;
+  5310→}
+  5311→```
+  5312→This is the dev/debug worldgen — checkerboard pattern, dirt only. Not used in production but useful for port testing the index formula `blocks[x << 11 | z << 7 | y]`.
+  5313→
+  5314→---
+  5315→
+  5316→## MobSpawner
+  5317→
+  5318→### MobSpawner.h — constants & decl — VERIFIED (lines 1–42)
+  5319→```cpp
+  5320→class MobSpawner
+  5321→{
+  5322→public:
+  5323→    static int tick(Level* level, bool spawnEnemies, bool spawnFriendlies);
+  5324→    static void postProcessSpawnMobs(Level* level, Biome* biome, int xo, int zo, int cellWidth, int cellHeight, Random* random);
+  5325→    static void finalizeMobSettings(Mob* mob, Level* level, float xx, float yy, float zz);
+  5326→    static bool isSpawnPositionOk(const MobCategory& category, Level* level, int x, int y, int z);
+  5327→    static TilePos getRandomPosWithin(Level* level, int xo, int zo);
+  5328→    static bool addMob(Level* level, Mob* mob, float x, float y, float z, float yRot, float xRot, bool force);
+  5329→    static void makeBabyMob(Mob* mob, float probability);
+  5330→protected:
+  5331→    static const std::vector<int> bedEnemies;
+  5332→private:
+  5333→    static const int MIN_SPAWN_DISTANCE = 24;          // blocks
+  5334→    static std::map<ChunkPos, bool> chunksToPoll;
+  5335→};
+  5336→```
+  5337→
+  5338→`MIN_SPAWN_DISTANCE = 24` blocks — mobs won't spawn within 24 blocks of a player OR within 24 blocks of the shared spawn point.
+  5339→
+  5340→`bedEnemies` (defined in MobSpawner.cpp:18–25): `{Spider, Zombie, Skeleton, PigZombie}` — listed but not actively used in the spawn algorithm in this version.
+  5341→
+  5342→### MobSpawner::tick — VERIFIED (MobSpawner.cpp:28–172) — the per-tick mob spawn algorithm
+  5343→```cpp
+  5344→int MobSpawner::tick(Level* level, bool spawnEnemies, bool spawnFriendlies) {
+  5345→    if (!spawnEnemies && !spawnFriendlies) {
+  5346→        return 0;
+  5347→    }
+  5348→
+  5349→    chunksToPoll.clear();
+  5350→
+  5351→    if (spawnFriendlies) {
+  5352→        spawnEnemies = false;     // friendlies disable enemies this tick
+  5353→        for (int i = 0; i < 256; ++i)
+  5354→            chunksToPoll.insert(std::make_pair(ChunkPos(i>>4, i&15), false));
+  5355→    } else {
+  5356→        // Only spawn mobs, check around one player per tick
+  5357→        static unsigned int _pid = 0;
+  5358→        if (++_pid >= level->players.size()) _pid = 0;
+  5359→        if (level->players.size()) {
+  5360→            Player* p = level->players[_pid];
+  5361→            int xx = Mth::floor(p->x / 16);
+  5362→            int zz = Mth::floor(p->z / 16);
+  5363→            int r = 128 / 16;          // = 8 chunks radius
+  5364→            for (int x = -r; x <= r; x++)
+  5365→            for (int z = -r; z <= r; z++) {
+  5366→                const int cx = xx + x;
+  5367→                const int cz = zz + z;
+  5368→                if (cx >= 0 && cx < 16 && cz >= 0 && cz < 16)
+  5369→                    chunksToPoll.insert(std::make_pair(ChunkPos(cx, cz), false));
+  5370→            }
+  5371→        }
+  5372→    }
+  5373→
+  5374→    int count = 0;
+  5375→    Pos spawnPos = level->getSharedSpawnPos();
+  5376→
+  5377→    for (int i = 0; i < MobCategory::numValues; ++i) {        // 3 categories: monster, creature, waterCreature
+  5378→        const MobCategory& mobCategory = *MobCategory::values[i];
+  5379→
+  5380→        if ((mobCategory.isFriendly() && !spawnFriendlies) || (!mobCategory.isFriendly() && !spawnEnemies))
+  5381→            continue;
+  5382→
+  5383→        int numMobs = level->countInstanceOfBaseType(mobCategory.getBaseClassId());
+  5384→        if (numMobs > mobCategory.getMaxInstancesPerLevel())
+  5385→            continue;
+  5386→
+  5387→chunkLoop:
+  5388→        for (std::map<ChunkPos, bool>::iterator it = chunksToPoll.begin(); it != chunksToPoll.end(); ++it) {
+  5389→            const ChunkPos& cp = it->first;
+  5390→            TilePos start = getRandomPosWithin(level, cp.x * 16, cp.z * 16);
+  5391→            int xStart = start.x;
+
+[showing lines 4792-5391 of 11684; use offset=5392 with limit to continue reading]
