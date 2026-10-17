@@ -1,0 +1,76 @@
+name: VoxelCraft rebuild checks
+
+on:
+  push:
+    branches: ["main", "rebuild/voxelcraft-modern-engine"]
+  pull_request:
+    branches: ["main"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  mechanics-and-build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository and reference submodules
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Stage original MCPE 2013 textures from rujukan source
+        run: |
+          # Stage the original MCPE 2013 textures that minecraft.html uses.
+          # These come from rujukan/ source code, NOT from the VoxelCraft RP mirror.
+          RUJUKAN=rujukan/pocket-edition-2013/mcpe-source/handheld/project/android/assets
+          mkdir -p public/VoxelCraft/textures/blocks public/VoxelCraft/textures/gui public/VoxelCraft/font \
+                   public/VoxelCraft/textures/environment public/VoxelCraft/textures/items \
+                   public/VoxelCraft/models/entity public/VoxelCraft/textures/entity/chicken
+          cp "$RUJUKAN/terrain.png" public/VoxelCraft/textures/blocks/terrain.png
+          cp "$RUJUKAN/gui/gui.png" public/VoxelCraft/textures/gui/gui.png
+          cp "$RUJUKAN/gui/icons.png" public/VoxelCraft/textures/gui/icons.png
+          cp "$RUJUKAN/font/default8.png" public/VoxelCraft/font/default8.png
+          cp "$RUJUKAN/environment/clouds.png" public/VoxelCraft/textures/environment/clouds.png
+          # gui_buttons.png is pre-sliced from gui.png (already committed)
+          # Chicken model + texture from VoxelCraft RP
+          cp VoxelCraft/models/entity/chicken.geo.json public/VoxelCraft/models/entity/chicken.geo.json
+          cp VoxelCraft/textures/entity/chicken/chicken.png public/VoxelCraft/textures/entity/chicken/chicken.png
+          # Item icons from VoxelCraft RP
+          for name in book_writable apple feather clock_item bed_red compass_item book_normal brick diamond; do
+            cp "VoxelCraft/textures/items/${name}.png" "public/VoxelCraft/textures/items/${name}.png"
+          done
+
+      - name: Install locked dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Build voxel engine bundle
+        run: |
+          if [ -f src/game/browser-entry.ts ]; then
+            bun build src/game/browser-entry.ts --target browser --outfile public/voxelcraft-engine.bundle.js
+          fi
+
+      - name: Test game-core mechanics
+        run: bun run test:game-core
+
+      - name: Build application
+        run: bun run build
+
+      - name: Verify build output
+        run: |
+          test -s out/index.html
+          test -s out/minecraft.html
+          test -s out/VoxelCraft/textures/blocks/terrain.png
+          test -s out/VoxelCraft/textures/gui/gui.png
+          test -s out/VoxelCraft/textures/gui/icons.png
+          test -s out/VoxelCraft/font/default8.png
+          test -s out/VoxelCraft/textures/environment/clouds.png
+          if [ -f public/voxelcraft-engine.bundle.js ]; then
+            test -s out/voxelcraft-engine.bundle.js
+            grep -q 'VoxelCraftEngine' out/voxelcraft-engine.bundle.js
+          fi
