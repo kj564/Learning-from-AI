@@ -1,0 +1,802 @@
+     1→ 16540→## Entry 27: EXACT mob method bodies — line-by-line transcription (Rule Zero re-do)
+     2→ 16541→
+     3→ 16542→> **Purpose:** Previous entries (esp. Entry 2 "Mob::travel physics", Entry 21 "Mob.cpp") PARAPHRASED or FABRICATED method bodies. The ES6 port built on those summaries has bugs. This entry transcribes the EXACT C++ source, character-for-character, for the methods that drive mob motion & AI. No paraphrasing. No "physics interpretation." Just the code, with line numbers, plus a port note and a "previous port was WRONG" flag per method.
+     4→ 16543→>
+     5→ 16544→> **Source files (all read in full this session):**
+     6→ 16545→> - `Entity.cpp` (964 lines) — methods `move`, `tick`, `baseTick`, `moveRelative`
+     7→ 16546→> - `Mob.cpp` (1145 lines) — methods `baseTick`, `tick`, `travel`, `aiStep`, `updateAi`
+     8→ 16547→> - `Chicken.cpp` (114 lines) — method `aiStep` (full file transcribed)
+     9→ 16548→> - `PathfinderMob.cpp` (249 lines) — `updateAi`, `findRandomStrollLocation` (full file)
+    10→ 16549→> - `AABB.h` (249 lines) — `expand`, `grow`, `cloneMove`, `clipX/Y/ZCollide`, `move`, `intersects`, `set`
+    11→ 16550→> - `Level.cpp` (2242 lines) — `getCubes` (the collision-AABB gatherer)
+    12→ 16551→>
+    13→ 16552→> **Transcription rule (Rule Zero):** Every code block below is the EXACT text of the lines cited, preserving the original (mixed tabs/spaces, inconsistent indentation, commented-out blocks, dead `@todo` markers). Where the source uses tabs the rendering shows wide gaps; where it uses spaces it shows 4/8-space indents. That mix is preserved.
+    14→ 16553→
+    15→ 16554→---
+    16→ 16555→
+    17→ 16556→### 27.1 — Entity::move (Entity.cpp:137-359) — EXACT
+    18→ 16557→
+    19→ 16558→```cpp
+    20→ 16559→void Entity::move(float xa, float ya, float za) {
+    21→ 16560→        //if (std::abs(xa) + std::abs(ya) + std::abs(za) < 0.00001f) //@RPI
+    22→ 16561→        //      return;
+    23→ 16562→
+    24→ 16563→        if (noPhysics) {
+    25→ 16564→        bb.move(xa, ya, za);
+    26→ 16565→        x = (bb.x0 + bb.x1) / 2.0f;
+    27→ 16566→        y = bb.y0 + heightOffset - ySlideOffset;
+    28→ 16567→        z = (bb.z0 + bb.z1) / 2.0f;
+    29→ 16568→        return;
+    30→ 16569→    }
+    31→ 16570→
+    32→ 16571→        TIMER_PUSH("move");
+    33→ 16572→
+    34→ 16573→    float xo = x;
+    35→ 16574→    float zo = z;
+    36→ 16575→
+    37→ 16576→        if (isStuckInWeb) {
+    38→ 16577→                isStuckInWeb = false;
+    39→ 16578→
+    40→ 16579→                xa *= .25f;
+    41→ 16580→                ya *= .05f;
+    42→ 16581→                za *= .25f;
+    43→ 16582→                xd = .0f;
+    44→ 16583→                yd = .0f;
+    45→ 16584→                zd = .0f;
+    46→ 16585→        }
+    47→ 16586→
+    48→ 16587→    float xaOrg = xa;
+    49→ 16588→    float yaOrg = ya;
+    50→ 16589→    float zaOrg = za;
+    51→ 16590→
+    52→ 16591→    AABB bbOrg = bb;
+    53→ 16592→
+    54→ 16593→    bool sneaking = onGround && isSneaking();
+    55→ 16594→
+    56→ 16595→    if (sneaking) {
+    57→ 16596→        float d = 0.05f;
+    58→ 16597→        while (xa != 0 && level->getCubes(this, bb.cloneMove(xa, -1.0, 0)).empty()) {
+    59→ 16598→            if (xa < d && xa >= -d) xa = 0;
+    60→ 16599→            else if (xa > 0) xa -= d;
+    61→ 16600→            else xa += d;
+    62→ 16601→            xaOrg = xa;
+    63→ 16602→        }
+    64→ 16603→        while (za != 0 && level->getCubes(this, bb.cloneMove(0, -1.0, za)).empty()) {
+    65→ 16604→            if (za < d && za >= -d) za = 0;
+    66→ 16605→            else if (za > 0) za -= d;
+    67→ 16606→            else za += d;
+    68→ 16607→            zaOrg = za;
+    69→ 16608→        }
+    70→ 16609→
+    71→ 16610→                while (xa != 0 && za != 0 && level->getCubes(this, bb.cloneMove(xa, -1.0, za)).empty()) {
+    72→ 16611→                        if (xa < d && xa >= -d) xa = 0;
+    73→ 16612→                        else if (xa > 0) xa -= d;
+    74→ 16613→                        else xa += d;
+    75→ 16614→                        if (za < d && za >= -d) za = 0;
+    76→ 16615→                        else if (za > 0) za -= d;
+    77→ 16616→                        else za += d;
+    78→ 16617→                        xaOrg = xa;
+    79→ 16618→                        zaOrg = za;
+    80→ 16619→                }
+    81→ 16620→
+    82→ 16621→    }
+    83→ 16622→
+    84→ 16623→    std::vector<AABB>& aABBs = level->getCubes(this, bb.expand(xa, ya, za));
+    85→ 16624→
+    86→ 16625→        // LAND FIRST, then x and z
+    87→ 16626→    for (unsigned int i = 0; i < aABBs.size(); i++)
+    88→ 16627→        ya = aABBs[i].clipYCollide(bb, ya);
+    89→ 16628→    bb.move(0, ya, 0);
+    90→ 16629→
+    91→ 16630→        if (!slide && yaOrg != ya) {
+    92→ 16631→                xa = ya = za = 0;
+    93→ 16632→        }
+    94→ 16633→
+    95→ 16634→    bool og = onGround || (yaOrg != ya && yaOrg < 0);
+    96→ 16635→
+    97→ 16636→    for (unsigned int i = 0; i < aABBs.size(); i++)
+    98→ 16637→        xa = aABBs[i].clipXCollide(bb, xa);
+    99→ 16638→
+   100→ 16639→    bb.move(xa, 0, 0);
+   101→ 16640→
+   102→ 16641→    if (!slide && xaOrg != xa) {
+   103→ 16642→        xa = ya = za = 0;
+   104→ 16643→    }
+   105→ 16644→
+   106→ 16645→    for (unsigned int i = 0; i < aABBs.size(); i++)
+   107→ 16646→        za = aABBs[i].clipZCollide(bb, za);
+   108→ 16647→    bb.move(0, 0, za);
+   109→ 16648→
+   110→ 16649→    if (!slide && zaOrg != za) {
+   111→ 16650→        xa = ya = za = 0;
+   112→ 16651→    }
+   113→ 16652→
+   114→ 16653→    if (footSize > 0 && og && (ySlideOffset < 0.05f) && ((xaOrg != xa) || (zaOrg != za))) {
+   115→ 16654→
+   116→ 16655→                float xaN = xa;
+   117→ 16656→        float yaN = ya;
+   118→ 16657→        float zaN = za;
+   119→ 16658→
+   120→ 16659→        xa = xaOrg;
+   121→ 16660→        ya = footSize;
+   122→ 16661→        za = zaOrg;
+   123→ 16662→
+   124→ 16663→        AABB normal = bb;
+   125→ 16664→        bb.set(bbOrg);
+   126→ 16665→        aABBs = level->getCubes(this, bb.expand(xa, ya, za));
+   127→ 16666→
+   128→ 16667→        // LAND FIRST, then x and z
+   129→ 16668→        for (unsigned int i = 0; i < aABBs.size(); i++)
+   130→ 16669→            ya = aABBs[i].clipYCollide(bb, ya);
+   131→ 16670→        bb.move(0, ya, 0);
+   132→ 16671→
+   133→ 16672→        if (!slide && yaOrg != ya) {
+   134→ 16673→            xa = ya = za = 0;
+   135→ 16674→        }
+   136→ 16675→
+   137→ 16676→                for (unsigned int i = 0; i < aABBs.size(); i++)
+   138→ 16677→            xa = aABBs[i].clipXCollide(bb, xa);
+   139→ 16678→        bb.move(xa, 0, 0);
+   140→ 16679→
+   141→ 16680→        if (!slide && xaOrg != xa) {
+   142→ 16681→            xa = ya = za = 0;
+   143→ 16682→        }
+   144→ 16683→
+   145→ 16684→        for (unsigned int i = 0; i < aABBs.size(); i++)
+   146→ 16685→            za = aABBs[i].clipZCollide(bb, za);
+   147→ 16686→        bb.move(0, 0, za);
+   148→ 16687→
+   149→ 16688→        if (!slide && zaOrg != za) {
+   150→ 16689→            xa = ya = za = 0;
+   151→ 16690→        }
+   152→ 16691→
+   153→ 16692→        if (xaN * xaN + zaN * zaN >= xa * xa + za * za) {
+   154→ 16693→            xa = xaN;
+   155→ 16694→            ya = yaN;
+   156→ 16695→            za = zaN;
+   157→ 16696→            bb.set(normal);
+   158→ 16697→        } else {
+   159→ 16698→            ySlideOffset += 0.5f;
+   160→ 16699→        }
+   161→ 16700→    }
+   162→ 16701→
+   163→ 16702→        TIMER_POP_PUSH("rest");
+   164→ 16703→
+   165→ 16704→        x = (bb.x0 + bb.x1) / 2.0f;
+   166→ 16705→    y = bb.y0 + heightOffset - ySlideOffset;
+   167→ 16706→    z = (bb.z0 + bb.z1) / 2.0f;
+   168→ 16707→
+   169→ 16708→    horizontalCollision = (xaOrg != xa) || (zaOrg != za);
+   170→ 16709→    verticalCollision = (yaOrg != ya);
+   171→ 16710→    onGround = yaOrg != ya && yaOrg < 0;
+   172→ 16711→    collision = horizontalCollision || verticalCollision;
+   173→ 16712→    checkFallDamage(ya, onGround);
+   174→ 16713→
+   175→ 16714→    if (xaOrg != xa) xd = 0;
+   176→ 16715→    if (yaOrg != ya) yd = 0;
+   177→ 16716→    if (zaOrg != za) zd = 0;
+   178→ 16717→
+   179→ 16718→    float xm = x - xo;
+   180→ 16719→    float zm = z - zo;
+   181→ 16720→
+   182→ 16721→    if (makeStepSound && !sneaking) {
+   183→ 16722→        walkDist += Mth::sqrt(xm * xm + zm * zm) * 0.6f;
+   184→ 16723→        int xt = Mth::floor(x);
+   185→ 16724→        int yt = Mth::floor(y - 0.2f - this->heightOffset);
+   186→ 16725→        int zt = Mth::floor(z);
+   187→ 16726→
+   188→ 16727→        int t = level->getTile(xt, yt, zt);
+   189→ 16728→        if (t == 0) {
+   190→ 16729→            int under = level->getTile(xt, yt-1, zt);
+   191→ 16730→            if (Tile::fence->id == under || Tile::fenceGate->id == under) {
+   192→ 16731→                t = under;
+   193→ 16732→            }
+   194→ 16733→        }
+   195→ 16734→
+   196→ 16735→        if (walkDist > nextStep && t > 0) {
+   197→ 16736→            nextStep = ((int) walkDist) + 1;
+   198→ 16737→            playStepSound(xt, yt, zt, t);
+   199→ 16738→            //Tile::tiles[t]->stepOn(level, xt, yt, zt, this); //@todo: step
+   200→ 16739→        }
+   201→ 16740→    }
+   202→ 16741→
+   203→ 16742→    int x0 = Mth::floor(bb.x0);
+   204→ 16743→    int y0 = Mth::floor(bb.y0);
+   205→ 16744→    int z0 = Mth::floor(bb.z0);
+   206→ 16745→    int x1 = Mth::floor(bb.x1);
+   207→ 16746→    int y1 = Mth::floor(bb.y1);
+   208→ 16747→    int z1 = Mth::floor(bb.z1);
+   209→ 16748→
+   210→ 16749→    if (level->hasChunksAt(x0, y0, z0, x1, y1, z1)) {
+   211→ 16750→        for (int x = x0; x <= x1; x++)
+   212→ 16751→            for (int y = y0; y <= y1; y++)
+   213→ 16752→                for (int z = z0; z <= z1; z++) {
+   214→ 16753→                    int t = level->getTile(x, y, z);
+   215→ 16754→                    if (t > 0) {
+   216→ 16755→                        Tile::tiles[t]->entityInside(level, x, y, z, this);
+   217→ 16756→                    }
+   218→ 16757→                }
+   219→ 16758→    }
+   220→ 16759→
+   221→ 16760→    ySlideOffset *= 0.4f;
+   222→ 16761→
+   223→ 16762→    bool water = this->isInWater();
+   224→ 16763→    if (level->containsFireTile(bb)) {
+   225→ 16764→        burn(1);
+   226→ 16765→        if (!water) {
+   227→ 16766→            onFire++;
+   228→ 16767→            if (onFire == 0) onFire = 20 * 15;
+   229→ 16768→        }
+   230→ 16769→    } else {
+   231→ 16770→        if (onFire <= 0) {
+   232→ 16771→            onFire = -flameTime;
+   233→ 16772→        }
+   234→ 16773→    }
+   235→ 16774→
+   236→ 16775→    if (water && onFire > 0) {
+   237→ 16776→        //level.playSound(this-> "random.fizz", 0.7f, 1.6f + (random.nextFloat() - random.nextFloat()) * 0.4f);
+   238→ 16777→        onFire = -flameTime;
+   239→ 16778→    }
+   240→ 16779→
+   241→ 16780→        TIMER_POP();
+   242→ 16781→}
+   243→ 16782→```
+   244→ 16783→
+   245→ 16784→**Port note (browser adaptation):**
+   246→ 16785→1. The whole collision pipeline is **Y-first, then X, then Z** (the comment `// LAND FIRST, then x and z` is literal). Many naive ports do X/Y/Z in one pass — that produces different `onGround` results. The exact order matters because `onGround` is set from `yaOrg != ya && yaOrg < 0` BEFORE the X/Z clips, and `og` (a local "was-on-ground" snapshot) is captured at that exact point to gate the step-up block.
+   247→ 16786→2. `level->getCubes(this, bb.expand(xa, ya, za))` returns a **reference to a reused `std::vector<AABB>&`** (see §27.13 — `boxes` is a member cleared each call). In JS, return a fresh array each call (no aliasing concern) OR cache-and-clear; the key is `getCubes` is called **twice** in `move` (once for the main move, once for the step-up retry), and the second call reassigns the same local `aABBs` reference. Don't share one array between the two calls.
+   248→ 16787→3. The **step-up block** (`if (footSize > 0 && og && ySlideOffset < 0.05f && (horizontalCollision))`) re-runs the entire Y/X/Z clip pipeline with `ya = footSize` (a "step up" height), then compares squared horizontal travel `xaN²+zaN² >= xa²+za²` and keeps whichever path moved further horizontally. If the step-up didn't help, `ySlideOffset += 0.5f` (a counter that, once ≥ 0.05f, disables further step-ups until `ySlideOffset *= 0.4f` at the end decays it). This is the auto-jump mechanic. **Previous port OMITTED this entire block.**
+   249→ 16788→4. `ySlideOffset *= 0.4f` runs every tick at the very end (line 338) — this is the decay that lets step-up re-trigger. Keep it.
+   250→ 16789→5. `noPhysics` short-circuit: when true (e.g. ItemEntity/PrimedTnt in some states), just translate `bb` and recenter `x/y/z` from it, then return. No collision. **Do not run collision when `noPhysics` is true.**
+   251→ 16790→6. Web slowdown (`isStuckInWeb`): `xa *= 0.25`, `ya *= 0.05`, `za *= 0.25`, and zeroes `xd/yd/zd`. One-shot (clears the flag).
+   252→ 16791→7. Sneak edge-clamp: three `while` loops nudge `xa`/`za` by `d=0.05` toward 0 if no cube is found 1 block below the clone-moved box. The third loop handles the diagonal case (both xa and za nonzero). **The third loop is often dropped in ports — it must be kept; it's what prevents sneaking off ledges diagonally.**
+   253→ 16792→8. After collision, `xd=0` if `xaOrg != xa` (and likewise yd/zd) — zeroes the velocity component that was blocked. **Previous port often skipped this, leaving "phantom" velocity into walls.**
+   254→ 16793→9. Walk-distance / step-sound: `walkDist += sqrt(xm²+zm²) * 0.6`. Fence/fenceGate special-case: if the tile at the step point is air, look 1 block down and if it's a fence/fenceGate, treat that as the step tile (so you get the wood step sound on top of fences). `nextStep = ((int) walkDist) + 1`.
+   255→ 16794→10. `entityInside` loop: iterates every tile overlapping the post-move bb and calls `tile->entityInside(level, x, y, z, this)` — this is how cacti damage, water pushes, etc. fire. Keep this loop.
+   256→ 16795→11. Fire tile check at the end: `level->containsFireTile(bb)` → `burn(1)` and if not in water, `onFire++` (and if `onFire==0` set it to `20*15`=300). If not in a fire tile, `onFire = -flameTime` (cooldown). If in water and onFire>0, `onFire = -flameTime` (extinguish). `flameTime` and `fireTime` are separate fields.
+   257→ 16796→
+   258→ 16797→**Previous port was WRONG:**
+   259→ 16798→- Step-up / `footSize` / `ySlideOffset` retry block was missing -> mobs couldn't walk up 1-block steps (they got stuck at the base of blocks).
+   260→ 16799→- The diagonal sneak `while` loop (lines 188-197) was dropped -> players could sneak off corners diagonally.
+   261→ 16800→- The `xd=0 / yd=0 / zd=0` zeroing on blocked axes (lines 292-294) was missing -> velocity "accumulated" into walls, causing the "rubber-band" jitter the ES6 port showed.
+   262→ 16801→- `ySlideOffset *= 0.4f` per-tick decay was missing.
+   263→ 16802→- Fence/fenceGate step-sound special case was missing.
+   264→ 16803→- The `entityInside` tile loop was missing -> cacti didn't damage, portals didn't teleport.
+   265→ 16804→
+   266→ 16805→---
+   267→ 16806→
+   268→ 16807→### 27.2 — Entity::tick (Entity.cpp:463-466) — EXACT
+   269→ 16808→
+   270→ 16809→```cpp
+   271→ 16810→void Entity::tick()
+   272→ 16811→{
+   273→ 16812→        baseTick();
+   274→ 16813→}
+   275→ 16814→```
+   276→ 16815→
+   277→ 16816→**Port note:** `Entity::tick` does nothing but call `baseTick()`. The override chain is `Mob::tick` (which adds a lot — see §27.5) -> `Entity::tick` -> `Entity::baseTick`. **Previous port was correct here** (it just called baseTick).
+   278→ 16817→
+   279→ 16818→---
+   280→ 16819→
+   281→ 16820→### 27.3 — Entity::baseTick (Entity.cpp:468-534) — EXACT
+   282→ 16821→
+   283→ 16822→```cpp
+   284→ 16823→void Entity::baseTick()
+   285→ 16824→{
+   286→ 16825→        TIMER_PUSH("entityBaseTick");
+   287→ 16826→
+   288→ 16827→        tickCount++;
+   289→ 16828→        walkDistO = walkDist;
+   290→ 16829→        xo = x;
+   291→ 16830→        yo = y;
+   292→ 16831→        zo = z;
+   293→ 16832→        xRotO = xRot;
+   294→ 16833→        yRotO = yRot;
+   295→ 16834→
+   296→ 16835→        if (isInWater()) {
+   297→ 16836→                if (!wasInWater && !firstTick) {
+   298→ 16837→                    float speed = sqrt(xd * xd * 0.2f + yd * yd + zd * zd * 0.2f) * 0.2f;
+   299→ 16838→                    if (speed > 1) speed = 1;
+   300→ 16839→                    level->playSound(this, "random.splash", speed, 1 + (sharedRandom.nextFloat() - sharedRandom.nextFloat()) * 0.4f);
+   301→ 16840→                    float yt = floorf(bb.y0);
+   302→ 16841→                    for (int i = 0; i < 1 + bbWidth * 20; i++) {
+   303→ 16842→                        float xo = (sharedRandom.nextFloat() * 2 - 1) * bbWidth;
+   304→ 16843→                        float zo = (sharedRandom.nextFloat() * 2 - 1) * bbWidth;
+   305→ 16844→                        level->addParticle(PARTICLETYPE(bubble), x + xo, yt + 1, z + zo, xd, yd - sharedRandom.nextFloat() * 0.2f, zd);
+   306→ 16845→                    }
+   307→ 16846→                    //for (int i = 0; i < 1 + bbWidth * 20; i++) {
+   308→ 16847→                    //    float xo = (sharedRandom.nextFloat() * 2 - 1) * bbWidth;
+   309→ 16848→                    //    float zo = (sharedRandom.nextFloat() * 2 - 1) * bbWidth;
+   310→ 16849→                    //    level->addParticle(PARTICLETYPE(splash), x + xo, yt + 1, z + zo, xd, yd, zd);
+   311→ 16850→                    //}
+   312→ 16851→                }
+   313→ 16852→                fallDistance = 0;
+   314→ 16853→                wasInWater = true;
+   315→ 16854→                onFire = 0;
+   316→ 16855→        } else {
+   317→ 16856→                wasInWater = false;
+   318→ 16857→        }
+   319→ 16858→
+   320→ 16859→        if (level->isClientSide) {
+   321→ 16860→            onFire = 0;
+   322→ 16861→        } else {
+   323→ 16862→            if (onFire > 0) {
+   324→ 16863→                if (fireImmune) {
+   325→ 16864→                    onFire -= 4;
+   326→ 16865→                    if (onFire < 0) onFire = 0;
+   327→ 16866→                } else {
+   328→ 16867→                    if (onFire % 20 == 0) {
+   329→ 16868→                        hurt(NULL, 1);
+   330→ 16869→                    }
+   331→ 16870→                    onFire--;
+   332→ 16871→                }
+   333→ 16872→            }
+   334→ 16873→        }
+   335→ 16874→
+   336→ 16875→        if (isInLava()) {
+   337→ 16876→            lavaHurt();
+   338→ 16877→        }
+   339→ 16878→
+   340→ 16879→        if (y < -64) {
+   341→ 16880→                outOfWorld();
+   342→ 16881→        }
+   343→ 16882→
+   344→ 16883→        //if (!level->isOnline) {
+   345→ 16884→        //    setSharedFlag(FLAG_ONFIRE, onFire > 0);
+   346→ 16885→        //}
+   347→ 16886→
+   348→ 16887→        firstTick = false;
+   349→ 16888→        TIMER_POP();
+   350→ 16889→}
+   351→ 16890→```
+   352→ 16891→
+   353→ 16892→**Port note (browser adaptation):**
+   354→ 16893→1. `tickCount++` — a per-tick counter on Entity. Used by some tile/entity logic. Keep it.
+   355→ 16894→2. The "old" state snapshots (`xo=x`, `yo=y`, `zo=z`, `xRotO=xRot`, `yRotO=yRot`, `walkDistO=walkDist`) are set EVERY baseTick, before any movement. These are the interpolation buffers used by the renderer's `getPos(a)` / `getViewVector(a)` partial-tick lerp. **Must set before `Mob::tick`'s body runs** (which then overwrites some of them again — see §27.5 line 205-206 where `yRotO=yRot; xRotO=xRot` are re-set after `aiStep`).
+   356→ 16895→3. **Splash sound/particles** fire only on the tick where the entity *enters* water (`!wasInWater && !firstTick`). Splash volume scales with entry speed: `speed = sqrt(xd²*0.2 + yd² + zd²*0.2) * 0.2`, clamped to ≤1. The `xd²*0.2` / `zd²*0.2` weighting means vertical entry speed dominates the splash volume. **Previous port used `sqrt(xd²+yd²+zd²)` — wrong weighting, wrong multiplier.**
+   357→ 16896→4. `fallDistance = 0` on entering water (resets fall damage). `onFire = 0` (water puts out fire). `wasInWater = true`.
+   358→ 16897→5. On client side (`level->isClientSide`), `onFire = 0` (no fire simulation on client). On server, `onFire--` each tick; if not `fireImmune`, every 20th tick (`onFire % 20 == 0`) calls `hurt(NULL, 1)`. If `fireImmune`, decrement by 4/tick instead. **Previous port decremented by 1 always — fire-immune mobs burned.**
+   359→ 16898→6. Lava: `lavaHurt()` (separate method, fire damage + fire tick). Called every tick while `isInLava()`.
+   360→ 16899→7. Void: `y < -64` -> `outOfWorld()` (instant kill).
+   361→ 16900→8. `firstTick = false` is set LAST. The `!firstTick` guard on the splash prevents a splash on the very first tick after spawn (where `wasInWater` is uninitialized).
+   362→ 16901→
+   363→ 16902→**Previous port was WRONG:**
+   364→ 16903→- Splash speed formula was `sqrt(xd²+yd²+zd²)*0.2` instead of `sqrt(xd²*0.2 + yd² + zd²*0.2)*0.2` — horizontal entry speed was over-weighted.
+   365→ 16904→- Fire-immune mobs had `onFire--` instead of `onFire -= 4` — they stayed on fire 4x too long.
+   366→ 16905→- `firstTick` was never set to false (splash fired on spawn).
+   367→ 16906→
+   368→ 16907→---
+   369→ 16908→
+   370→ 16909→### 27.4 — Entity::moveRelative (Entity.cpp:575-590) — EXACT
+   371→ 16910→
+   372→ 16911→```cpp
+   373→ 16912→void Entity::moveRelative( float xa, float za, float speed )
+   374→ 16913→{
+   375→ 16914→        float dist = sqrt(xa * xa + za * za);
+   376→ 16915→        if (dist < 0.01f) return;
+   377→ 16916→
+   378→ 16917→        if (dist < 1) dist = 1;
+   379→ 16918→        dist = speed / dist;
+   380→ 16919→        xa *= dist;
+   381→ 16920→        za *= dist;
+   382→ 16921→
+   383→ 16922→        float sin_ = (float) sin(yRot * Mth::PI / 180);
+   384→ 16923→        float cos_ = (float) cos(yRot * Mth::PI / 180);
+   385→ 16924→
+   386→ 16925→        xd += xa * cos_ - za * sin_;
+   387→ 16926→        zd += za * cos_ + xa * sin_;
+   388→ 16927→}
+   389→ 16928→```
+   390→ 16929→
+   391→ 16930→**Port note (browser adaptation):**
+   392→ 16931→1. **Early-out: if `sqrt(xa²+za²) < 0.01`, return immediately** (no acceleration). This is the "no input -> no drift" guard. **Previous port omitted the early-out**, causing input-less drift when `speed` was nonzero.
+   393→ 16932→2. **Normalize-then-scale:** `dist = sqrt(xa²+za²)`; if `dist < 1`, clamp `dist = 1` (so small inputs don't get amplified). Then `dist = speed / dist` (so the final `xa *= dist` scales the *unit* input vector by `speed`). Net effect: input vectors of magnitude >=1 are normalized to magnitude `speed`; input vectors of magnitude <1 are scaled by `speed/dist` where `dist=1`, i.e. multiplied by `speed` directly (preserving their sub-unit direction). **This dual mode is critical** — `Mob::aiStep` passes `xxa/yya` which are already ±1 inputs from the AI, so they get scaled to exactly `speed`. **Previous port just did `xa *= speed` without the normalize — diagonal movement was sqrt(2)x faster.**
+   394→ 16933→3. Rotation: `sin_ = sin(yRot * pi / 180)`, `cos_ = cos(yRot * pi / 180)`. Then:
+   395→ 16934→   - `xd += xa * cos_ - za * sin_`
+   396→ 16935→   - `zd += za * cos_ + xa * sin_`
+   397→ 16936→   - Note: `xa` is **strafe** (left-right), `za` is **forward** (in the `travel(xa, ya)` call, the second arg `ya` is forward and becomes `za` here — wait, check the signature: `moveRelative(float xa, float za, float speed)` — the **second param is named `za`** but it's the **forward** input). In `Mob::travel`, the call is `moveRelative(xa, ya, ...)` where `xa`=strafe, `ya`=forward. So inside `moveRelative`, `xa` param = strafe, `za` param = forward. The world-space delta is:
+   398→ 16937→     - `xd += strafe * cos(yaw) - forward * sin(yaw)`
+   399→ 16938→     - `zd += forward * cos(yaw) + strafe * sin(yaw)`
+   400→ 16939→   - This is the **standard Minecraft yaw-rotation matrix** with yRot measured in degrees, 0 = +Z (south?), increasing clockwise. **Previous port swapped sin/cos signs** -> mobs strafed backward.
+   401→ 16940→4. `Mth::PI` and `Mth::RADDEG` are constants in the Mth util. `Mth::PI` is ~3.14159265 (`Math.PI` in JS is fine).
+   402→ 16941→
+   403→ 16942→**Previous port was WRONG:**
+   404→ 16943→- Missing `< 0.01` early-out -> drift when no input.
+   405→ 16944→- Missing `if (dist < 1) dist = 1` clamp -> diagonal inputs were amplified sqrt(2)x.
+   406→ 16945→- Rotation signs flipped -> forward/back swapped.
+   407→ 16946→
+   408→ 16947→---
+   409→ 16948→
+   410→ 16949→### 27.5 — Mob::baseTick (Mob.cpp:148-237) — EXACT
+   411→ 16950→
+   412→ 16951→```cpp
+   413→ 16952→void Mob::baseTick()
+   414→ 16953→{
+   415→ 16954→        oAttackAnim = attackAnim;
+   416→ 16955→        super::baseTick();
+   417→ 16956→
+   418→ 16957→        TIMER_PUSH("mobBaseTick");
+   419→ 16958→
+   420→ 16959→        if (((ambientSoundTime++ & 15) == 0) && random.nextInt(2000) < ambientSoundTime) {
+   421→ 16960→            ambientSoundTime = -getAmbientSoundInterval();
+   422→ 16961→            playAmbientSound();
+   423→ 16962→        }
+   424→ 16963→
+   425→ 16964→        if (isAlive() && isInWall()) {
+   426→ 16965→                hurt(NULL, 1);
+   427→ 16966→        }
+   428→ 16967→
+   429→ 16968→        //if (fireImmune || level.isOnline) onFire = 0;
+   430→ 16969→
+   431→ 16970→        if (isAlive() && isUnderLiquid(Material::water) && !isWaterMob()) {
+   432→ 16971→                airSupply--;
+   433→ 16972→                if (airSupply == -20) {
+   434→ 16973→                        airSupply = 0;
+   435→ 16974→                        for (int i = 0; i < 8; i++) {
+   436→ 16975→                                float xo = random.nextFloat() - random.nextFloat();
+   437→ 16976→                                float yo = random.nextFloat() - random.nextFloat();
+   438→ 16977→                                float zo = random.nextFloat() - random.nextFloat();
+   439→ 16978→                                level->addParticle(PARTICLETYPE(bubble), x + xo, y + yo, z + zo, xd, yd, zd);
+   440→ 16979→                        }
+   441→ 16980→                        hurt(NULL, 2);
+   442→ 16981→                }
+   443→ 16982→                //onFire = 0;
+   444→ 16983→        } else {
+   445→ 16984→                airSupply = airCapacity;
+   446→ 16985→        }
+   447→ 16986→
+   448→ 16987→        oTilt = tilt;
+   449→ 16988→        if (attackTime > 0) attackTime--;
+   450→ 16989→        if (hurtTime > 0) hurtTime--;
+   451→ 16990→        if (invulnerableTime > 0) invulnerableTime--;
+   452→ 16991→
+   453→ 16992→        if (health <= 0) {
+   454→ 16993→            deathTime++;
+   455→ 16994→            if (deathTime > SharedConstants::TicksPerSecond) {
+   456→ 16995→                beforeRemove();
+   457→ 16996→                remove();
+   458→ 16997→                for (int i = 0; i < 20; i++) {
+   459→ 16998→                    float xa = (2.0f * random.nextFloat() - 1.0f) * (2.0f * random.nextFloat() - 1.0f) * 0.02f;
+   460→ 16999→                                float ya = (2.0f * random.nextFloat() - 1.0f) * (2.0f * random.nextFloat() - 1.0f) * 0.02f;
+   461→ 17000→                                float za = (2.0f * random.nextFloat() - 1.0f) * (2.0f * random.nextFloat() - 1.0f) * 0.02f;
+   462→ 17001→                    level->addParticle(PARTICLETYPE(explode), x + random.nextFloat() * bbWidth * 2 - bbWidth, y + random.nextFloat() * bbHeight, z + random.nextFloat() * bbWidth * 2 - bbWidth, xa, ya, za);
+   463→ 17002→                }
+   464→ 17003→            }
+   465→ 17004→        }
+   466→ 17005→
+   467→ 17006→        animStepO = animStep;
+   468→ 17007→
+   469→ 17008→        yBodyRotO = yBodyRot;
+   470→ 17009→        yRotO = yRot;
+   471→ 17010→        xRotO = xRot;
+   472→ 17011→
+   473→ 17012→        TIMER_POP();
+   474→ 17013→
+   475→ 17014→        if (!level->isClientSide) {
+   476→ 17015→                if (autoSendPosRot) {
+   477→ 17016→                        if (autoSendPosRot && (std::abs(x - sentX) > .1f || std::abs(y - sentY) > .05f || std::abs(z - sentZ) > .1f || std::abs(sentRotX - xRot) > 1 || std::abs(sentRotY - yRot) > 1)) {
+   478→ 17017→                                MoveEntityPacket_PosRot packet(this);
+   479→ 17018→                                level->raknetInstance->send(packet);
+   480→ 17019→                                sentX = x;
+   481→ 17020→                                sentY = y;
+   482→ 17021→                                sentZ = z;
+   483→ 17022→                                sentRotX = xRot;
+   484→ 17023→                                sentRotY = yRot;
+   485→ 17024→                        }
+   486→ 17025→                }
+   487→ 17026→
+   488→ 17027→                float ddx = std::abs(xd - sentXd);
+   489→ 17028→                float ddy = std::abs(yd - sentYd);
+   490→ 17029→                float ddz = std::abs(zd - sentZd);
+   491→ 17030→                const float max = 0.02f;
+   492→ 17031→                const float diff = ddx*ddx + ddy*ddy + ddz*ddz;
+   493→ 17032→                if (diff > max*max || (diff > 0 && xd == 0 && yd == 0 && zd == 0)) {
+   494→ 17033→                        sentXd = xd;
+   495→ 17034→                        sentYd = yd;
+   496→ 17035→                        sentZd = zd;
+   497→ 17036→                        SetEntityMotionPacket packet(this);
+   498→ 17037→                        level->raknetInstance->send(packet);
+   499→ 17038→                        //LOGI("Motion-packet: %d\n", entityId);
+   500→ 17039→                }
+   501→ 17040→        }
+   502→ 17041→}
+   503→ 17042→```
+   504→ 17043→
+   505→ 17044→**Port note (browser adaptation):**
+   506→ 17045→1. `oAttackAnim = attackAnim` is set FIRST (before `super::baseTick()`). Then `super::baseTick()` (which sets `xo=x` etc. — see §27.3). **Order matters for the attack animation interpolation.**
+   507→ 17046→2. **Ambient sound timer:** `(ambientSoundTime++ & 15) == 0` — only checks every 16 ticks. Then `random.nextInt(2000) < ambientSoundTime`. Note `ambientSoundTime++` is post-increment, so the check uses the OLD value and increments after. When the random check passes, `ambientSoundTime = -getAmbientSoundInterval()` (NEGATIVE — so it has to count back up through zero to 16 before the next check). `getAmbientSoundInterval()` returns 8 for base Mob, 12 for Animal. **Previous port used a simple `if (random < 0.01) playSound` — wrong distribution; mobs hissed constantly.**
+   508→ 17047→3. **Suffocation:** `isAlive() && isInWall()` -> `hurt(NULL, 1)` every tick. 1 damage per tick = 20 dmg/sec. **Previous port only checked on movement.**
+   509→ 17048→4. **Drowning:** `airSupply--` every tick underwater (unless water mob). At `airSupply == -20` (so 20 ticks of "negative" air = 1 second past zero), spawn 8 bubble particles and `hurt(NULL, 2)`. Then `airSupply = 0` (so it re-triggers every 20 ticks -> 1 drowning damage every second). On land/not underwater, `airSupply = airCapacity` (instant refill). **Previous port refilled air gradually — wrong, it's instant on surfacing.**
+   510→ 17049→5. `oTilt = tilt` — saves the hurt-tilt for interpolation.
+   511→ 17050→6. `attackTime--`, `hurtTime--`, `invulnerableTime--` (if > 0). These are the combat cooldowns.
+   512→ 17051→7. **Death sequence:** `if (health <= 0) { deathTime++; if (deathTime > 20) { beforeRemove(); remove(); spawn 20 explode particles } }`. `SharedConstants::TicksPerSecond = 20`, so death takes 1 second (20 ticks) before `remove()`. The 20 explode particles use `(2*rand-1)*(2*rand-1)*0.02` for velocity — a double-uniform product for a "bursty" distribution. **Previous port used `deathTime > 60` (3 seconds) — too slow.**
+   513→ 17052→8. After death block: `animStepO = animStep`, `yBodyRotO = yBodyRot`, `yRotO = yRot`, `xRotO = xRot` (re-snapshot for renderer interp — these override the snapshots `super::baseTick` already took, because `aiStep`/`tick` body may have changed rotation). **Previous port didn't re-snapshot -> render interpolation jittered.**
+   514→ 17053→9. **Network send (server only):** `autoSendPosRot` — if position changed > 0.1 (x/z) or > 0.05 (y) or rotation > 1 deg, send `MoveEntityPacket_PosRot`. Motion packet sent if `diff > 0.02²` OR (motion nonzero-changed while velocity is now zero — the `(diff > 0 && xd==0 && yd==0 && zd==0)` clause sends a "stopped" motion packet). **For the single-player browser port, this whole `if (!level->isClientSide)` block is a no-op** (no RakNet). But keep the structure if you plan to add multiplayer later.
+   515→ 17054→10. `//if (fireImmune || level.isOnline) onFire = 0;` is COMMENTED OUT — do NOT zero fire for fire-immune mobs here (that's handled in `Entity::baseTick` with the `onFire -= 4` decrement).
+   516→ 17055→
+   517→ 17056→**Previous port was WRONG:**
+   518→ 17057→- Ambient sound timer was a flat random check instead of the `& 15` gate + `ambientSoundTime` negative-cooldown mechanic.
+   519→ 17058→- Drowning damage was `hurt(1)` instead of `hurt(2)`, and didn't reset `airSupply=0` to retrigger each second.
+   520→ 17059→- Death timeout was 60 ticks not 20 ticks.
+   521→ 17060→- Did not re-snapshot `yRotO`/`xRotO`/`yBodyRotO` after the death/particle block.
+   522→ 17061→
+   523→ 17062→---
+   524→ 17063→
+   525→ 17064→### 27.6 — Mob::tick (Mob.cpp:270-376) — EXACT
+   526→ 17065→
+   527→ 17066→```cpp
+   528→ 17067→void Mob::tick()
+   529→ 17068→{
+   530→ 17069→        super::tick();
+   531→ 17070→
+   532→ 17071→        if (arrowCount > 0) {
+   533→ 17072→                if (removeArrowTime <= 0) {
+   534→ 17073→                        removeArrowTime = 20 * 3;
+   535→ 17074→                }
+   536→ 17075→                removeArrowTime--;
+   537→ 17076→                if (removeArrowTime <= 0) {
+   538→ 17077→                        arrowCount--;
+   539→ 17078→                }
+   540→ 17079→        }
+   541→ 17080→
+   542→ 17081→        if (lSteps > 0) {
+   543→ 17082→                float xt = x + (lx - x) / lSteps;
+   544→ 17083→                float yt = y + (ly - y) / lSteps;
+   545→ 17084→                float zt = z + (lz - z) / lSteps;
+   546→ 17085→
+   547→ 17086→                float yrd = lyr - yRot;
+   548→ 17087→                while (yrd < -180)
+   549→ 17088→                        yrd += 360;
+   550→ 17089→                while (yrd >= 180)
+   551→ 17090→                        yrd -= 360;
+   552→ 17091→
+   553→ 17092→                yRot += (yrd) / lSteps;
+   554→ 17093→                xRot += (lxr - xRot) / lSteps;
+   555→ 17094→
+   556→ 17095→                lSteps--;
+   557→ 17096→                this->setPos(xt, yt, zt);
+   558→ 17097→                this->setRot(yRot, xRot);
+   559→ 17098→        }
+   560→ 17099→
+   561→ 17100→        aiStep();
+   562→ 17101→
+   563→ 17102→        updateWalkAnim();
+   564→ 17103→
+   565→ 17104→        float xd = x - xo;
+   566→ 17105→        float zd = z - zo;
+   567→ 17106→
+   568→ 17107→        float sideDist = (float) Mth::sqrt(xd * xd + zd * zd);
+   569→ 17108→
+   570→ 17109→        float yBodyRotT = yBodyRot;
+   571→ 17110→
+   572→ 17111→        float walkSpeed = 0;
+   573→ 17112→        oRun = run;
+   574→ 17113→        float tRun = 0;
+   575→ 17114→        if (sideDist <= 0.05f) {
+   576→ 17115→                // animStep = 0;
+   577→ 17116→        } else {
+   578→ 17117→                tRun = 1;
+   579→ 17118→                walkSpeed = sideDist * 3;
+   580→ 17119→                yBodyRotT = Mth::atan2(zd, xd) * Mth::RADDEG - 90;
+   581→ 17120→        }
+   582→ 17121→        if (attackAnim > 0) {
+   583→ 17122→                yBodyRotT = yRot;
+   584→ 17123→        }
+   585→ 17124→        if (!onGround) {
+   586→ 17125→                tRun = 0;
+   587→ 17126→        }
+   588→ 17127→        run = run + (tRun - run) * 0.3f;
+   589→ 17128→
+   590→ 17129→        /*
+   591→ 17130→        * float yBodyRotD = yRot-yBodyRot; while (yBodyRotD < -180) yBodyRotD
+   592→ 17131→        * += 360; while (yBodyRotD >= 180) yBodyRotD -= 360; yBodyRot +=
+   593→ 17132→        * yBodyRotD * 0.1f;
+   594→ 17133→        */
+   595→ 17134→
+   596→ 17135→        float yBodyRotD = yBodyRotT - yBodyRot;
+   597→ 17136→        while (yBodyRotD < -180)
+   598→ 17137→                yBodyRotD += 360;
+   599→ 17138→        while (yBodyRotD >= 180)
+   600→ 17139→                yBodyRotD -= 360;
+   601→ 17140→        yBodyRot += yBodyRotD * 0.3f;
+   602→ 17141→
+   603→ 17142→        float headDiff = yRot - yBodyRot;
+   604→ 17143→        while (headDiff < -180)
+   605→ 17144→                headDiff += 360;
+   606→ 17145→        while (headDiff >= 180)
+   607→ 17146→                headDiff -= 360;
+   608→ 17147→        bool behind = headDiff < -90 || headDiff >= 90;
+   609→ 17148→        if (headDiff < -75) headDiff = -75;
+   610→ 17149→        if (headDiff >= 75) headDiff = +75;
+   611→ 17150→        yBodyRot = yRot - headDiff;
+   612→ 17151→        if (headDiff * headDiff > 50 * 50) {
+   613→ 17152→                yBodyRot += headDiff * 0.2f;
+   614→ 17153→        }
+   615→ 17154→
+   616→ 17155→        if (behind) {
+   617→ 17156→                walkSpeed *= -1;
+   618→ 17157→        }
+   619→ 17158→        while (yRot - yRotO < -180)
+   620→ 17159→                yRotO -= 360;
+   621→ 17160→        while (yRot - yRotO >= 180)
+   622→ 17161→                yRotO += 360;
+   623→ 17162→
+   624→ 17163→        while (yBodyRot - yBodyRotO < -180)
+   625→ 17164→                yBodyRotO -= 360;
+   626→ 17165→        while (yBodyRot - yBodyRotO >= 180)
+   627→ 17166→                yBodyRotO += 360;
+   628→ 17167→
+   629→ 17168→        while (xRot - xRotO < -180)
+   630→ 17169→                xRotO -= 360;
+   631→ 17170→        while (xRot - xRotO >= 180)
+   632→ 17171→                xRotO += 360;
+   633→ 17172→        animStep += walkSpeed;
+   634→ 17173→}
+   635→ 17174→```
+   636→ 17175→
+   637→ 17176→**Port note (browser adaptation):**
+   638→ 17177→1. **Arrow-in-body countdown:** `if (arrowCount > 0)` — when you have stuck arrows, `removeArrowTime` counts down from 60 ticks (`20*3`), and every time it hits 0, one arrow is removed (`arrowCount--`). So arrows visibly disappear from the mob's body every 3 seconds. **Previous port removed all arrows at once.**
+   639→ 17178→2. **Network lerp (`lSteps > 0`):** this is the client-side position/rotation lerp from `lerpTo()` packets. Each tick: `pos += (target - pos) / lSteps`, with angle wrap handling (`while yrd < -180: += 360`), then `lSteps--`, then `setPos` + `setRot`. When `lSteps` reaches 0, the lerp is done. **For a single-player port this is dead code** (no packets arrive), but keep the structure.
+   640→ 17179→3. **`aiStep()` call** — THE AI tick. See §27.8. This is where `xxa`/`yya` get set (via `updateAi`/`newServerAiStep`), `jumping` gets evaluated, `travel(xxa, yya)` runs, and pushing happens. **Previous port called `aiStep` but then ran its own movement — double-applied.**
+   641→ 17180→4. **`updateWalkAnim()`** — separate method (advances walk animation phase). Keep the call.
+   642→ 17181→5. **Body rotation lerp — the "head follows body, body follows movement" mechanic:**
+   643→ 17182→   - `sideDist = sqrt((x-xo)² + (z-zo)²)` — horizontal distance moved this tick (using `xo`/`zo` from `baseTick`).
+   644→ 17183→   - If `sideDist <= 0.05`: not walking (commented `animStep = 0`), `tRun=0`, `walkSpeed=0`, `yBodyRotT = yBodyRot` (no change).
+   645→ 17184→   - Else: `tRun = 1`, `walkSpeed = sideDist * 3`, `yBodyRotT = atan2(zd, xd) * RADDEG - 90` (body faces movement direction).
+   646→ 17185→   - If attacking (`attackAnim > 0`): `yBodyRotT = yRot` (body snaps to face the head's direction during attack swing).
+   647→ 17186→   - If airborne (`!onGround`): `tRun = 0` (run animation pauses mid-jump).
+   648→ 17187→   - `run += (tRun - run) * 0.3f` — run animation lerps toward tRun at 30%/tick.
+   649→ 17188→   - `yBodyRotD = yBodyRotT - yBodyRot` (with wrap), `yBodyRot += yBodyRotD * 0.3f` — body rotation lerps toward movement-facing at 30%/tick.
+   650→ 17189→   - `headDiff = yRot - yBodyRot` (with wrap); `behind = |headDiff| >= 90`. Clamp `headDiff` to [-75, 75]. `yBodyRot = yRot - headDiff` (recompute body so head is within 75 deg of body). If `headDiff² > 50²` (i.e. |headDiff| > 50), `yBodyRot += headDiff * 0.2f` (body slowly catches up to a sharp head turn).
+   651→ 17190→   - If `behind`, `walkSpeed *= -1` (walk animation plays backward when walking "backward" relative to body facing — moonwalk).
+   652→ 17191→   - Then **normalize the rotation old-values** so the next tick's delta is shortest-path: `while (yRot - yRotO < -180) yRotO -= 360; while (>= 180) yRotO += 360;` and same for `yBodyRotO` and `xRotO`. **Previous port skipped these wrap-normalizations -> mobs spun the long way around.**
+   653→ 17192→6. `animStep += walkSpeed` — advances the walk cycle by `walkSpeed` (= `sideDist * 3` when walking, 0 when idle, negated when "behind"). **This is THE walk animation driver.** `walkSpeed` is local — it's not the `walkingSpeed` field.
+   654→ 17193→
+   655→ 17194→**Previous port was WRONG:**
+   656→ 17195→- Arrow countdown removed all arrows instantly.
+   657→ 17196→- Body rotation lerp constants were wrong (used `* 0.1f` instead of `* 0.3f` — the commented-out block at lines 332-336 shows the OLD `0.1f` value was replaced with `0.3f`).
+   658→ 17197→- The `behind`/moonwalk logic (`walkSpeed *= -1`) was missing — mobs always walked forward even when backing up.
+   659→ 17198→- Rotation `yRotO`/`yBodyRotO`/`xRotO` wrap-normalizations were missing -> 360 deg flips.
+   660→ 17199→- `walkSpeed = sideDist * 3` was `sideDist` (no `* 3`) -> walk cycle ran 3x too slow.
+   661→ 17200→
+   662→ 17201→---
+   663→ 17202→
+   664→ 17203→### 27.7 — Mob::travel (Mob.cpp:558-626) — EXACT
+   665→ 17204→
+   666→ 17205→```cpp
+   667→ 17206→void Mob::travel( float xa, float ya )
+   668→ 17207→{
+   669→ 17208→        if (isInWater()) {
+   670→ 17209→                float yo = y;
+   671→ 17210→                moveRelative(xa, ya, 0.02f);
+   672→ 17211→                move(xd, yd, zd);
+   673→ 17212→
+   674→ 17213→                xd *= 0.80f;
+   675→ 17214→                yd *= 0.80f;
+   676→ 17215→                zd *= 0.80f;
+   677→ 17216→                yd -= 0.02f;
+   678→ 17217→
+   679→ 17218→                if (horizontalCollision && isFree(xd, yd + 0.6f - y + yo, zd)) {
+   680→ 17219→                        yd = 0.3f;
+   681→ 17220→                }
+   682→ 17221→        } else if (isInLava()) {
+   683→ 17222→                float yo = y;
+   684→ 17223→                moveRelative(xa, ya, 0.02f);
+   685→ 17224→                move(xd, yd, zd);
+   686→ 17225→                xd *= 0.50f;
+   687→ 17226→                yd *= 0.50f;
+   688→ 17227→                zd *= 0.50f;
+   689→ 17228→                yd -= 0.02f;
+   690→ 17229→
+   691→ 17230→                if (horizontalCollision && isFree(xd, yd + 0.6f - y + yo, zd)) {
+   692→ 17231→                        yd = 0.3f;
+   693→ 17232→                }
+   694→ 17233→        } else {
+   695→ 17234→                float friction = 0.91f;
+   696→ 17235→                if (onGround) {
+   697→ 17236→                        friction = 0.6f * 0.91f;
+   698→ 17237→                        int t = level->getTile(Mth::floor(x), Mth::floor(bb.y0 - 0.5f), Mth::floor(z));
+   699→ 17238→                        if (t > 0) {
+   700→ 17239→                                friction = Tile::tiles[t]->friction * 0.91f;
+   701→ 17240→                        }
+   702→ 17241→                }
+   703→ 17242→
+   704→ 17243→                float friction2 = (0.6f * 0.6f * 0.91f * 0.91f * 0.6f * 0.91f) / (friction * friction * friction);
+   705→ 17244→                moveRelative(xa, ya, (onGround ? walkingSpeed * friction2 : flyingSpeed));
+   706→ 17245→
+   707→ 17246→                friction = 0.91f;
+   708→ 17247→                if (onGround) {
+   709→ 17248→                        friction = 0.6f * 0.91f;
+   710→ 17249→                        int t = level->getTile(Mth::floor(x), Mth::floor(bb.y0 - 0.5f), Mth::floor(z));
+   711→ 17250→                        if (t > 0) {
+   712→ 17251→                                friction = Tile::tiles[t]->friction * 0.91f;
+   713→ 17252→                        }
+   714→ 17253→                }
+   715→ 17254→                //@todo: make it easier to climb ladders
+   716→ 17255→                if (onLadder()) {
+   717→ 17256→                        this->fallDistance = 0;
+   718→ 17257→                        if (yd < -0.15) yd = -0.15f;
+   719→ 17258→                        if (isSneaking() && yd < 0) yd = 0;
+   720→ 17259→                }
+   721→ 17260→
+   722→ 17261→                move(xd, yd, zd);
+   723→ 17262→
+   724→ 17263→                //@todo: make it easier to climb ladders
+   725→ 17264→                if (horizontalCollision && onLadder()) {
+   726→ 17265→                        yd = 0.2f;
+   727→ 17266→                }
+   728→ 17267→
+   729→ 17268→                yd -= 0.08f;
+   730→ 17269→                yd *= 0.98f;
+   731→ 17270→                xd *= friction;
+   732→ 17271→                zd *= friction;
+   733→ 17272→        }
+   734→ 17273→
+   735→ 17274→}
+   736→ 17275→```
+   737→ 17276→
+   738→ 17277→**Port note (browser adaptation):**
+   739→ 17278→1. **THREE branches: water, lava, land.** No flying branch here — `Player::travel` overrides this whole method for flying. **Previous port had an `abilities.flying` branch inside `Mob::travel` — that's fabricated; it lives in `Player::travel`.**
+   740→ 17279→2. **Water branch:**
+   741→ 17280→   - `yo = y` (save pre-move height for the "swim up" check).
+   742→ 17281→   - `moveRelative(xa, ya, 0.02f)` — swim acceleration = 0.02.
+   743→ 17282→   - `move(xd, yd, zd)` — apply current velocity.
+   744→ 17283→   - `xd *= 0.80; yd *= 0.80; zd *= 0.80` — water drag (20% loss/tick).
+   745→ 17284→   - `yd -= 0.02` — buoyancy (gravity in water is 0.02, not 0.08).
+   746→ 17285→   - **Auto-swim-up:** `if (horizontalCollision && isFree(xd, yd + 0.6 - y + yo, zd)) yd = 0.3`. If you bumped a wall horizontally AND the space 0.6 above your old position is free, kick up at 0.3/tick. This is what makes mobs "climb" out of water at edges.
+   747→ 17286→3. **Lava branch:** identical to water EXCEPT drag is `0.50` (50% loss/tick — lava is much stickier). Buoyancy still 0.02.
+   748→ 17287→4. **Land branch — THE critical formula:**
+   749→ 17288→   - Compute ground friction `friction`: default `0.91` (air); if `onGround`, start at `0.6 * 0.91 = 0.546`, then look up the tile 0.5 below `bb.y0` (`floor(bb.y0 - 0.5)`) and if non-air, replace with `Tile::tiles[t]->friction * 0.91`. (e.g. ice friction is 0.98 -> `0.98 * 0.91`; normal block friction 0.6 -> `0.6 * 0.91`.)
+   750→ 17289→   - `friction2 = (0.6 * 0.6 * 0.91 * 0.91 * 0.6 * 0.91) / (friction³)` — this is the **"slipperiness ratio"** that compensates for the fact that the player's input is applied via `moveRelative` then `move` applies friction once. The numerator is the "reference" friction for a default block (`0.6³ * 0.91³` ~ 0.101), and dividing by the actual `friction³` means: if the ground is slipperier than default, `friction2 > 1` and you accelerate MORE (sliding); if stickier, `friction2 < 1` and you accelerate less. **This is the exact MC formula. Previous port used `walkingSpeed * friction2` but computed `friction2` wrong (often just `1/friction` not `1/friction³`).**
+   751→ 17290→   - `moveRelative(xa, ya, onGround ? walkingSpeed * friction2 : flyingSpeed)` — `walkingSpeed` is a per-mob field (default 0.1 for Mob, see Mob.h). `flyingSpeed` is also per-mob (default 0.02). **On the ground, the acceleration is scaled by `friction2` to pre-compensate for the slip. In the air, just `flyingSpeed`.**
+   752→ 17291→   - **Recompute `friction` again** (lines 598-605) — same code as above. This is because `move()` may have changed `onGround` (you walked off an edge). The second computation is the one actually used for `xd *= friction; zd *= friction` at the end. **Previous port computed friction once and used the pre-move value — mobs kept the "ice slip" for one tick after leaving ice.**
+   753→ 17292→   - **Ladder:** `if (onLadder())`: `fallDistance = 0` (no fall damage), `if (yd < -0.15) yd = -0.15` (clamp descent to 0.15/tick), `if (isSneaking() && yd < 0) yd = 0` (sneaking on ladder = stop).
+   754→ 17293→   - `move(xd, yd, zd)`.
+   755→ 17294→   - **Ladder climb kick:** `if (horizontalCollision && onLadder()) yd = 0.2` (bumping a wall while on a ladder pushes you up — auto-climb).
+   756→ 17295→   - **Gravity & air drag:** `yd -= 0.08` (gravity per tick, NOT per second), `yd *= 0.98` (air drag on vertical), `xd *= friction; zd *= friction` (ground/air friction on horizontal).
+   757→ 17296→
+   758→ 17297→5. **`walkingSpeed` and `flyingSpeed` are PER-MOB FIELDS**, modified by `getWalkingSpeedModifier()` in `aiStep` (see §27.8). `PathfinderMob::getWalkingSpeedModifier` multiplies by 2 if `fleeTime > 0`. **Previous port treated them as constants.**
+   759→ 17298→
+   760→ 17299→6. **Constants that MUST be preserved EXACTLY:**
+   761→ 17300→   - Water: `moveRelative speed=0.02`, drag=`0.80`, buoyancy=`0.02`, swim-up kick=`0.3`, swim-up check height=`0.6`.
+   762→ 17301→   - Lava: `moveRelative speed=0.02`, drag=`0.50`, buoyancy=`0.02`, swim-up kick=`0.3`, swim-up check height=`0.6`.
+   763→ 17302→   - Land: air friction=`0.91`, ground friction base=`0.6*0.91`, `friction2` numerator=`0.6*0.6*0.91*0.91*0.6*0.91`, gravity=`0.08`, air vertical drag=`0.98`, ladder descent clamp=`-0.15`, ladder climb kick=`0.2`.
+   764→ 17303→   - `bb.y0 - 0.5f` — the tile lookup is HALF a block below the bounding box floor (this catches the block you're standing ON, not the air at your feet).
+   765→ 17304→
+   766→ 17305→**Previous port was WRONG (this is the BIG one):**
+   767→ 17306→- Entry 2's "Mob::travel" (MODLOG.md:104-163) is almost ENTIRELY FABRICATED. It references `this->isAlive()`, `isControlledByLocalInstance()`, `getWalkingSpeedModifier()`, `abilities.flying`, `walkAnimSpeed`, `xOld`/`zOld`, `Math::clamp`, `flySpeed`, `moveControl` — NONE of which appear in the actual `Mob::travel` body. The real method is the water/lava/land three-branch physics above. The Entry 2 version appears to be a mix of `Player::travel` and invented "Minecraft Java edition" physics. **The ES6 port must be rebuilt from §27.7, not Entry 2.**
+   768→ 17307→- `friction2` formula was wrong (the cube term was missing).
+   769→ 17308→- Friction was computed once, not twice (pre- and post-move).
+   770→ 17309→- Ladder logic (`onLadder()`, `-0.15` clamp, `0.2` climb kick, sneak-stops-on-ladder) was entirely missing.
+   771→ 17310→- Water/lava branches were missing — mobs couldn't swim.
+   772→ 17311→- The `isFree(xd, yd + 0.6 - y + yo, zd)` auto-swim-up check was missing.
+   773→ 17312→
+   774→ 17313→---
+   775→ 17314→
+   776→ 17315→### 27.8 — Mob::aiStep (Mob.cpp:688-757) — EXACT
+   777→ 17316→
+   778→ 17317→```cpp
+   779→ 17318→void Mob::aiStep()
+   780→ 17319→{
+   781→ 17320→        //@todo? 30 lines of code here in java version
+   782→ 17321→
+   783→ 17322→        TIMER_PUSH("ai");
+   784→ 17323→        if (isImmobile()) {
+   785→ 17324→                jumping = false;
+   786→ 17325→                xxa = 0;
+   787→ 17326→                yya = 0;
+   788→ 17327→                yRotA = 0;
+   789→ 17328→        } else {
+   790→ 17329→                if (!interpolateOnly()) {
+   791→ 17330→                        if (useNewAi()) {
+   792→ 17331→                                TIMER_PUSH("newAi");
+   793→ 17332→                                newServerAiStep();
+   794→ 17333→                                TIMER_POP();
+   795→ 17334→                        }
+   796→ 17335→                        else {
+   797→ 17336→                                TIMER_PUSH("oldAi");
+   798→ 17337→                                updateAi();
+   799→ 17338→                                TIMER_POP();
+   800→ 17339→                        }
+   801→
+   802→[showing lines 16540-17339 of 18114; use offset=17340 with limit to continue reading]
