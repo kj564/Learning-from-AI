@@ -237,23 +237,70 @@
   }
   #inventory.hidden { display: none; }
   #inventory h2 { font-size: 18px; margin-bottom: 12px; text-shadow: 2px 2px 0 #000; letter-spacing: 1px; }
+  /* §TouchIngameBlockSelectionScreen.cpp:40-47 — BorderPixels=4, BlockPixels=24,
+     ItemSize=BlockPixels+2*BorderPixels=32, Bx=10, By=6 (frame border). */
   .inv-grid {
-    display: grid; grid-template-columns: repeat(8, 54px); gap: 4px; padding: 14px;
-    background: rgba(0,0,0,0.7); border: 2px solid #555; border-radius: 6px;
+    display: grid;
+    grid-template-columns: repeat(8, 32px);  /* ItemSize = 32 (BlockPixels 24 + 2*BorderPixels 4) */
+    gap: 0;
+    padding: 6px;  /* §By = 6 — frame border height (itemframe.png provides the border) */
+    background-image: url('./VoxelCraft/textures/gui/itemframe.png');
+    background-size: 100% 100%;  /* §TouchIngameBlockSelectionScreen.cpp:212 — blit itemframe across grid */
+    background-repeat: no-repeat;
+    background-color: rgba(20, 20, 20, 0.85);
+    border: 0;
+    border-radius: 0;
     max-height: 70vh; overflow-y: auto;
+    image-rendering: pixelated;
   }
   .inv-slot {
-    width: 54px; height: 54px; background: rgba(30,30,30,0.7);
-    border: 2px solid #444; border-radius: 4px; cursor: pointer;
-    display: flex; align-items: center; justify-content: center; position: relative;
+    width: 32px; height: 32px;  /* ItemSize = 32 */
+    background: transparent;
+    border: 0;
+    border-radius: 0;
+    cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    position: relative;
+    padding: 4px;  /* §BorderPixels = 4 */
+    box-sizing: border-box;
   }
-  .inv-slot:hover { border-color: #fff; background: rgba(60,60,60,0.85); }
-  .inv-slot canvas, .inv-slot img { width: 40px; height: 40px; image-rendering: pixelated; object-fit: contain; }
+  .inv-slot:hover { background: rgba(255,255,255,0.12); border: 0; }
+  .inv-slot canvas, .inv-slot img {
+    width: 24px; height: 24px;  /* §BlockPixels = 24 */
+    image-rendering: pixelated; object-fit: contain;
+  }
   .inv-slot .lbl { position: absolute; bottom: -14px; font-size: 9px; opacity: 0; pointer-events: none; white-space: nowrap; }
   .inv-slot:hover .lbl { opacity: 1; }
   .inv-hint { margin-top: 14px; font-size: 12px; opacity: 0.8; text-shadow: 1px 1px 0 #000; }
-  #invClose { margin-top: 16px; padding: 8px 22px; background: #4a9a3a; border: 2px solid #fff; color: #fff; border-radius: 4px; cursor: pointer; font-size: 14px; }
-  #invClose:hover { background: #5cb84a; }
+  /* §TouchIngameBlockSelectionScreen.cpp:100-109 — Done button (top-right, 18x18
+     image button in rujukan). Browser port: small × button at top-right of dialog. */
+  #invClose {
+    position: absolute;
+    top: 14px; right: 14px;
+    width: 32px; height: 32px;
+    padding: 0;
+    background-color: #2c2c2c;
+    background-image: none;
+    border: 2px solid #000;
+    border-radius: 0;
+    color: #fff;
+    font-size: 20px;
+    line-height: 28px;
+    text-align: center;
+    text-shadow: 1px 1px #000;
+    cursor: pointer;
+    z-index: 12;
+  }
+  #invClose:hover {
+    background-color: #3c3c3c;
+    background-image: none;
+    color: #ffffa0;
+  }
+  #invClose:active {
+    background-image: none;
+    color: #a0a0a0;
+    transform: translateY(1px);
+  }
 
 
   /* (Legacy VoxelCraft RP hotbar/hud/toast/button overrides removed in favour of
@@ -368,32 +415,43 @@
     text-shadow: 2px 2px #000;
     font-size: 14px;
   }
+  /* §TouchIngameBlockSelectionScreen.cpp:81-86 — grid rect: 8 columns, ItemSize=32,
+     BlockPixels=24, BorderPixels=4. Rujukan uses itemframe.png border. */
   .inv-grid {
-    /* Nine columns matches the nine-slot hotbar. */
-    grid-template-columns: repeat(9, minmax(38px, 52px));
-    gap: 3px;
-    width: min(100%, 620px);
-    padding: 10px;
-    background-color: #1d1d1d;
-    border: 2px solid #000;
+    grid-template-columns: repeat(8, 32px);  /* §ItemSize = 32 */
+    gap: 0;
+    width: auto;
+    padding: 6px;  /* §By = 6 */
+    background-image: url('./VoxelCraft/textures/gui/itemframe.png');
+    background-size: 100% 100%;
+    background-repeat: no-repeat;
+    background-color: rgba(20, 20, 20, 0.85);
+    border: 0;
     border-radius: 0;
-    box-shadow: 0 4px 0 rgba(0,0,0,.4);
+    box-shadow: none;
+    image-rendering: pixelated;
   }
   .inv-slot {
-    width: 100%;
-    height: auto;
-    aspect-ratio: 1;
-    background-color: #2a2a2a;
-    border: 1px solid #000;
+    width: 32px;  /* §ItemSize = 32 */
+    height: 32px;
+    aspect-ratio: auto;
+    background: transparent;
+    border: 0;
     border-radius: 0;
-    box-shadow: inset 1px 1px rgba(255,255,255,.06);
+    box-shadow: none;
+    padding: 4px;  /* §BorderPixels = 4 */
+    box-sizing: border-box;
     image-rendering: pixelated;
   }
   .inv-slot:hover {
-    background-color: #4a4a4a;
-    border-color: #fff;
+    background: rgba(255,255,255,0.12);
+    border-color: transparent;
   }
-  .inv-slot canvas { width: 80%; height: 80%; image-rendering: pixelated; }
+  .inv-slot canvas {
+    width: 24px;  /* §BlockPixels = 24 */
+    height: 24px;
+    image-rendering: pixelated;
+  }
   .inv-hint {
     width: min(100%, 590px);
     margin: 8px 0 0;
@@ -405,13 +463,38 @@
     font-size: 12px;
     text-shadow: 1px 1px #000;
   }
+  /* §TouchIngameBlockSelectionScreen.cpp:100-109 — Done button is a small 18x18
+     image button at the top-right of the screen. Browser port: small × glyph. */
   #invClose {
-    min-width: 160px;
-    margin-top: 10px;
-    padding: 1px 16px;
+    position: absolute;
+    top: 14px; right: 14px;
+    min-width: 0;
+    width: 32px; height: 32px;
+    margin: 0;
+    padding: 0;
+    background-color: #2c2c2c;
+    background-image: none;
+    border: 2px solid #000;
+    border-radius: 0;
+    color: #fff;
+    font-size: 20px;
+    line-height: 28px;
+    text-align: center;
+    cursor: pointer;
+    z-index: 12;
+  }
+  #invClose:hover {
+    background-color: #3c3c3c;
+    background-image: none;
+    color: #ffffa0;
+  }
+  #invClose:active {
+    background-image: none;
+    color: #a0a0a0;
+    transform: translateY(1px);
   }
   @media (max-width: 600px) {
-    .inv-grid { grid-template-columns: repeat(6, minmax(34px, 1fr)); max-height: 56vh; overflow-y: auto; }
+    .inv-grid { grid-template-columns: repeat(6, 32px); max-height: 56vh; overflow-y: auto; }
     .inv-slot { min-width: 0; }
     #inventory { padding: 10px; }
     #hud { max-width: 65vw; font-size: 10px; }
@@ -893,7 +976,8 @@
   <div id="toast"></div>
 
   <div id="inventory" class="hidden" role="dialog" aria-modal="true" aria-labelledby="inventoryTitle">
-    <h2 id="inventoryTitle">Inventaris — pilih blok untuk slot hotbar aktif</h2>
+    <button id="invClose" class="inv-done" title="Done" aria-label="Done">×</button>
+    <h2 id="inventoryTitle">Select blocks</h2>
     <div class="inv-tabs" role="tablist" aria-label="Kategori inventaris">
       <button type="button" id="inventoryTabAll" role="tab" aria-selected="true" aria-controls="invGrid" class="active" data-inv-filter="all">Semua</button>
       <button type="button" id="inventoryTabNature" role="tab" aria-selected="false" aria-controls="invGrid" tabindex="-1" data-inv-filter="nature">Alam</button>
@@ -901,8 +985,7 @@
       <button type="button" id="inventoryTabMinerals" role="tab" aria-selected="false" aria-controls="invGrid" tabindex="-1" data-inv-filter="minerals">Mineral</button>
     </div>
     <div class="inv-grid" id="invGrid" role="tabpanel" aria-labelledby="inventoryTabAll" tabindex="0"></div>
-    <p class="inv-hint">Klik salah satu blok untuk memasukkannya ke slot hotbar terpilih. Tutup dengan E atau tombol di bawah.</p>
-    <button id="invClose">Tutup (E)</button>
+    <p class="inv-hint">Klik salah satu blok untuk memasukkannya ke slot hotbar terpilih. Tutup dengan E atau tombol di pojok kanan atas.</p>
   </div>
 
 
@@ -3544,20 +3627,8 @@
 
     function updateMobs(dt) {
       window.__mobUpdateCount = (window.__mobUpdateCount || 0) + 1;
-      // VERIFIED MobSpawner::tick — spawn rules
-      if (mobs.length < 4 && Math.random() < 0.008) {
-        const ang = Math.random() * Math.PI * 2;
-        const dist = 12 + Math.random() * 14;
-        const sx = player.pos.x + Math.cos(ang) * dist;
-        const sz = player.pos.z + Math.sin(ang) * dist;
-        for (let y = CHUNK_Y - 1; y >= 0; y--) {
-          const id = world.getBlock(Math.floor(sx), y, Math.floor(sz));
-          if (id && id !== 7 && id !== 8 && id !== 17) {
-            if (id === 2 || id === 3) { spawnChicken(sx + 0.5, y + 1, sz + 0.5); }
-            break;
-          }
-        }
-      }
+      // §Mob spawning now handled by tickMobSpawner() inside the 20 tps physics
+      //   tick loop (see tickMobSpawner below). Random chicken spawn removed.
       // tick mobs at FIXED 20 tps (accumulator, matches player physics)
       mobPhysicsAccumMs += dt * 1000;
       let mobTicks = 0;
@@ -3592,6 +3663,426 @@
         }
       }
     }
+
+    // ============================================================
+    // §LiquidTileDynamic — water flow tick system (1:1 with rujukan)
+    // ============================================================
+    // §LiquidTileDynamic.h:18-91 — tick() computes new depth from neighbors,
+    //   spreads down/horizontally, becomes static when stable.
+    // §LiquidTile.h:78-82 — getTickDelay: water=5 ticks, lava=30 ticks.
+    // §LiquidTile.h:150-153 — getDepth: -1 if not same material, else getData.
+    // §LiquidTile.h:16-21 — getHeight: d>=8 is falling (rendered as 0); d=0 is full.
+    //
+    // Simplification: per-block tick scheduling is replaced by scanning all
+    // loaded chunks near the player every 5 ticks for water blocks. Depth
+    // (data 0..15) is stored per-block in a Map (chunks in this port only
+    // carry 1 byte/block of id data, not the 4-bit Tile::data rujukan uses).
+    const waterDepthData = new Map();   // key "x,y,z" (world coords) → depth 0..15
+    const staticWater = new Set();      // "x,y,z" — skip in tick (became static)
+    let waterTickCounter = 0;
+    const WATER_TICK_DELAY = 5;        // §LiquidTile.h:79 — water getTickDelay = 5
+
+    function waterKey(x, y, z) { return x + ',' + y + ',' + z; }
+
+    // §LiquidTile.h:150-153 — getDepth: -1 if not same material, else getData
+    function getWaterDepth(x, y, z) {
+      if (world.getBlockIfLoaded(x, y, z) !== 17) return -1;
+      const k = waterKey(x, y, z);
+      return waterDepthData.has(k) ? waterDepthData.get(k) : 0;
+    }
+    function setWaterDepth(x, y, z, d) {
+      const k = waterKey(x, y, z);
+      if (d === 0) waterDepthData.delete(k);
+      else waterDepthData.set(k, d);
+      staticWater.delete(k);
+    }
+
+    // §LiquidTileDynamic.h:126-136 — isWaterBlocking: blocks that stop water flow.
+    //   rujukan: solid + doors/signs/ladders/reeds. This port has no
+    //   doors/signs/ladders/reeds in BLOCKS, so the check reduces to `solid`.
+    function isWaterBlocking(x, y, z) {
+      const t = world.getBlockIfLoaded(x, y, z);
+      if (t === 0) return false;       // air
+      if (t === 17) return false;      // water is not blocking itself
+      const def = BLOCKS[t];
+      return def ? !!def.solid : true;
+    }
+
+    // §LiquidTileDynamic.h:119-124 — canSpreadTo: false if same material/lava,
+    //   else !isWaterBlocking.
+    function canSpreadTo(x, y, z) {
+      const t = world.getBlockIfLoaded(x, y, z);
+      if (t === 17) return false;       // same material
+      return !isWaterBlocking(x, y, z);
+    }
+
+    // §LiquidTileDynamic.h:173-185 — trySpreadTo: place water at new depth.
+    function trySpreadTo(x, y, z, depth) {
+      if (canSpreadTo(x, y, z)) {
+        if (world.setBlock(x, y, z, 17)) {
+          setWaterDepth(x, y, z, depth);
+        }
+      }
+    }
+
+    // §LiquidTileDynamic.h:18-91 — tick() per-block. Port: 1:1 logic, only the
+    //   spread-direction simplification omits getSpread/getSlopeDistance (we
+    //   spread to all 4 horizontal neighbors equally instead of using slope
+    //   distance to choose the lowest path).
+    function tickWaterBlock(x, y, z) {
+      const k = waterKey(x, y, z);
+      if (staticWater.has(k)) return;
+
+      const dropOff = 1;  // §LiquidTileDynamic.h:22-23 — water dropOff = 1 (lava = 2)
+      const depth = getWaterDepth(x, y, z);
+      if (depth < 0) return;
+
+      const HORIZONTAL_DIRS = [[-1,0,0],[1,0,0],[0,0,-1],[0,0,1]];
+
+      // §LiquidTileDynamic.h:25-72 — flowing water (depth > 0) recomputes depth
+      if (depth > 0) {
+        let highest = -100;
+        let maxCount = 0;
+        // §LiquidTileDynamic.h:29-32 + 94-102 — getHighest over 4 neighbors
+        for (const [dx, dz] of HORIZONTAL_DIRS) {
+          const d = getWaterDepth(x + dx, y, z + dz);
+          if (d < 0) continue;
+          if (d === 0) maxCount++;
+          const adj = d >= 8 ? 0 : d;
+          if (highest < 0 || adj < highest) highest = adj;
+        }
+
+        // §LiquidTileDynamic.h:34 — newDepth = highest + dropOff
+        let newDepth = highest + dropOff;
+        // §LiquidTileDynamic.h:35-37 — dry up if too far from source
+        if (newDepth >= 8 || highest < 0) newDepth = -1;
+
+        // §LiquidTileDynamic.h:38-42 — water above forces falling depth
+        const above = getWaterDepth(x, y + 1, z);
+        if (above >= 0) {
+          if (above >= 8) newDepth = above;
+          else newDepth = above + 8;
+        }
+        // §LiquidTileDynamic.h:43-50 — 2+ source neighbors + solid/water below = spring
+        if (maxCount >= 2) {
+          if (isWaterBlocking(x, y - 1, z)) {
+            newDepth = 0;
+          } else if (world.getBlockIfLoaded(x, y - 1, z) === 17 && getWaterDepth(x, y, z) === 0) {
+            newDepth = 0;
+          }
+        }
+
+        // §LiquidTileDynamic.h:61-72 — apply newDepth
+        if (newDepth !== depth) {
+          if (newDepth < 0) {
+            // dry up — remove water
+            world.setBlock(x, y, z, 0);
+            waterDepthData.delete(k);
+            staticWater.delete(k);
+            return;
+          } else {
+            setWaterDepth(x, y, z, newDepth);
+          }
+        } else {
+          // §LiquidTileDynamic.h:70-72 — stable → become static (skip future ticks)
+          staticWater.add(k);
+          return;
+        }
+      }
+      // §LiquidTileDynamic.h:73-74 — depth 0 (source) is already stable; setStatic.
+      //   Source blocks remain id=17 with no depth entry. They still spread.
+
+      // §LiquidTileDynamic.h:76-90 — spread to neighbors
+      const curDepth = getWaterDepth(x, y, z);
+      if (curDepth < 0) return;
+
+      // §LiquidTileDynamic.h:76-78 — spread DOWN first (falling water)
+      if (canSpreadTo(x, y - 1, z)) {
+        const below = curDepth >= 8 ? curDepth : curDepth + 8;
+        trySpreadTo(x, y - 1, z, below);
+      } else if (curDepth >= 0 && (curDepth === 0 || isWaterBlocking(x, y - 1, z))) {
+        // §LiquidTileDynamic.h:79-90 — spread HORIZONTALLY (only if not falling freely)
+        let neighbor = curDepth + dropOff;
+        if (curDepth >= 8) neighbor = 1;     // falling water spreads at depth 1
+        if (neighbor >= 8) return;
+        for (const [dx, dz] of HORIZONTAL_DIRS) {
+          trySpreadTo(x + dx, y, z + dz, neighbor);
+        }
+      }
+    }
+
+    // §LiquidTileDynamic.h:104-109 — onPlace adds water to tick list. Simplified
+    //   port: scan all loaded chunks near the player every 5 ticks.
+    function tickWaterSystem() {
+      waterTickCounter++;
+      if (waterTickCounter < WATER_TICK_DELAY) return;
+      waterTickCounter = 0;
+
+      // Scan loaded chunks for water blocks (id 17). Limit to chunks near the
+      // player to keep scan cost bounded (≈7×7 chunk radius = 49 chunks max).
+      const pcx = Math.floor(player.pos.x / CHUNK_X);
+      const pcz = Math.floor(player.pos.z / CHUNK_Z);
+      const RADIUS = 3;
+      for (let dcx = -RADIUS; dcx <= RADIUS; dcx++) {
+        for (let dcz = -RADIUS; dcz <= RADIUS; dcz++) {
+          const chunk = world.getChunk(pcx + dcx, pcz + dcz);
+          if (!chunk) continue;
+          const baseX = chunk.cx * CHUNK_X;
+          const baseZ = chunk.cz * CHUNK_Z;
+          for (let y = 0; y < CHUNK_Y; y++) {
+            for (let lz = 0; lz < CHUNK_Z; lz++) {
+              for (let lx = 0; lx < CHUNK_X; lx++) {
+                if (chunk.get(lx, y, lz) === 17) {
+                  tickWaterBlock(baseX + lx, y, baseZ + lz);
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+    window.__tickWaterSystem = tickWaterSystem;
+    window.__waterDepthData = waterDepthData;
+
+    // ============================================================
+    // §MobSpawner — mob spawning tick system (1:1 with rujukan)
+    // ============================================================
+    // §MobSpawner.h:36 — MIN_SPAWN_DISTANCE = 24
+    // §MobCategory.cpp:9-29 — monster(maxPerLevel=20), creature(maxPerLevel=15)
+    // §Biome.cpp:35-43 — default mob lists:
+    //   Friendlies: Sheep(12,2,3), Pig(10,1,3), Chicken(10,2,4), Cow(8,2,3)
+    //   Enemies:    Spider(8,2,3), Zombie(12,2,4), Skeleton(6,1,3), Creeper(4,1,1)
+    // §MobSpawner.cpp:236-242 — isSpawnPositionOk: solid below, air here, !liquid, air above
+    // §MobFactory.h:10-54 — CreateMob switch (Chicken/Cow/Pig/Sheep/Creeper/Zombie/Skeleton/Spider)
+    const MAX_CREATURES = 15;          // §MobCategory.cpp:17-21 — creature maxPerLevel
+    const MAX_MONSTERS = 20;           // §MobCategory.cpp:9-13 — monster maxPerLevel
+    const MIN_SPAWN_DISTANCE = 24;     // §MobSpawner.h:36
+    let mobSpawnTickCounter = 0;
+
+    // §Biome.cpp:35-43 — default mob lists (mobType, randomWeight, minCount, maxCount)
+    const CREATURE_SPAWN_LIST = [
+      { type: 'sheep',   weight: 12, min: 2, max: 3 },
+      { type: 'pig',     weight: 10, min: 1, max: 3 },
+      { type: 'chicken', weight: 10, min: 2, max: 4 },
+      { type: 'cow',     weight:  8, min: 2, max: 3 },
+    ];
+    const MONSTER_SPAWN_LIST = [
+      { type: 'spider',   weight:  8, min: 2, max: 3 },
+      { type: 'zombie',   weight: 12, min: 2, max: 4 },
+      { type: 'skeleton', weight:  6, min: 1, max: 3 },
+      { type: 'creeper',  weight:  4, min: 1, max: 1 },
+    ];
+    // §Biome.cpp:55-61 — defaultTotalEnemyWeight = 30, defaultTotalFriendlyWeight = 40
+    const TOTAL_FRIENDLY_WEIGHT = 12 + 10 + 10 + 8;  // = 40
+    const TOTAL_ENEMY_WEIGHT    =  8 + 12 +  6 + 4;  // = 30
+
+    // §WeighedRandom::getRandomItem — pick a random mob type by weight
+    function weightedRandom(list, total) {
+      let r = Math.random() * total;
+      for (const entry of list) {
+        r -= entry.weight;
+        if (r <= 0) return entry;
+      }
+      return list[0];
+    }
+
+    // §MobSpawner.cpp:236-242 — isSpawnPositionOk:
+    //   for creature (air material): solid below, air here, !liquid, air above
+    function isSpawnPositionOk(x, y, z) {
+      if (y < 1 || y >= CHUNK_Y - 1) return false;
+      const below = world.getBlockIfLoaded(x, y - 1, z);
+      if (!below || !BLOCKS[below] || !BLOCKS[below].solid) return false;
+      const here = world.getBlockIfLoaded(x, y, z);
+      if (here !== 0) return false;        // must be air
+      const above = world.getBlockIfLoaded(x, y + 1, z);
+      if (above !== 0) return false;       // must be air
+      return true;
+    }
+
+    // §MobSpawner.cpp:113-126 — distance check: spawn >= MIN_SPAWN_DISTANCE from player
+    function isTooCloseToPlayer(x, y, z) {
+      const dx = x - player.pos.x;
+      const dy = y - player.pos.y;
+      const dz = z - player.pos.z;
+      const sd = dx * dx + dy * dy + dz * dz;
+      return sd < MIN_SPAWN_DISTANCE * MIN_SPAWN_DISTANCE;
+    }
+
+    function countCreatures() {
+      let n = 0;
+      for (const m of mobs) if (m.__isCreature) n++;
+      return n;
+    }
+    function countMonsters() {
+      let n = 0;
+      for (const m of mobs) if (m.__isMonster) n++;
+      return n;
+    }
+
+    // Create a simple box-mesh mob — fallback for cow/pig/sheep/monsters.
+    // §MobFactory.h:14-48 — CreateMob switch returns the mob class instance;
+    //   the mesh is built separately (Chicken uses ChickenModel; others use
+    //   simple colored boxes since this port has no per-mob model files).
+    function makeBoxMobMesh(type) {
+      const group = new THREE.Group();
+      const COLORS = {
+        cow:      { body: 0x4a3526, head: 0x3a2515, legs: 0x3a2515 },
+        pig:      { body: 0xe6a6a6, head: 0xe6a6a6, legs: 0xc99595 },
+        sheep:    { body: 0xe0e0e0, head: 0xd0c4b0, legs: 0x6a5a4a },
+        zombie:   { body: 0x4a7a4a, head: 0x5a8a5a, legs: 0x3a2a3a },
+        skeleton: { body: 0xcccccc, head: 0xdddddd, legs: 0xbbbbbb },
+        creeper:  { body: 0x4a8a3a, head: 0x4a8a3a, legs: 0x3a6a2a },
+        spider:   { body: 0x3a2a2a, head: 0x4a3a3a, legs: 0x2a1a1a },
+      };
+      const c = COLORS[type] || COLORS.pig;
+      const matBody = new THREE.MeshLambertMaterial({ color: c.body });
+      const matHead = new THREE.MeshLambertMaterial({ color: c.head });
+      const matLegs = new THREE.MeshLambertMaterial({ color: c.legs });
+
+      if (type === 'spider') {
+        const body = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.4, 0.9), matBody);
+        body.position.set(0, 0.35, 0); group.add(body);
+        const head = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.3, 0.4), matHead);
+        head.position.set(0, 0.35, 0.5); group.add(head);
+        for (const dx of [-0.5, 0.5]) for (const dz of [-0.4, 0.4]) {
+          const leg = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.1, 0.5), matLegs);
+          leg.position.set(dx, 0.1, dz); group.add(leg);
+        }
+      } else if (type === 'creeper') {
+        const body = new THREE.Mesh(new THREE.BoxGeometry(0.6, 1.2, 0.4), matBody);
+        body.position.set(0, 0.7, 0); group.add(body);
+        const head = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.6, 0.4), matHead);
+        head.position.set(0, 1.6, 0); group.add(head);
+        for (const x of [-0.25, 0.25]) for (const z of [-0.2, 0.2]) {
+          const leg = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.3, 0.2), matLegs);
+          leg.position.set(x, 0.15, z); group.add(leg);
+        }
+      } else if (type === 'zombie' || type === 'skeleton') {
+        // Biped: vertical body, head on top, arms + legs
+        const body = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.8, 0.3), matBody);
+        body.position.set(0, 0.6, 0); group.add(body);
+        const head = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.4, 0.3), matHead);
+        head.position.set(0, 1.2, 0); group.add(head);
+        const armL = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.6, 0.15), matBody);
+        armL.position.set(-0.35, 0.6, 0); group.add(armL);
+        const armR = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.6, 0.15), matBody);
+        armR.position.set(0.35, 0.6, 0); group.add(armR);
+        const legL = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.6, 0.2), matLegs);
+        legL.position.set(-0.15, 0.15, 0); group.add(legL);
+        const legR = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.6, 0.2), matLegs);
+        legR.position.set(0.15, 0.15, 0); group.add(legR);
+      } else {
+        // Quadruped (cow/pig/sheep): horizontal body, head forward
+        const SIZES = {
+          cow:   { body: [1.0, 0.7, 0.5], head: [0.4, 0.4, 0.4] },
+          pig:   { body: [0.9, 0.6, 0.5], head: [0.4, 0.4, 0.4] },
+          sheep: { body: [0.9, 0.7, 0.5], head: [0.35, 0.35, 0.35] },
+        };
+        const sz = SIZES[type] || SIZES.pig;
+        const body = new THREE.Mesh(new THREE.BoxGeometry(...sz.body), matBody);
+        const head = new THREE.Mesh(new THREE.BoxGeometry(...sz.head), matHead);
+        body.position.set(0, 0.55, 0); group.add(body);
+        head.position.set(0, 0.65, 0.45); group.add(head);
+        for (const x of [-0.3, 0.3]) for (const z of [-0.2, 0.2]) {
+          const leg = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.4, 0.18), matLegs);
+          leg.position.set(x, 0.2, z); group.add(leg);
+        }
+      }
+      return group;
+    }
+
+    // §MobFactory.h:10-54 — CreateMob switch. Chicken uses the existing class;
+    //   cow/pig/sheep use Animal; monsters use Mob directly.
+    function createMobOfType(type, level) {
+      if (type === 'chicken') return MobFactory.createChicken(level);
+      if (type === 'zombie' || type === 'skeleton' || type === 'creeper' || type === 'spider') {
+        return new Mob(level);
+      }
+      // cow / pig / sheep
+      return new Animal(level);
+    }
+
+    // §MobSpawner.cpp:264-276 — addMob: moveTo + addEntity
+    function spawnMob(type, x, y, z, yRot) {
+      const mob = createMobOfType(type, null);
+      mob.setPos(x + 0.5, y, z + 0.5);
+      if (yRot === undefined) yRot = Math.random() * Math.PI * 2;
+      mob.yRot = yRot;
+      // attach mesh
+      let mesh;
+      if (type === 'chicken') {
+        mesh = makeVanillaChickenModel() || makeChickenFallback();
+      } else {
+        mesh = makeBoxMobMesh(type);
+      }
+      mesh.position.set(x + 0.5, y, z + 0.5);
+      mesh.rotation.y = yRot;
+      scene.add(mesh);
+      mob.mesh = mesh;
+      mob.bones = mesh.userData?.bones || null;
+      mob.body = mesh.userData?.bones?.get('body') || mesh.userData?.fallbackBody || mesh;
+      // tag for mob counting + despawn rules
+      mob.__mobType = type;
+      mob.__isCreature = (type === 'chicken' || type === 'cow' || type === 'pig' || type === 'sheep');
+      mob.__isMonster  = (type === 'zombie' || type === 'skeleton' || type === 'creeper' || type === 'spider');
+      mobs.push(mob);
+      return mob;
+    }
+    window.__spawnMob = spawnMob;
+
+    // §MobSpawner.cpp:28-172 — tick(level, spawnEnemies, spawnFriendlies)
+    function tickMobSpawner() {
+      // §MobSpawner.cpp:32-34 — only tick if at least one flag is set (browser port:
+      //   both flags are always considered — friendly spawn in day, enemy at night)
+      mobSpawnTickCounter++;
+      if (mobSpawnTickCounter < 20) return;   // §task: every 20 ticks = 1 second
+      mobSpawnTickCounter = 0;
+
+      // §MobSpawner.cpp:75-77 — skip if both categories are at capacity
+      const creatures = countCreatures();
+      const monsters = countMonsters();
+      if (creatures >= MAX_CREATURES && monsters >= MAX_MONSTERS) return;
+
+      // §MobSpawner.cpp:42-64 — spawn around player within 128 blocks (radius 8 chunks)
+      // §MobSpawner.cpp:93-167 — try up to 4 cluster attempts per tick
+      for (let attempt = 0; attempt < 4; attempt++) {
+        const ang = Math.random() * Math.PI * 2;
+        const dist = MIN_SPAWN_DISTANCE + Math.random() * (128 - MIN_SPAWN_DISTANCE);
+        const sx = Math.floor(player.pos.x + Math.cos(ang) * dist);
+        const sz = Math.floor(player.pos.z + Math.sin(ang) * dist);
+        // Find top non-air, non-water block
+        let topY = -1;
+        for (let y = CHUNK_Y - 1; y >= 1; y--) {
+          const id = world.getBlockIfLoaded(sx, y, sz);
+          if (id && id !== 17) { topY = y; break; }
+        }
+        if (topY < 1) continue;
+
+        // §MobSpawner.cpp:236-242 — isSpawnPositionOk: solid below, air here, air above
+        if (!isSpawnPositionOk(sx, topY + 1, sz)) continue;
+
+        // §MobSpawner.cpp:113-126 — distance check (>= MIN_SPAWN_DISTANCE from player)
+        if (isTooCloseToPlayer(sx + 0.5, topY + 1, sz + 0.5)) continue;
+
+        // §task: monsters spawn only at night (skyDarken >= 4); creatures spawn in day
+        let spawnType = null;
+        const night = skyDarkenLevel >= 4;
+        if (night && monsters < MAX_MONSTERS && Math.random() < 0.6) {
+          spawnType = weightedRandom(MONSTER_SPAWN_LIST, TOTAL_ENEMY_WEIGHT).type;
+        } else if (creatures < MAX_CREATURES) {
+          spawnType = weightedRandom(CREATURE_SPAWN_LIST, TOTAL_FRIENDLY_WEIGHT).type;
+        }
+        if (!spawnType) continue;
+
+        // §MobSpawner.cpp:158 — addMob: spawn at (xx, yy, zz, random*360, 0, false)
+        spawnMob(spawnType, sx, topY + 1, sz, Math.random() * Math.PI * 2);
+        break;
+      }
+    }
+    window.__tickMobSpawner = tickMobSpawner;
+    window.__countCreatures = countCreatures;
+    window.__countMonsters = countMonsters;
+
     window.__mobs = mobs;
     window.__spawnChicken = spawnChicken;
     window.__Chicken = Chicken;
@@ -3696,7 +4187,7 @@
     // renderItemCatalog removed — MCPE 2013 has no item icon catalog, only block inventory.
     function buildInventory(filter = activeInventoryFilter) {
       activeInventoryFilter = filter;
-      inventoryHintEl.textContent = 'Klik salah satu blok untuk memasukkannya ke slot hotbar terpilih. Tutup dengan E atau tombol di bawah.';
+      inventoryHintEl.textContent = 'Klik salah satu blok untuk memasukkannya ke slot hotbar terpilih. Tutup dengan E atau tombol di pojok kanan atas.';
       invGridEl.innerHTML = '';
       const allowedIds = inventoryFilterSets[filter];
       invGridEl.removeAttribute('aria-label');
@@ -3705,17 +4196,22 @@
         if (!def || (allowedIds && !allowedIds.has(id))) continue;
         const slot = document.createElement('div');
         slot.className = 'inv-slot';
+        // §TouchIngameBlockSelectionScreen.cpp:41 — BlockPixels = 24 (icon size).
+        // Canvas is drawn at 24x24 then CSS scales 1:1 (no upscale) to fit the
+        // 24px content area inside the 32px slot (24 + 2*BorderPixels=4).
         const c = document.createElement('canvas');
-        c.width = 40; c.height = 40;
+        c.width = 24; c.height = 24;
         const cx = c.getContext('2d');
         cx.imageSmoothingEnabled = false;
-        drawTilePreview(cx, def.side, 40);
+        drawTilePreview(cx, def.side, 24);
         slot.appendChild(c);
         const lbl = document.createElement('div');
         lbl.className = 'lbl'; lbl.textContent = def.name;
         slot.appendChild(lbl);
         slot.title = def.name;
         slot.addEventListener('click', () => {
+          // §TouchIngameBlockSelectionScreen.cpp:169-189 — addItem: moveToSelectionSlot(0, itemId) + play sound.
+          // Browser port: assign to the selected hotbar slot + toast (no audio).
           HOTBAR[selectedSlot] = { type: 'block', id, label: BLOCKS[id]?.name || 'Blok' };
           voxelEngine.inventory.setSlot(selectedSlot, { itemKey: runtimeBlockKey(id), count: 64, maxStackSize: 64 });
           buildHotbar();
@@ -4962,6 +5458,12 @@
           // in the 60fps render loop, or it runs 3x too fast.
           tickMiningTick();
           checkTouchDestroy();
+          // §LiquidTileDynamic.h:18 — water flow tick (every 5 game ticks).
+          // §MobSpawner.cpp:28 — mob spawning tick (every 20 game ticks).
+          // Both run inside the 20 tps physics tick loop so they advance
+          // exactly one game tick per iteration, not 60fps frame counts.
+          tickWaterSystem();
+          tickMobSpawner();
         }
       }
 
