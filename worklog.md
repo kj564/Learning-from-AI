@@ -3212,3 +3212,41 @@ Stage Summary:
 - Game is now PLAYABLE on mobile — touch "Start Game" → D-pad + look controls
 - Still need: TouchStartMenuScreen layout, TouchIngameBlockSelectionScreen,
   flying D-pad sprite toggle, mobile pause button
+
+---
+Task ID: 22
+Agent: Z.ai Code (orchestrator)
+Task: Day/night formula 1:1 with rujukan NormalDayCycleDimension
+
+Work Log:
+- RE phase (read ALL day/night source files completely):
+  - NormalDayCycleDimension.h:13-17 — getTimeOfDay formula (blend of linear + cosine)
+  - Level.cpp:1163-1170 — getSkyDarken (block brightness 0-8)
+  - Level.cpp:1172-1192 — getSkyColor (sky background, 0x3070ff, clamp 0.75)
+  - Dimension.cpp:66-73 — brightnessRamp (converts skyDarken to float)
+  - Dimension.cpp:78-92 — getSunriseColor (sunset/sunrise orange tint)
+  - Dimension.cpp:94-107 — getFogColor (fogColor = 0x80daff)
+  - Level.cpp:1194-1230 — getCloudColor (0xffffff with brightness curve)
+  - Level.cpp:1240-1243 — getSunAngle (td * PI * 2)
+
+- Implementation: replaced entire day/night block in animate() with rujukan formulas:
+  1. getTimeOfDay: td = worldTime - 0.25, wrap, then 1-(cos+1)*0.5 blend with /3
+  2. getSkyDarken: 1 - (cos(td*2π)*2+0.5), clamp [0,0.80], *11 → 0..8
+  3. brightnessRamp: ((1-v)/(v*3+1))*(1-0.05)+0.05*3 → block brightness
+  4. getSkyColor: cos(td*2π)*2+0.5, clamp [0,0.75], 0x3070ff * br
+  5. getSunriseColor: cos(td*2π) in [-0.4,0.4] → orange tint mix
+  6. Stars/vignette: max(0, (skyDarken-4)/4)
+
+- Verified at noon (worldTime=0.5):
+  td=0.2155, br=0.94 clamped to 0.75
+  skyColor = rgb(36, 84, 191) — matches rujukan EXACTLY
+  (MCPE 2013 sky IS intentionally darker at noon due to 0.75 cap — Level.cpp:1177)
+
+- Commit c434416d + push to origin/main
+- Tests: 213 pass, 0 fail
+
+Stage Summary:
+- Day/night cycle now 1:1 with rujukan NormalDayCycleDimension
+- All 6 rujukan formulas transcribed exactly:
+  getTimeOfDay, getSkyDarken, brightnessRamp, getSkyColor, getSunriseColor, getCloudColor
+- getCloudColor was already 1:1 (verified in Task 14, unchanged)
