@@ -2110,3 +2110,110 @@ Stage Summary:
   2. Tools — pickaxe/axe/shovel destroySpeed multipliers (Item::getDestroySpeed)
   3. Survival mode toggle — gameMode switch + hearts/damage
   4. Mob spawner — full MobSpawner + Animal wandering (PathfinderMob.cpp)
+
+---
+Task ID: 14
+Agent: Z.ai Code (orchestrator)
+Task: Audit fundamental — cek 1:1 dengan rujukan MCPE 2013 (Rule Zero)
+
+Work Log:
+- Audit fundamental line-by-line, baca source rujukan asli:
+  - Timer.h:116 + Minecraft.cpp:153 → Timer(20), MAX_TICKS_PER_UPDATE=10 ✓
+  - SharedConstants.h:28 → TicksPerSecond=20 ✓
+  - Level.h:74 → TICKS_PER_DAY = 20*60*16 = 19200 → 960s = 16min ✓
+  - LevelConstants.h:5-8 → LEVEL_HEIGHT=128, CHUNK_WIDTH=16, CHUNK_DEPTH=16 ✓
+  - Level.h:70-71 → DEPTH=128, SEA_LEVEL=63 ✓
+  - RandomLevelSource.cpp:68 → waterHeight = DEPTH - 64 = 64 (used in worldgen)
+  - Level.h:73 → MAX_BRIGHTNESS = 15
+  - TileRenderer.cpp:54-57 → c10=0.5 (DOWN), c11=1.0 (UP), c2=0.8 (N/S), c3=0.6 (W/E) ✓
+  - TileRenderer.cpp:1743-2030 → renderFaceDown/Up/North/South/East/West vertex order + UV ✓
+  - Mob.cpp:558-626 → travel land branch (friction2 formula, gravity 0.08, airDrag 0.98) ✓
+  - Mob.cpp:844-847 → jumpFromGround yd=0.42 ✓
+  - Mob.cpp:727-729 → xxa *= 0.98, yya *= 0.98, yRotA *= 0.9 ✓
+  - Player.cpp:364-375 → Player::travel flying override (yd = ydo * 0.6 NOT yd *= 0.6)
+  - LocalPlayer.cpp:168-217 → aiStep (jumpTriggerTime 7-tick window, fly vertical thrust 0.15)
+  - Tile.cpp:161-215 → block hardness values (stone=1.5, dirt=0.5, obsidian=10, etc.) ✓
+  - Tile.cpp:391-395 → getDestroyProgress = (playerDestroySpeed / destroySpeed) / 30 ✓
+  - SurvivalMode.cpp:18-50 → continueDestroyBlock + destroyDelay=5 ✓
+  - CreativeMode.cpp:11-33 → DestructionTickDelay=10 ✓
+  - NormalDayCycleDimension.h → getTimeOfDay formula (blend of linear + smoothstep)
+  - ChickenModel.cpp → all 8 bone coords (head/beak/redThing/body/leg0/leg1/wing0/wing1) ✓
+
+- Audit findings: 15 systems verified 1:1, 7 deviations found
+  VERIFIED 1:1 ✓:
+    1. Per-face brightness (c10/c11/c2/c3)
+    2. FACES vertex order + UV mapping (all 6 faces match renderFace* exactly)
+    3. Texture atlas (flipY=false, NearestFilter, inset 0.01/256)
+    4. Tick rate (TICKS_PER_SECOND=20, TICK_MS=50ms)
+    5. Day length (TICKS_PER_DAY=19200 → 960s = 16min)
+    6. World dimensions (CHUNK_X/Z=16, CHUNK_Y=128)
+    7. Water level (WATER_LEVEL=64)
+    8. Player jump (jumpFromGround = 0.42)
+    9. Gravity/airDrag (yd -= 0.08, yd *= 0.98)
+    10. friction2 formula (0.6*0.6*0.91*0.91*0.6*0.91 / friction^3)
+    11. Input decay (xxa *= 0.98, yya *= 0.98)
+    12. Mob class hierarchy (MobEntity→Mob→PathfinderMob→AgableMob→Animal→Chicken)
+    13. Chicken model bones (all 8 cubes with exact coords from ChickenModel.cpp)
+    14. Block hardness values (all 36 blocks match Tile.cpp setDestroyTime)
+    15. Mining formulas (SurvivalMode + CreativeMode + Tile::getDestroyProgress)
+
+  DEVIATIONS ✗:
+    CRITICAL (broken gameplay):
+      #1. Player::travel flying damping: yd *= 0.6 (multiply AFTER gravity+drag)
+          vs rujukan yd = ydo * 0.6 (OVERWRITE — discards gravity+drag changes)
+          → gravity accumulated in fly mode, player slowly sank
+      #2. Fly vertical thrust MISSING: rujukan LocalPlayer::aiStep adds
+          yd += 0.15 (Space/wantUp), yd -= 0.15 (Shift/wantDown) per tick
+          → browser port had NO vertical control while flying, only WASD
+
+    MEDIUM (deviation but functional):
+      #3. Double-jump fly toggle window: 280ms real-time vs 7-tick counter
+          (7 ticks = 350ms at 20 tps)
+
+    LOW (acceptable browser simplification):
+      #4. Day/night formula: sin(2πt - π/2) vs rujukan blend (tdo + (cos(π*td)+1)/2 - tdo) / 3
+      #5. Per-block lighting: global daylight multiplier vs rujukan Tile::getBrightness per-block
+      #6. AABB collision: substep loop vs rujukan exact clipX/Y/ZCollide
+      #7. lightOpacity scale: 0-15 vs rujukan 0-255 (semantic match)
+
+- Fixed CRITICAL #1 + #2 + MEDIUM #3 in public/minecraft.html:
+  - Replaced movePlayerTick fly branch with 1:1 rujukan Player::travel
+  - Added fly vertical thrust (Space +0.15, Shift -0.15 per tick)
+  - Added jumpTriggerTime 7-tick counter (replaces 280ms real-time)
+  - Added lastSpaceDown edge-detect + mayfly flag
+  - Updated clearPressedKeys to reset new state vars
+
+- Verification (Agent Browser + math check):
+  - Double-tap Space (within 7-tick window) → fly ON ✓
+  - Player hover at y=70.96, vel.y ≈ 0 (no gravity in fly mode) ✓
+  - Hold Space 1s → vel.y = 0.19584 = rujukan y[4] in recurrence y[n+1] = (y[n]+0.15)*0.6 ✓
+  - Hold Shift 1s → descend ~1 block ✓
+  - VLM saw clean rendering, no glitches
+  - 131 tests pass, 0 fail, 508 expect() calls
+
+- Commit 9dd19286 + push to origin/main
+- All 3 workflows SUCCESS:
+  - static.yml #524 → SUCCESS (Pages build/deploy)
+  - rebuild-engine.yml #460 → SUCCESS
+  - pocket-engine-ci.yml #18 → SUCCESS (Kitab Suci integrity)
+
+Stage Summary:
+- Branch: main (commit 9dd19286 pushed to origin)
+- 3 critical fly-mode bugs FIXED 1:1 with rujukan:
+  1. Player::travel flying damping: yd = ydo * 0.6 (overwrite, not multiply)
+     — eliminates gravity in fly mode, player hovers correctly
+  2. Fly vertical thrust: Space +0.15/tick ascend, Shift -0.15/tick descend
+     — enables actual 3D flight, was completely missing before
+  3. Double-jump fly toggle: 7-tick counter (350ms) replaces 280ms real-time
+     — exact rujukan value, edge-detected via lastSpaceDown
+- Audit confirmed fundamentals are 1:1:
+  - All physics constants match rujukan exactly
+  - All FACES vertex/UV match TileRenderer.cpp renderFace* exactly
+  - All block hardness values match Tile.cpp setDestroyTime exactly
+  - All mining formulas match SurvivalMode + CreativeMode + Tile::getDestroyProgress
+  - Day length 16min, tick rate 20tps, world 128-high, water at 64 — all match
+- Remaining LOW-priority deviations (not blocking, may address later):
+  - Day/night formula simplified (sin vs rujukan blend)
+  - Per-block lighting missing (global daylight multiplier only)
+  - AABB collision substep approximation (vs rujukan exact clip)
+  - lightOpacity 0-15 scale (vs rujukan 0-255)
