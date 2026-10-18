@@ -81,8 +81,11 @@
   }
   .slot canvas { width: 16px; height: 16px; image-rendering: pixelated; }
   .slot .num { position: absolute; top: 0; left: 1px; font-size: 7px; color: #fff; text-shadow: 1px 1px 0 #000; line-height: 1; }
-  .slot .name { position: absolute; bottom: -10px; left: 50%; transform: translateX(-50%); font-size: 8px; color: #fff; text-shadow: 1px 1px 0 #000; white-space: nowrap; opacity: 0; transition: opacity .15s; }
-  .slot.active .name { opacity: 1; }
+  /* §Rujukan Gui::renderOnSelectItemNameText (Gui.cpp:652-668): item name
+     shown as TEMPORARY overlay ABOVE hotbar, not persistent under each slot.
+     Hidden here to match rujukan. The item name overlay feature can be added later. */
+  .slot .name { display: none; }
+  .slot.active .name { display: none; }
   .slot .count { position:absolute; right:1px; bottom:0; color:#fff; font-size:7px; line-height:1; text-shadow:1px 1px #000; pointer-events:none; }
   /* §Durability bar — visual indicator of ItemInstance::auxValue wear.
      Shows a thin colored bar under the tool icon, shrinking as auxValue
@@ -132,17 +135,28 @@
   #toast.show { opacity: 1; }
 
   /* Minecraft-inspired main menu */
+  /* §Screen.cpp:130-141 — renderDirtBackground uses gui/background.png
+     tiled at 32px scale with color 0x404040 tint. */
   #overlay {
-    background: linear-gradient(180deg, rgba(0,0,0,.22), rgba(0,0,0,.42));
+    background: url('./VoxelCraft/textures/gui/background.png') repeat;
+    background-size: 64px 64px;
+    background-color: #404040;
     backdrop-filter: none; cursor: default; padding: 24px; overflow-y: auto;
   }
   #overlay .menu-wrap { width: min(440px, 94vw); display:flex; flex-direction:column; align-items:center; margin:auto; }
   /* Browser adaptation of VoxelCraftResourcePack/ui/main_menu.json branding. */
-  #overlay .brand { position:relative; margin-bottom:26px; transform:none; }
-  #overlay h1 { font-family:'Segoe UI', system-ui, sans-serif; font-size:clamp(36px, 6vw, 54px); font-weight:800; line-height:1; letter-spacing:1px; color:#bfff7a; -webkit-text-stroke:0; text-shadow:2px 2px 0 #252525, 4px 4px 0 rgba(0,0,0,.45); margin:0; }
-  #overlay h1 span { color:#bfff7a; }
-  #overlay .edition { font-size:12px; letter-spacing:3px; margin-top:8px; color:#fff; text-shadow:2px 2px #222; }
+  /* §StartMenuScreen.cpp:155-173 — title.png image instead of text.
+     Rujukan renders gui/title.png at center top with y=4, scaled to width/2. */
+  #overlay .brand { position:relative; margin-bottom:26px; transform:none; text-align:center; }
+  #overlay .brand .title-img {
+    width: min(50vw, 256px); height: auto; image-rendering: pixelated;
+    display: block; margin: 0 auto;
+  }
+  #overlay h1 { display:none; }  /* text title replaced by title.png image */
+  #overlay h1 span { display:none; }
+  #overlay .edition { display:none; }  /* no edition text in rujukan */
   #overlay .splash { display:none; }
+
   #overlay .menu-buttons { width:100%; display:grid; gap:8px; }
   #overlay .menu-buttons.hidden { display:none; }
   #overlay .help-options-panel {
@@ -180,7 +194,6 @@
   #overlay .button-row { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
   #overlay .menu-foot { display:flex; justify-content:space-between; gap:12px; width:100%; margin-top:22px; font-size:11px; color:#eee; text-shadow:1px 1px #222; }
   #overlay .menu-foot span:last-child { text-align:right; }
-  #overlay .menu-subtitle { font-size:12px; color:#f1f1f1; margin:0 0 18px; text-shadow:1px 2px #222; }
   #overlay .keys { display:none; }
   #overlay .cta { display:none; }
   #overlay .settings-panel { display:none; width:100%; margin-top:12px; padding:12px; background:#1d1d1d; border:2px solid #000; color:#fff; }
@@ -492,19 +505,8 @@
   }
 
 
-  /* Main menu backdrop — MCPE 2013 title screen uses a panorama; we don't have
-     that texture, so fall back to a dark dirt-block gradient that matches the
-     in-game block palette. */
-  #overlay {
-    background-color: #202020;
-    background-image:
-      linear-gradient(rgba(0, 0, 0, .30), rgba(0, 0, 0, .56)),
-      radial-gradient(ellipse at center, #3a2a1a 0%, #1a1a1a 70%);
-    background-position: center;
-    background-size: cover;
-    background-repeat: no-repeat;
-    image-rendering: pixelated;
-  }
+  /* §Screen.cpp:130-141 — renderDirtBackground uses gui/background.png.
+     The gradient fallback has been replaced with the actual rujukan dirt texture. */
   #overlay .menu-wrap {
     padding: 18px;
     background: rgba(20, 20, 20, .18);
@@ -595,7 +597,9 @@
     align-items: center;
     justify-content: center;
     padding: 18px;
-    background: rgba(0,0,0,.64);
+    /* §Screen.cpp:108-110 — fillGradient(0xc0101010, 0xd0101010) =
+       rgba(16,16,16,0.75) → rgba(16,16,16,0.82) dark gray gradient */
+    background: linear-gradient(rgba(16,16,16,0.75), rgba(16,16,16,0.82));
     color: #fff;
     backdrop-filter: none;
   }
@@ -862,11 +866,16 @@
 
   <div id="overlay" class="hidden">
     <div class="menu-wrap">
+      <!-- §StartMenuScreen.cpp:155-173 — title.png image, NOT text.
+           Rujukan loads gui/title.png (256×64) and renders it at center top, y=4.
+           The title is scaled to fit width/2, maintaining aspect ratio. -->
       <div class="brand">
-        <h1>VOXEL<span>CRAFT</span></h1>
-        <div class="edition">BROWSER EDITION</div>
+        <img src="./VoxelCraft/textures/gui/title.png" alt="Minecraft" class="title-img" />
       </div>
-      <p class="menu-subtitle">A world of blocks awaits.</p>
+      <!-- §StartMenuScreen.cpp:75-89 — rujukan button layout:
+           bHost (Start Game) 160×24 at y=yBase-28
+           bJoin (Join Game)  160×24 at y=yBase
+           bOptions (Options)  78×22 at y=yBase+30 -->
       <div id="mainMenuButtons" class="menu-buttons">
         <button id="playButton">Play Game</button>
         <button id="helpOptionsButton">Help &amp; Options</button>
@@ -1816,6 +1825,7 @@
     let jumpTriggerTime = 0;
     let lastSpaceDown = false;
     const mayfly = true;  // browser port: creative-style, no survival mayfly gating
+    let showDebugHud = false;  // §F3 toggles debug HUD (not in rujukan, browser addition)
     let atlasTexture = null;
     let opaqueMat = null, transparentMat = null;
     const chunkMeshes = new Map(); // key -> {opaque, transparent}
@@ -4398,6 +4408,11 @@
       // movePlayerTick via the 7-tick jumpTriggerTime counter (1:1 with rujukan).
       // The old 280ms real-time window was a browser-only approximation.
       // Keydown just sets keys['Space']=true; the tick loop handles the rest.
+      // §F3 toggles debug HUD (browser addition, not in rujukan)
+      if (e.code === 'F3' && !e.repeat && !wasDown) {
+        e.preventDefault();
+        showDebugHud = !showDebugHud;
+      }
       if (e.code === 'KeyK' && !e.repeat && !wasDown) {
         if (world.save()) toast('Dunia disimpan di browser ini');
       }
@@ -4570,11 +4585,18 @@
       hudTimer += dt;
       if (hudTimer >= 0.2) {
         hudTimer = 0;
-        const clockMinutes = Math.floor((((worldTime % 1) + 1) % 1) * 1440);
-        const clock = `${String(Math.floor(clockMinutes / 60) % 24).padStart(2, '0')}:${String(clockMinutes % 60).padStart(2, '0')}`;
-        const clockIcon = (worldTime > 0.22 && worldTime < 0.78) ? '☀' : '🌙';
-        hudEl.innerHTML =
-          `<span class="hud-brand">VoxelCraft</span> <span class="hud-sep">|</span> Overworld <span class="hud-sep">|</span> XYZ <b>${Math.floor(player.pos.x)}, ${Math.floor(player.pos.y)}, ${Math.floor(player.pos.z)}</b> <span class="hud-sep">|</span> ${clockIcon} <b>${clock}</b> <span class="hud-sep">|</span> Koin: <b>${browserStats.coins}</b> <span class="hud-sep">|</span> ${player.fly ? 'Terbang' : (player.sprinting ? 'Lari' : 'Jalan')} <span class="hud-sep">|</span> Blok: <b>${HOTBAR[selectedSlot]?.label || '?'}</b> <span class="hud-sep">|</span> Hancur: <b>${browserBlocksBroken}</b> <span class="hud-sep">|</span> FPS: <b>${fps}</b>`;
+        // §Rujukan MCPE 2013 Gui::render: in-game HUD shows ONLY hotbar + hearts +
+        // crosshair + vignette + item-name overlay. The big debug text bar is a
+        // browser addition — hidden by default to match rujukan, toggle with F3.
+        if (showDebugHud) {
+          const clockMinutes = Math.floor((((worldTime % 1) + 1) % 1) * 1440);
+          const clock = `${String(Math.floor(clockMinutes / 60) % 24).padStart(2, '0')}:${String(clockMinutes % 60).padStart(2, '0')}`;
+          const clockIcon = (worldTime > 0.22 && worldTime < 0.78) ? '☀' : '🌙';
+          hudEl.innerHTML =
+            `<span class="hud-brand">VoxelCraft</span> <span class="hud-sep">|</span> Overworld <span class="hud-sep">|</span> XYZ <b>${Math.floor(player.pos.x)}, ${Math.floor(player.pos.y)}, ${Math.floor(player.pos.z)}</b> <span class="hud-sep">|</span> ${clockIcon} <b>${clock}</b> <span class="hud-sep">|</span> Koin: <b>${browserStats.coins}</b> <span class="hud-sep">|</span> ${player.fly ? 'Terbang' : (player.sprinting ? 'Lari' : 'Jalan')} <span class="hud-sep">|</span> Blok: <b>${HOTBAR[selectedSlot]?.label || '?'}</b> <span class="hud-sep">|</span> Hancur: <b>${browserBlocksBroken}</b> <span class="hud-sep">|</span> FPS: <b>${fps}</b>`;
+        } else {
+          hudEl.innerHTML = '';
+        }
       }
     }
 
