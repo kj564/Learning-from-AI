@@ -2485,3 +2485,116 @@ Stage Summary:
 - Lesson learned: 'VERIFIED' comments must mean 'I read the source', not
   'I think this is right'. User's challenge was correct — I was still
   guessing on some details while claiming verification.
+
+---
+Task ID: 17
+Agent: Z.ai Code (orchestrator)
+Task: Port tool durability 1:1 dari rujukan MCPE 2013 (Rule Zero enforced)
+
+Work Log:
+- RE phase (Rule Zero — baca source rujukan line-by-line):
+  - ItemInstance.h:97-99 — `int auxValue` field (durability for tools, data for blocks)
+  - ItemInstance.cpp:99-100 — isDamageableItem: getMaxDamage() > 0
+  - ItemInstance.cpp:120-122 — getMaxDamage: Item::items[id]->getMaxDamage()
+  - ItemInstance.cpp:128-138 — hurt(i):
+      if (!isDamageableItem()) return;
+      auxValue += i;
+      if (auxValue > getMaxDamage()) {  // STRICT >, NOT >=
+        count--; if (count < 0) count = 0; auxValue = 0;
+      }
+  - DiggerItem.h:21-25 — mineBlock: itemInstance->hurt(1) (pickaxe/axe/shovel)
+  - DiggerItem.h:67-72 — constructor: setMaxDamage(tier.getUses()); maxStackSize=1
+  - WeaponItem.h:33-37 — mineBlock: itemInstance->hurt(2) (sword)
+  - WeaponItem.h:13-19 — constructor: setMaxDamage(tier.getUses())
+  - SurvivalMode.cpp:57-76 — destroyBlock: item->mineBlock(t,x,y,z); if (count==0) clearSlot
+  - CreativeMode.cpp:31-38 — creativeDestroyBlock: NO mineBlock call (durability intact)
+  - FillingContainer.cpp:485-500 — clearSlot: release(slot) (nulls the slot)
+  - Item.cpp:11-15 — tier uses values: WOOD(59), STONE(131), IRON(250), DIAMOND(1561), GOLD(32)
+
+- Implementation phase:
+  - NEW src/game/items/item-instance.ts (89 lines):
+    - isDamageableItem(tool): tool.tierDef.uses > 0
+    - getMaxDamage(tool): tool.tierDef.uses
+    - hurtStack(stack, amount, tool): EXACT rujukan formula with strict >
+    - getMineBlockHurtAmount(tool): pickaxe/axe/shovel=1, sword=2, bare hand=0
+    - applyMineBlockDurability(stack, tool): hurtStack with per-tool amount
+  - NEW src/game/items/item-instance.test.ts (13 tests):
+    - All 5 tiers verified (WOOD/STONE/IRON/DIAMOND/GOLD)
+    - Strict > boundary: wood_pickaxe breaks after 60 hurts (not 59)
+    - Gold sword breaks after 17 block breaks (16×hurt(2)=32, 17th → 34 > 32)
+    - Bare hand returns stack unchanged
+    - count > 1 stacks decrement count
+  - src/game/inventory/inventory.ts:
+    - Added optional auxValue field to ItemStack interface
+    - createStack now preserves auxValue (default 0)
+    - §CRITICAL FIX: sameStack now compares auxValue too — without this,
+      setSlot would silently no-op when applyToolDurability updated auxValue
+      on a tool (same itemKey/count/maxStackSize but different wear).
+      This was the critical bug preventing durability from working in-game.
+      Diagnosed via Agent Browser: setSlot called with auxValue=1 but
+      getSlot returned auxValue=0 because sameStack returned true (no-op).
+  - src/game/engine.ts:
+    - tickMining: after 'broken', if gameMode==='survival' → applyToolDurability()
+      (matches SurvivalMode.cpp:63-69; creative skips per CreativeMode.cpp:31-38)
+    - applyToolDurability: resolves tool from selected slot's itemKey via getTool
+      (real-time lookup matching rujukan inventory->getSelected()),
+      applyMineBlockDurability, clearSlot if count==0
+  - src/game/persistence/save-schema.ts:
+    - Inventory validation now preserves auxValue (default 0 if absent)
+    - Worn tools survive save/load
+  - public/minecraft.html:
+    - Durability bar CSS: .slot .dur (2px colored bar)
+      green > 50%, orange (warn) > 20%, red (crit) <= 20%
+    - buildHotbar: adds dur element per slot (hidden by default)
+    - refreshHotbarCounts: resolves tool via VoxelCraftGetTool, computes
+      remaining = 1 - (aux/maxDamage), sets bar width + color class
+      Hidden for non-tool items (bare hand, blocks)
+  - public/voxelcraft-engine.bundle.js: rebuilt (84.7KB, +2KB)
+
+- Verification (Agent Browser, end-to-end in survival mode):
+  - wood_pickaxe (maxDamage=59) on stone (23 ticks/break):
+      After 1 break:  auxValue=1, count=1 ✓
+      After 30 breaks: auxValue=30, count=1 ✓
+      After 59 breaks: auxValue=59, count=1 (NOT > 59, no break) ✓
+      After 60 breaks: slot=null (count-- → 0 → clearSlot) ✓
+      After 62 breaks: slot=null (stays null, tool is gone) ✓
+  - Pre-worn tool (auxValue=59) + 1 break → slot=null (immediate break) ✓
+  - Durability bar visual:
+      auxValue=30/maxDamage=59 → width=49.15%, class='warn' (orange) ✓
+      computed backgroundColor: rgb(240,160,32) (orange) ✓
+      Hidden for block slots (no bar shown) ✓
+  - Creative mode: no durability loss ✓
+  - Direct setSlot test: auxValue=5 input → auxValue=5 output ✓
+
+- bun run test:game-core: 163 pass, 0 fail, 2318 expect() calls
+  (added 13 new item-instance tests)
+- Commit feb53f30 + push to origin/main
+- All 3 workflows SUCCESS:
+  - static.yml #527 → SUCCESS
+  - rebuild-engine.yml #463 → SUCCESS
+  - pocket-engine-ci.yml #21 → SUCCESS
+
+Stage Summary:
+- Branch: main (commit feb53f30 pushed to origin)
+- Tool durability 1:1 with rujukan MCPE 2013:
+  - 5 tiers with exact maxDamage from Item.cpp:11-15 (59/131/250/1561/32)
+  - hurt formula from ItemInstance.cpp:128-138 (strict >, not >=)
+  - DiggerItem hurt(1) per block break, WeaponItem hurt(2) per block break
+  - Survival only (creative doesn't decrement — CreativeMode.cpp:31-38)
+  - clearSlot when count==0 (SurvivalMode.cpp:68)
+  - Durability bar visual (green/orange/red) in hotbar
+  - AuxValue persists across save/load
+- Files changed (9 files, 436 insertions, 14 deletions):
+  - NEW src/game/items/item-instance.ts (89 lines)
+  - NEW src/game/items/item-instance.test.ts (13 tests)
+  - src/game/inventory/inventory.ts (auxValue field + sameStack fix)
+  - src/game/engine.ts (applyToolDurability integration)
+  - src/game/persistence/save-schema.ts (auxValue preservation)
+  - public/minecraft.html (durability bar UI)
+  - public/voxelcraft-engine.bundle.js (rebuilt)
+  - 2 test files updated (expect auxValue: 0 in stack comparisons)
+- Bug found and fixed during implementation:
+  - sameStack() didn't compare auxValue → setSlot was no-op for durability
+    changes. Fixed to include auxValue comparison.
+- Rule Zero respected — every formula transcribed from rujukan source.
+  No guessing. All 6 source files read line-by-line and cited in comments.
