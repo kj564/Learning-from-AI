@@ -2008,3 +2008,105 @@ Stage Summary:
 - rebuild-engine.yml no longer mixes modern VoxelCraft RP into staging;
   now stages 11 rujukan MCPE 2013 assets only (1:1 with kitab suci)
 - User can now look at GitHub Actions tab and see only green checkmarks
+
+---
+Task ID: 13
+Agent: Z.ai Code (orchestrator)
+Task: Lanjut porting MCPE 2013 ke web game — fokus ke mekanik tertinggi impact
+
+Work Log:
+- Stocktake minecraft.html (4320 lines, single-file Three.js port):
+  - Sudah ada: block registry 36 blocks, FACES 1:1 TileRenderer.cpp, tileUV
+    flipY=false, buildChunkGeometry per-face brightness, movePlayerTick
+    rujukan physics (friction2, gravity 0.08, AABB clip), Mob class hierarchy
+    (MobEntity→Mob→PathfinderMob→AgableMob→Animal→Chicken), cloud + day/night
+    16min, world gen CHUNK_Y=128 WATER_LEVEL=64 deposit ores, inventory 4 tabs,
+    GUI dari gui.png+icons.png, ChickenModel.cpp hardcoded cubes
+  - Belum 1:1: mining (pakai hardness/seconds model yang SALAH), lighting
+    per-block sky/block (tidak ada sama sekali), tools, mob spawner penuh
+- Pilih prioritas #1: MINING (core interaction, salah sama sekali vs rujukan)
+- RE phase (Rule Zero — baca source asli):
+  - SurvivalMode.cpp:18-50 — continueDestroyBlock: destroyDelay block; 
+    destroyProgress += tile->getDestroyProgress(player); ++destroyTicks & 3 == 1
+    → step sound; if destroyProgress >= 1: break + reset + destroyDelay = 5
+  - CreativeMode.cpp:11-33 — startDestroyBlock: instant break + destroyDelay = 10;
+    continueDestroyBlock: destroyDelay--, if <=0: break + destroyDelay = 10
+  - Tile.cpp:391-395 — getDestroyProgress: if destroySpeed<0 return 0;
+    if !canDestroy return 1/destroySpeed/100; else (playerDestroySpeed/destroySpeed)/30
+  - Player.cpp:556-561 — getDestroySpeed returns inventory->getDestroySpeed(tile)
+  - Inventory.cpp:316-323 — getDestroySpeed: bare hand returns 1.0; tool (id>=256)
+    returns Item::getDestroySpeed
+  - Timer.h — TICKS_PER_SECOND = 20 (1 tick = 50ms)
+- Port phase:
+  - Rewrite src/game/interaction/mining.ts:
+    - MiningSession: target, blockId, hardness, mode, playerDestroySpeed,
+      destroyProgress, destroyTicks, destroyDelay, completed, cancelled
+    - tick(ticks, currentTarget, currentBlockId) replaces advance(deltaSeconds, ...)
+    - survival branch: rujukan per-tick loop with destroyDelay gating
+    - creative branch: instant break + 10-tick cooldown between breaks
+    - Constants: TICKS_PER_SECOND=20, SURVIVAL_DESTROY_DELAY=5,
+      CREATIVE_DESTRUCTION_TICK_DELAY=10, DESTROY_PROGRESS_DIVISOR=30
+    - cancel() method (was silent side-effect)
+  - Update src/game/engine.ts:
+    - Added gameMode + playerDestroySpeed engine options (default creative, 1.0)
+    - tickMining(ticks, currentTarget) replaces advanceMining(deltaSeconds, ...)
+    - startMining(target) no longer takes miningSpeed
+  - Update src/game/interaction/controller.ts:
+    - tickMining(ticks, currentHit) replaces tickMining(deltaSeconds, currentHit)
+    - Constructor: (mode, playerDestroySpeed) replaces miningSpeed
+  - Rewrite src/game/interaction/mining.test.ts:
+    - ticksToBreak(hardness) helper — FP-faithful rujukan math (45 ticks for stone)
+    - survival/creative/bedrock/cancel/air tests, default-mode test
+  - Update src/game/interaction/controller.test.ts + src/game/engine.test.ts:
+    - tick-based API, rujukan constants verified
+- minecraft.html integration:
+  - VoxelCraftEngine ctor: added gameMode: 'creative', playerDestroySpeed: 1.0
+  - tickMining(dt) per-frame → tickMiningTick() per-physics-tick
+  - MOVED tickMiningTick() call into physics tick loop (was in 60fps render
+    loop — wrong, runs 3x too fast). Now inside `while physicsAccumMs >= TICK_MS`
+    loop alongside movePlayerTick(). 1:1 with rujukan Minecraft.tick() calling
+    gameMode.tick → continueDestroyBlock at 20 tps.
+  - voxelEngine.tickMining(1, hit.block) — advance exactly 1 physics tick
+  - 'mining' and 'cooldown' statuses keep holding without breaking
+- Rebuild public/voxelcraft-engine.bundle.js (76KB, exports tickMining not
+  advanceMining; new VoxelCraftEngine accepts gameMode/playerDestroySpeed)
+- Verification (Agent Browser + VLM):
+  - Page loads, no parse errors
+  - VoxelCraftEngine.prototype.tickMining === function (new API live)
+  - VLM saw tunnel in terrain after holding mouse — 5 blocks broken in ~2.5s
+    (matches creative 10-tick cooldown = 0.5s/block)
+  - HUD: XYZ 8,69,8 | Time 06:46 | Hancur: 5 | FPS 21
+  - No rendering errors, no z-fighting, no missing textures
+  - Lighting inside tunnel darker (per-face brightness working as expected)
+- bun run test:game-core: 131 pass, 0 fail, 508 expect() calls
+- TypeScript: no errors in changed files
+- Commit 9cb520b9 + push to origin/main
+- All 3 workflows passing:
+  - static.yml #523 → SUCCESS (Pages build/deploy)
+  - rebuild-engine.yml #459 → SUCCESS (tests + build)
+  - pocket-engine-ci.yml #17 → SUCCESS (Kitab Suci integrity)
+
+Stage Summary:
+- Branch: main (commit 9cb520b9 pushed to origin)
+- Mining is now 1:1 with rujukan MCPE 2013:
+  - Creative (default): instant break + 10-tick (0.5s) cooldown —
+    2 blocks/sec sustained, matches CreativeMode.cpp exactly
+  - Survival: per-tick destroyProgress = (1/hardness)/30; stone (1.5) breaks
+    in 45 ticks (2.25s), dirt (0.5) in 16 ticks (0.8s), obsidian (10) in
+    301 ticks (15.05s) — matches SurvivalMode.cpp + Tile::getDestroyProgress
+  - Mining advances per PHYSICS TICK (20 tps), not per render frame —
+    1:1 with rujukan Minecraft.tick() → gameMode.tick → continueDestroyBlock
+- Files changed (8 files, 441 insertions, 161 deletions):
+  - src/game/interaction/mining.ts (rewritten)
+  - src/game/interaction/controller.ts
+  - src/game/engine.ts
+  - src/game/interaction/mining.test.ts (rewritten)
+  - src/game/interaction/controller.test.ts
+  - src/game/engine.test.ts
+  - public/minecraft.html
+  - public/voxelcraft-engine.bundle.js (rebuilt)
+- Next porting candidates (priority order):
+  1. Lighting — per-block skyLight/blockLight (LightLayer.h, LightUpdate.cpp)
+  2. Tools — pickaxe/axe/shovel destroySpeed multipliers (Item::getDestroySpeed)
+  3. Survival mode toggle — gameMode switch + hearts/damage
+  4. Mob spawner — full MobSpawner + Animal wandering (PathfinderMob.cpp)
