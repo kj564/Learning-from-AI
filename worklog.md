@@ -3143,3 +3143,72 @@ Work Log:
 
 - Tests: 213 pass, 0 fail, 2448 expect() calls
 - Workflows: all SUCCESS
+
+---
+Task ID: 21
+Agent: Z.ai Code (orchestrator)
+Task: Touch controls 1:1 — MCPE 2013 is a MOBILE game
+
+Work Log:
+- User pointed out: MCPE 2013 is a mobile game, but the browser port
+  has ZERO touch support and is unplayable on mobile. Also I keep
+  violating Rule Zero.
+
+- RE phase (read ALL touch input source files completely):
+  - Multitouch.h — 12 pointer tracking, getX/getY, isPressed/isReleased
+  - TouchscreenInput.cpp:120-310 — D-pad layout + tick logic:
+    * 3x3 grid, Bw=w*0.11 capped at 14mm, bottom-left
+    * N=forward, S=backward, W/E=strafe, C=jump
+    * Water: C=swim, Flying: N=wantUp, S=wantDown
+    * When forward && N pressed: auto-jump
+  - TouchscreenInput.cpp:421-508 — D-pad render:
+    * gui.png (0,107) 26x26 sprites per button
+    * Colors: cPressed=0xc0c0c0 a128, cReleased=0xffffff a128
+    * Flying sprites: N(52,133), S(78,133), C(104,133)
+  - TouchInputHolder.h:62-280 — Unified Turn/Build:
+    * Right side of screen = look + break + place
+    * State machine: None→Deciding→Turn/Destroy
+    * MaxBuildMovement=20, RemovalMilliseconds=400
+    * Quick tap <250ms = BUILD, long press >400ms = DESTROY
+    * drag >20px = TURN (look around)
+  - TouchStartMenuScreen.cpp:67-120 — Touch start menu:
+    * 3 horizontal buttons using touchgui.png
+    * yBase = 2 + height/3
+  - TouchIngameBlockSelectionScreen.cpp — Touch inventory:
+    * Grid with itemframe.png border, BorderPixels=4, BlockPixels=24
+
+- Implementation:
+  - Copied touchgui.png + itemframe.png from rujukan assets
+  - D-pad CSS: 3x3 grid, gui.png sprites at (0,107), 5 buttons (N/S/W/E/C)
+    with flying sprite variants (CSS classes for state changes)
+  - D-pad JS: touchstart/move/end handlers tracking which button pressed
+    Maps to keys: N=KeyW, S=KeyS, W=KeyA, E=KeyD, C=Space
+    touchmove re-evaluates button (slide between directions)
+  - Turn/Build JS: unified state machine on right side of screen
+    Quick tap <250ms = placeBlock(), long press >400ms = breakBlock()
+    drag = look around (yaw/pitch update via sensitivity 0.004)
+  - Physics loop fix: touchGameplayActive works without pointer lock
+    (TouchscreenInput.cpp has no pointer lock concept)
+  - Start game fix: on touch devices, no pointer lock requested
+    (resumeGame sets locked=true directly, shows D-pad + touch area)
+
+- Commits:
+  - 6e840ea3: Touch controls (D-pad + turn/build + assets)
+  - bda19b65: Start game without pointer lock on touch devices
+
+- Verification (Agent Browser with simulated touch events):
+  - D-pad 'n' (forward): keys.KeyW = true ✓
+  - Touch drag (right side): yaw -0.16 (look right), pitch -0.04 (down) ✓
+  - VLM: 'D-pad visible as 3x3 grid of semi-transparent light-gray buttons' ✓
+
+- Tests: 213 pass, 0 fail, 2448 expect() calls
+- Workflows: static.yml #537 in progress
+
+Stage Summary:
+- Touch controls now match rujukan MCPE 2013:
+  - D-pad: 3x3 grid with gui.png sprites (TouchscreenInput.cpp)
+  - Turn/Build: unified state machine (TouchInputHolder.h)
+  - No pointer lock on touch devices (mobile game)
+- Game is now PLAYABLE on mobile — touch "Start Game" → D-pad + look controls
+- Still need: TouchStartMenuScreen layout, TouchIngameBlockSelectionScreen,
+  flying D-pad sprite toggle, mobile pause button
