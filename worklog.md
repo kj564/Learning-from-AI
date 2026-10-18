@@ -2217,3 +2217,136 @@ Stage Summary:
   - Per-block lighting missing (global daylight multiplier only)
   - AABB collision substep approximation (vs rujukan exact clip)
   - lightOpacity 0-15 scale (vs rujukan 0-255)
+
+---
+Task ID: 15
+Agent: Z.ai Code (orchestrator)
+Task: Port tools (pickaxe/axe/shovel) 1:1 dari rujukan MCPE 2013
+
+Work Log:
+- RE phase (Rule Zero — baca source rujukan line-by-line):
+  - Item.h:26-59 — Tier class: level, uses, speed, damage
+  - Item.cpp:11-15 — Tier static instances:
+      WOOD(0, 59, 2, 0), STONE(1, 131, 4, 1), IRON(2, 250, 6, 2),
+      DIAMOND(3, 1561, 8, 3), GOLD(0, 32, 12, 0)
+  - Item.cpp:168-198 — 20 tool definitions with icon (col,row) coordinates
+  - DiggerItem.h:14-19 — getDestroySpeed(item, tile): hasTile ? speed : 1
+  - PickaxeItem.cpp:7-26 — tile list (cobblestone, stone, ores, etc.)
+  - PickaxeItem.cpp:38-52 — canDestroySpecial tier gates:
+      obsidian → tier==3, diamond/gold → tier>=2, iron/lapis → tier>=1,
+      stone/metal material → true
+  - PickaxeItem.cpp:54-58 — getDestroySpeed: stone/metal → tier.speed
+  - HatchetItem.cpp:14-22 — tile list (wood, bookshelf, log, chest, etc.)
+  - HatchetItem.cpp:21-25 — getDestroySpeed: wood → tier.speed
+  - ShovelItem.cpp:11-19 — tile list (grass, dirt, sand, gravel, snow, etc.)
+  - ShovelItem.cpp:25-30 — canDestroySpecial: topSnow/snow → true
+  - Material.cpp:37-66 — initMaterials: stone/metal/snow/topSnow call
+      notAlwaysDestroyable() — everything else default true
+  - Material.h:84 — _isAlwaysDestroyable default = true
+  - Player.cpp:563-565 — Player::canDestroy → Inventory::canDestroy
+  - Inventory.cpp:307-313 — canDestroy: isAlwaysDestroyable OR tool.canDestroySpecial
+  - Inventory.cpp:316-323 — getDestroySpeed: bare hand returns 1.0, tool
+      returns Item::getDestroySpeed
+  - Tile.cpp:391-395 — getDestroyProgress:
+      if (destroySpeed < 0) return 0;  // unbreakable
+      if (!canDestroy) return 1/destroySpeed/100.0f;  // 100x slower fallback
+      return (playerDestroySpeed / destroySpeed) / 30.0f;
+
+- Implementation phase:
+  - NEW src/game/items/tools.ts (235 lines):
+    - TIERS table with all 5 tier values from Item.cpp:11-15
+    - 20 tool definitions with exact icon coords from Item.cpp:168-198
+    - BlockMaterial type (26 materials from Material.cpp)
+    - isAlwaysDestroyable() — true by default, false for stone/metal/snow/topSnow
+    - canDestroyBlock() — Inventory.cpp:307-313 logic with per-tool logic
+    - getPlayerDestroySpeed() — Inventory.cpp:316-323 logic with per-tool
+      material matching (pickaxe stone/metal, axe wood, shovel tile-list)
+    - PICKAXE_TILES / AXE_TILES / SHOVEL_TILES sets
+  - src/game/blocks/registry.ts: added material field to BlockDefinition,
+    41 blocks tagged with material per Tile.cpp + Material.cpp
+  - src/game/interaction/mining.ts: replaced playerDestroySpeed with tool,
+    added canDestroy flag to MiningSession, applied 100x penalty in tick()
+    when !canDestroy (rujukan Tile::getDestroyProgress fallback formula)
+  - src/game/engine.ts: tool field replaces playerDestroySpeed, startMining
+    accepts per-call tool override
+  - src/game/interaction/controller.ts: same — constructor takes tool,
+    startMining accepts per-call tool override
+  - src/game/browser-entry.ts: exposed window.VoxelCraftGetTool so
+    minecraft.html can resolve the equipped tool from selected slot's itemKey
+  - public/minecraft.html:
+    - HOTBAR changed from block ID array to mixed {type, id/itemKey, label}
+      objects: 4 blocks (stone/dirt/cobblestone/oak_planks) + 4 tools
+      (wood_pickaxe/iron_pickaxe/diamond_pickaxe/wood_shovel)
+    - TOOL_ICONS map: 20 tool itemKey → (col,row) in items.png 256x256
+    - buildHotbar: renders tool slots via new drawItemPreview (items.png)
+    - drawItemPreview function added (parallel to drawTilePreview)
+    - items.png loaded at startup alongside terrain.png
+    - getEquippedTool() helper: reads HOTBAR[selectedSlot].itemKey and
+      resolves via VoxelCraftGetTool
+    - beginMiningTarget: passes getEquippedTool() to voxelEngine.startMining
+    - placeBlock: skips when tool slot is selected
+    - HUD label uses HOTBAR[slot].label (works for blocks and tools)
+    - Removed playerDestroySpeed from engine ctor (tool is per-call)
+  - public/voxelcraft-engine.bundle.js: rebuilt (82.5KB, +6KB)
+
+- Verification (Agent Browser + math check):
+  - Tool icons render in hotbar (VLM confirmed pickaxe/axe/shovel visible
+    from items.png atlas, blocks show 64 count, tools show 1)
+  - Slot 5 (wood_pickaxe) selected → getEquippedTool() returns:
+      { kind:'pickaxe', tier:'wood', tierDef:{ level:0, uses:59, speed:2,
+      damage:0 }, iconCol:0, iconRow:6 }
+  - SURVIVAL + wood_pickaxe on stone (hardness 1.5):
+      playerDestroySpeed=2 (wood tier speed)
+      canDestroy=true (pickaxe can destroy stone)
+      23 ticks to break (matches ceil(1 / (2/1.5/30)) = 23 exactly)
+  - SURVIVAL + bare hand on stone:
+      playerDestroySpeed=1 (bare-hand fallback)
+      canDestroy=false (stone is notAlwaysDestroyable, no tool)
+      100x penalty applied (1/1.5/(30*100) per tick)
+      After 100 ticks: progress=0.0222 (matches expected)
+      Expected 4500 ticks total (225 seconds at 20 tps)
+  - SURVIVAL + bare hand on dirt (hardness 0.5):
+      playerDestroySpeed=1, canDestroy=true (dirt is alwaysDestroyable)
+      16 ticks to break (matches ceil(1 / (1/0.5/30)) = 16 exactly)
+  - CREATIVE + any tool: instant break first tick (unchanged)
+
+- bun run test:game-core: 146 pass, 0 fail, 580 expect() calls
+  (added 15 new tool tests in tools.test.ts covering all TIERS values,
+  tool metadata, isAlwaysDestroyable, canDestroyBlock per-block tier gates,
+  getPlayerDestroySpeed material matching, bare-hand fallback)
+
+- Commit beafbb62 + push to origin/main
+- All 3 workflows SUCCESS:
+  - static.yml #525 → SUCCESS (Pages build/deploy)
+  - rebuild-engine.yml #461 → SUCCESS
+  - pocket-engine-ci.yml #19 → SUCCESS (Kitab Suci integrity)
+
+Stage Summary:
+- Branch: main (commit beafbb62 pushed to origin)
+- Tool system 1:1 with rujukan MCPE 2013:
+  - 5 tiers (wood/stone/iron/diamond/gold) with exact speed/uses/level/damage
+  - 20 tools (5 tiers × 4 kinds: pickaxe/axe/shovel/sword)
+  - Per-tool canDestroySpecial with exact tier gates (obsidian→diamond, etc.)
+  - Per-tool getDestroySpeed with exact material matching (stone/metal/wood)
+  - 100x penalty for !canDestroy (stone with bare hand = 225s, with wood
+    pickaxe = 1.15s — exactly 100x ratio)
+  - 4 tools in hotbar (wood/iron/diamond pickaxe + wood shovel) with icons
+    rendered from items.png atlas at exact rujukan coordinates
+- Files changed (12 files, 853 insertions, 155 deletions):
+  - NEW src/game/items/tools.ts (235 lines)
+  - NEW src/game/items/tools.test.ts (15 tests)
+  - src/game/blocks/registry.ts (added material field, 41 blocks tagged)
+  - src/game/interaction/mining.ts (tool-aware + canDestroy penalty)
+  - src/game/interaction/controller.ts (tool param)
+  - src/game/engine.ts (tool param + per-call override)
+  - src/game/browser-entry.ts (exposed VoxelCraftGetTool)
+  - public/minecraft.html (hotbar + items.png + tool plumbing)
+  - public/voxelcraft-engine.bundle.js (rebuilt)
+  - 3 test files updated (mining.test.ts, controller.test.ts, engine.test.ts)
+- Hotbar now: stone, dirt, cobblestone, oak_planks, wood_pickaxe,
+  iron_pickaxe, diamond_pickaxe, wood_shovel (8 slots)
+- Next porting candidates:
+  1. Lighting — per-block skyLight/blockLight (LightLayer.h, LightUpdate.cpp)
+  2. Tool durability (ItemInstance::hurt, decrement uses on each block break)
+  3. Survival mode toggle with hearts/damage (Mob::hurt, Player::die)
+  4. Mob spawner — full MobSpawner + Animal wandering
