@@ -3033,3 +3033,64 @@ Work Log:
 
 - Tests: 213 pass, 0 fail, 2448 expect() calls
 - Workflows: static.yml #534 → SUCCESS
+
+---
+Task ID: 20 (final)
+Agent: Z.ai Code (orchestrator)
+Task: "lanjutkan" — 3 more 1:1 GUI fixes (hearts + inventory)
+
+Work Log:
+- Continued deep GUI audit with Rule Zero:
+
+  Commit 30d31c56 — 3 more fixes:
+
+  1. Hearts blink logic — §Gui.cpp:568-569 EXACT:
+     Rujukan: blink = (invulnerableTime / 3) % 2 == 1;
+              if (invulnerableTime < 10) blink = false;
+     Browser was: toggle('blink', invulnerableTime > 0) — WRONG (blinked immediately)
+     Fixed: blink = invulnerableTime >= 10 && (floor(invulnerableTime/3) % 2) === 1
+     = no blink for first 10 ticks, then alternating flash every 3 ticks
+
+  2. Low-health jitter — §Gui.cpp:586-588:
+     Rujukan: if (h <= 4) yo = yo + random.nextInt(2) - 1;
+     = when health <= 4 (2 hearts), each heart randomly shifts ±1px vertically
+     Browser was: no jitter at all
+     Fixed: deterministic PRNG seeded by tickCount * 312871 (matching rujukan's
+     random.setSeed(tickCount * 312871)), offsets each heart ±1px when hp <= 4
+
+  3. Inventory screen background — §Screen.cpp:108-110:
+     Rujukan: fillGradient(0xc0101010, 0xd0101010)
+     = linear-gradient(rgba(16,16,16,0.75), rgba(16,16,16,0.82))
+     Browser was: rgba(0,0,0,0.65) flat black
+     Fixed: same gradient as pause screen (Screen::renderBackground)
+
+- VLM verification (final):
+  - "HUD clean (no big text bar)" ✓
+  - "Hotbar at the bottom center with 9 slots" ✓
+  - "'...' button at the end" ✓
+  - "No slot numbers on the slots" ✓
+  - "Yes, it strongly resembles Minecraft Pocket Edition" ✓
+
+- Total GUI commits across Task 20 (7 commits):
+  1. b0e268b6: Button CSS (text colors + sprite positions)
+  2. 1cdae9bd: Start menu title.png + dirt background
+  3. 9d4929c9: HUD minimal + per-slot names hidden
+  4. dbb218e2: Pause overlay gradient
+  5. 90649574: Slot numbers removed + "..." 9th slot + loading screen
+  6. 30d31c56: Hearts blink + low-health jitter + inventory background
+
+- Tests: 213 pass, 0 fail, 2448 expect() calls
+- Workflows: all SUCCESS
+
+Stage Summary:
+- GUI now 1:1 with rujukan MCPE 2013:
+  - Start menu: gui/title.png image + dirt background (StartMenuScreen.cpp)
+  - In-game HUD: minimal (hotbar + crosshair only, no text bar) (Gui::render)
+  - Hotbar: 9 slots (8 items + "..." inventory button) (Gui.cpp:187,756)
+  - No slot numbers on hotbar (Gui::renderSlot renders icon only)
+  - Loading: dirt bg + progress bar #808080/#80ff80 (ProgressScreen.cpp)
+  - Buttons: correct text colors + gui.png sprite positions (Button.cpp)
+  - Pause/inventory: fillGradient background (Screen.cpp:108-110)
+  - Hearts: correct sprites, blink logic, low-health jitter (Gui.cpp:567-601)
+  - Crosshair: icons.png (0,0) with mix-blend-mode: difference (Gui.cpp:505-511)
+  - Vignette: CSS radial-gradient (browser approximation, no vignette.png in rujukan assets)
