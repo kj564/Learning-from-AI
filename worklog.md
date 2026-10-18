@@ -2976,3 +2976,60 @@ Stage Summary:
 - Button CSS matches rujukan exactly (text colors + sprite positions)
 - Pause overlay background matches rujukan fillGradient
 - VLM confirmed all fixes look like "the original Minecraft Pocket Edition"
+
+---
+Task ID: 20 (deep audit continued)
+Agent: Z.ai Code (orchestrator)
+Task: "wajib 1:1 dan ingat rule 0" — deep GUI audit, 4 more deviations fixed
+
+Work Log:
+- User demanded strict 1:1. Deep audit found 4 more deviations:
+
+  Commit 90649574 — 4 GUI fixes:
+
+  1. Slot numbers (1-8) removed from hotbar
+     - §Gui.cpp:293-302 — renderSlot() renders ONLY item icon, NO slot number
+     - Browser had <div class='num'> showing 1-8 on each slot
+     - Removed from buildHotbar JS + .num CSS set to display:none
+     - VLM confirmed: no slot numbers visible
+
+  2. "..." 9th slot added to hotbar (opens inventory)
+     - §Gui.cpp:187-189 — clicking slot N-1 opens SCREEN_BLOCKSELECTION
+     - §Gui.cpp:756 — renderToolBar loops N-1 items, Nth is "..." button
+     - §Inventory.h:20 — MAX_SELECTION_SIZE = 9 (8 items + 1 "...")
+     - HOTBAR now has 9 entries (was 8): 4 blocks + 4 tools + 1 "..."
+     - Clicking "..." calls toggleInventory()
+     - VLM confirmed: "9 visible hotbar slots" + "..." button at far right"
+
+  3. Loading screen: spinner → dirt background + progress bar
+     - §ProgressScreen.cpp:24-57 — dirt bg + 100×2px progress bar
+     - §ProgressScreen.cpp:45 — bar bg 0x808080 (#808080 gray)
+     - §ProgressScreen.cpp:51 — bar fill 0x80ff80 (#80ff80 green)
+     - Replaced spinner animation with progress bar element
+     - CSS verified: bg=#808080, fill=#80ff80 (exact rujukan values)
+     - Background: gui/background.png dirt texture
+
+  4. placeBlock skips when "..." slot is selected
+     - Added isMoreSlotSelected() helper
+     - Shows toast "Buka inventaris untuk pilih blok"
+
+  Also updated:
+  - buildHotbar: "..." slot uses special render path (no canvas/count/durability)
+  - Inventory init: skips "..." slot
+  - getEquippedTool: returns null for "..." slot
+
+- VLM verification:
+  - Start menu: "dirt texture background" ✓ + "MINECRAFT in iconic blocky font" ✓
+  - In-game: "9 hotbar slots" ✓ + "..." button at far right" ✓
+  - In-game: "clean HUD, no text bar" ✓
+  - Loading: dirt bg + progress bar #808080/#80ff80 ✓ (CSS verified)
+
+- All 7 GUI commits across Task 20 (b0e268b6 → 90649574):
+  1. b0e268b6: Button CSS (text colors + sprite positions)
+  2. 1cdae9bd: Start menu title.png + dirt background
+  3. 9d4929c9: HUD minimal + per-slot names hidden
+  4. dbb218e2: Pause overlay gradient
+  5. 90649574: Slot numbers removed + "..." 9th slot + loading screen
+
+- Tests: 213 pass, 0 fail, 2448 expect() calls
+- Workflows: static.yml #534 → SUCCESS
