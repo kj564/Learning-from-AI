@@ -2837,3 +2837,71 @@ Stage Summary:
   values — future code should import from here, not hardcode
 - Total test count: 213 pass / 0 fail / 2448 expect() calls across 31 files
 - Rule Zero enforced: every constant cites §File:line from rujukan source
+
+---
+Task ID: 20
+Agent: Z.ai Code (orchestrator)
+Task: Port UI/GUI 1:1 dari rujukan MCPE 2013 — fix button CSS + create docs/gui.md
+
+Work Log:
+- RE phase (Rule Zero — baca rujukan GUI source line-by-line):
+  - Gui.cpp:505-511 — Crosshair: icons.png (0,0) 16×16, blend GL_ONE_MINUS_DST_COLOR/GL_ONE_MINUS_SRC_COLOR
+  - Gui.cpp:567-601 — Hearts: 10 hearts, 9×9 sprites, icons.png at (16+bg*9, 0), blink logic, low-health jitter
+  - Gui.cpp:709-765 — Hotbar: gui.png (0,0) 180×22, end cap (180,0) 2×22, selected (0,22) 24×22, 9 slots 20px each
+  - Gui.cpp:268-295 — Vignette: misc/vignette.png, darkness = 1 - brightness
+  - Button.cpp:65-83 — Button: getYImage(0/1/2), blit at y=46+yImage*20, text colors 0xa0a0a0/0xe0e0e0/0xffffa0
+  - Button.h:8 — Default size 200×24
+  - StartMenuScreen.cpp:27-29,75-89 — Start menu: bHost 160×24, bJoin 160×24, bOptions 78×22, yBase=height/2+25
+  - PauseScreen.cpp:98-116,144 — Pause: "Game menu" title at y=24, buttons at yBase+32*N, 160 wide
+  - Screen.cpp — Screen lifecycle: init → setupPositions → render → buttonClicked
+
+- Audit minecraft.html UI components vs rujukan:
+  - Crosshair: ✓ correct (icons.png 0,0, mix-blend-mode: difference)
+  - Hotbar: ✓ correct (gui.png 0,0, 180×22, selected highlight)
+  - Hearts: ✓ correct but hidden (creative mode default)
+  - Vignette: ✓ approximation (CSS radial-gradient instead of texture)
+  - Button CSS: ✗ WRONG — text color all #fff (should be #e0e0e0/#ffffa0/#a0a0a0),
+    background-position 0/-20/-40 (should be -66/-86/-46 for atlas y=66/86/46),
+    background-size 200px 60px (should be 200px 256px for full atlas)
+  - Start menu: acceptable adaptation (different labels but same function)
+  - Pause screen: ✓ "Game Menu" title correct, buttons adapted for browser
+
+- Fix button CSS in public/minecraft.html:
+  - Text colors: #fff → #e0e0e0 (normal), #ffffa0 (hover), #a0a0a0 (disabled/active)
+    — §Button.cpp:75,78,80
+  - Background-position: 0/−20/−40 → −66/−86/−46
+    — §Button.cpp:83 (y=46+yImage*20 where yImage=1/2/0)
+  - Background-size: 200px 60px → 200px 256px (full atlas at correct scale)
+  - Min-height: 22px → 20px (matches atlas sprite height)
+  - Added :disabled state styling
+
+- NEW docs/gui.md (144 lines):
+  - Complete GUI spec with rujukan source citations for every constant
+  - Button, Hotbar, Hearts, Crosshair, Vignette, StartMenu, PauseScreen, Screen lifecycle
+  - Browser port mapping table
+  - 10 acceptance tests (8 ✅ verified, 2 ⚠ hidden/deferred)
+
+- Verification (Agent Browser + VLM):
+  - Start menu buttons: light gray text (#e0e0e0) ✓, stone texture background ✓
+  - VLM confirmed: "text on both buttons appears to be a light gray"
+  - VLM confirmed: "buttons have a dark, metallic, or stone-like texture"
+  - VLM confirmed: "buttons are heavily styled like Minecraft"
+  - Pause screen: "Game Menu" title ✓, buttons present ✓
+
+- bun run test:game-core: 213 pass, 0 fail, 2448 expect() calls (CSS-only change, no test impact)
+- bun run lint: passes
+- Commit b0e268b6 + push to origin/main
+- All 3 workflows SUCCESS:
+  - static.yml #530 → SUCCESS
+  - rebuild-engine.yml #466 → SUCCESS
+  - pocket-engine-ci.yml #22 → SUCCESS
+
+Stage Summary:
+- Branch: main (commit b0e268b6 pushed to origin)
+- Button CSS fixed 1:1 with rujukan Button.cpp:
+  - Text colors match exactly (#e0e0e0 normal, #ffffa0 hover, #a0a0a0 disabled)
+  - Background-position matches gui.png sprite rows (y=66/86/46)
+  - Background-size correct (200px 256px, full atlas)
+- docs/gui.md created with 144 lines of spec + rujukan citations
+- 10 GUI acceptance tests documented (8 ✅, 2 ⚠)
+- VLM confirmed buttons look like Minecraft
