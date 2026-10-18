@@ -2598,3 +2598,165 @@ Stage Summary:
     changes. Fixed to include auxValue comparison.
 - Rule Zero respected — every formula transcribed from rujukan source.
   No guessing. All 6 source files read line-by-line and cited in comments.
+
+---
+Task ID: 18-A
+Agent: docs-spec-writer
+Task: Spec-driven docs/ + ACCEPTANCE.md — apply weltendaemmerung spec-driven methodology + awesome-rea acceptance-test philosophy to VoxelCraft. Create 8 self-contained spec files in docs/ + a central ACCEPTANCE.md stating machine-decidable acceptance tests for every ported system. Update README.md with Documentation section.
+
+Work Log:
+- Read prior worklog (Tasks 3-A through 17) to understand 13-17 covered mining, tools, fly fixes, durability. Task 16 caught 3 Rule Zero violations (torch/ladder material, sword getDestroySpeed); Task 17 added durability helpers.
+- Verified test suite baseline: `bun run test:game-core` → 163 pass / 0 fail / 2318 expect() calls.
+- RE phase (Rule Zero — read rujukan line-by-line for every formula):
+  - SurvivalMode.cpp:18-50 (continueDestroyBlock) + 45 (destroyDelay=5) + 57-76 (destroyBlock with mineBlock + clearSlot)
+  - CreativeMode.cpp:11-33 (startDestroyBlock + creativeDestroyBlock) + 16 (DestructionTickDelay=10) + 31-38 (NO mineBlock call)
+  - Tile.cpp:161-268 (block hardness values + Material assignments for 41 ported blocks)
+  - Tile.cpp:391-395 (getDestroyProgress: destroySpeed<0 → 0; !canDestroy → 1/speed/100; else (playerDestroySpeed/speed)/30)
+  - Item.h:26-59 (Tier class definition) + Item.cpp:11-15 (5 tier constants — verified WOOD 0/59/2/0, STONE 1/131/4/1, IRON 2/250/6/2, EMERALD 3/1561/8/3, GOLD 0/32/12/0) + Item.cpp:168-198 (20 tool icon coords)
+  - DiggerItem.h:14-19 (getDestroySpeed hasTile?speed:1) + 21-25 (mineBlock hurt(1))
+  - PickaxeItem.cpp:5-32 (tile list) + 34-45 (canDestroySpecial tier gates: obsidian==3, emerald/gold>=2, iron/lapis>=1, redstone>=2, stone/metal material=true) + 47-53 (getDestroySpeed stone/metal → speed)
+  - HatchetItem.cpp:6-19 (tile list) + 21-27 (getDestroySpeed wood → speed)
+  - ShovelItem.cpp:4-19 (tile list) + 20-24 (canDestroySpecial topSnow/snow → true)
+  - WeaponItem.h:17-25 (constructor) + 28-35 (getDestroySpeed: web→15, default→1.5) + 33-37 (mineBlock hurt(2)) + 69-71 (canDestroySpecial web only)
+  - ItemInstance.h:97-99 (auxValue field) + ItemInstance.cpp:99-100 (isDamageableItem) + 126-128 (getMaxDamage) + 130-140 (hurt formula with strict >) + 146-148 (mineBlock dispatch)
+  - Mob.cpp:558-626 (travel land/water/lava branches, friction2 = 0.6*0.6*0.91*0.91*0.6*0.91/friction^3, gravity 0.08, airDrag 0.98) + 688-757 (aiStep: xxa*=0.98, yya*=0.98, yRotA*=0.9) + 844-847 (jumpFromGround yd=0.42)
+  - Player.cpp:364-375 (travel flying override: yd = ydo * 0.6 — OVERWRITE not multiply) + 556-561 (getDestroySpeed → inventory)
+  - LocalPlayer.cpp:168-217 (aiStep: jumpTriggerTime=7, fly thrust ±0.15)
+  - Timer.h:10 (Timer(20)) + 116 (MAX_TICKS_PER_UPDATE=10) + SharedConstants.h:28 (TicksPerSecond=20)
+  - Level.h:70-71 (DEPTH=128, SEA_LEVEL=63) + 73 (MAX_BRIGHTNESS=15) + 74 (TICKS_PER_DAY = 20*60*16 = 19200)
+  - LevelConstants.h:5-12 (LEVEL_HEIGHT=128, CHUNK_WIDTH=16, CHUNK_DEPTH=16, CHUNK_BLOCK_COUNT=32768)
+  - NormalDayCycleDimension.h:12-20 (getTimeOfDay formula — blend of linear + smoothstep)
+  - RandomLevelSource.cpp:68 (waterHeight = DEPTH - 64 = 64 — note 1-block discrepancy with SEA_LEVEL=63)
+  - Material.cpp:37-66 (initMaterials — 27 materials, 4 notAlwaysDestroyable: stone/metal/topSnow/snow) + Material.h:61-65 (isAlwaysDestroyable) + 99-102 (notAlwaysDestroyable)
+  - TileRenderer.cpp:54-57 (c10=0.5 DOWN, c11=1.0 UP, c2=0.8 N/S, c3=0.6 W/E) + 81-118 (face brightness application) + 1743-2030 (renderFaceDown/Up/North/South/East/West vertex order + UV math, 256-px atlas with 0.01 inset)
+  - Inventory.cpp:307-313 (canDestroy: isAlwaysDestroyable OR tool.canDestroySpecial) + 316-323 (getDestroySpeed: bare hand returns 1.0)
+  - StoneTile.h:15 + GrassTile.cpp:6 + DirtTile.h:15 + ObsidianTile.h:10 (extends StoneTile) + TreeTile.h:21 + (verified via Task 16 audit log: 41 block materials confirmed)
+- Discrepancies found during spec writing:
+  1. EMERALD vs DIAMOND: rujukan Item.h:35 declares `Tier::EMERALD` (3, 1561, 8, 3); TS port renames to `diamond` to match modern MC terminology. Same numeric values — naming convention only.
+  2. 27 materials vs task's "26": rujukan Material.cpp:8-34 has 27 material pointers (counted: air, dirt, wood, stone, metal, water, lava, leaves, plant, replaceable_plant, sponge, cloth, fire, sand, decoration, glass, explosive, coral, ice, topSnow, snow, cactus, clay, vegetable, portal, cake, web). TS port `BlockMaterial` type lists 27 entries. Documented as 27 in materials.md.
+  3. SEA_LEVEL=63 vs waterHeight=64: rujukan Level.h:71 says SEA_LEVEL=63 but RandomLevelSource.cpp:68 says waterHeight = DEPTH-64 = 64. The TS port uses 64 because worldgen formula is what it replicates. Documented the 1-block discrepancy explicitly in day-night.md + world-gen.md.
+  4. dirt+bare_hand ticks: closed form = 15 (ceil(30*0.5/1)), but TS engine's FP accumulation = 16. Documented both in mining.md and ACCEPTANCE.md (test suite uses 16 since that's what the engine produces).
+  5. Redstone ore tier gate MISSING in TS port: rujukan PickaxeItem.cpp:41 has `if (tile == Tile::redStoneOre || tile == Tile::redStoneOre_lit) return tier.getLevel() >= 2;` but TS port's `pickaxeCanDestroy` (tools.ts:118-128) doesn't include the redstone branch. Documented as bug-for-next-agent in tools.md.
+  6. Survival mode doesn't apply durability end-to-end: §SurvivalMode.cpp:65 calls item->mineBlock which applies durability, but the TS engine's `finishBlockBreak` (mining.ts:232-263) doesn't invoke `applyMineBlockDurability` on the selected slot after a survival break. The durability helpers exist and are unit-tested in isolation, but the engine doesn't wire them up — so a survival break in the running browser game does NOT damage the held tool. Documented as functional gap in durability.md.
+  7. Per-face brightness NOT in TS engine: rujukan c10/c11/c2/c3 constants live only in public/minecraft.html:1547. The TS engine's chunk-mesher.ts doesn't apply brightness at all. Documented as untested in rendering.md.
+  8. Physics constants NOT in TS engine: rujukan per-tick values (gravity 0.08, airDrag 0.98, jump 0.42) live only in public/minecraft.html::movePlayerTick. TS engine's PlayerPhysics uses per-second units (gravity=24, jumpSpeed=8). Documented as untested in physics.md.
+
+- Files created (8 spec files + ACCEPTANCE.md + README.md update):
+  - docs/mining.md (8,785 bytes) — Survival + Creative mining, 23-tick formula, 5/10-tick delays, 100x fallback, 18 unique rujukan citations
+  - docs/tools.md (14,143 bytes) — 5 tier constants, 20 tool icon coords, canDestroy tier gates, per-tool getDestroySpeed, sword 1.5/15, 38 unique rujukan citations
+  - docs/durability.md (11,917 bytes) — ItemInstance::hurt strict >, DiggerItem hurt(1) + WeaponItem hurt(2), 60/33/1562 break counts, 16 unique rujukan citations
+  - docs/physics.md (12,121 bytes) — Mob::travel + Player::travel + jumpFromGround, friction2 formula, fly overwrite, jumpTriggerTime=7, 32 unique rujukan citations
+  - docs/day-night.md (7,281 bytes) — TICKS_PER_DAY=19200, NormalDayCycleDimension formula, SEA_LEVEL=63 vs waterHeight=64, 11 unique rujukan citations
+  - docs/world-gen.md (11,642 bytes) — Level dimensions, 41 block hardness values, 94 unique rujukan citations
+  - docs/rendering.md (11,674 bytes) — TileRenderer c10/c11/c2/c3, FACES vertex order, texture atlas (256x256, 0.01 inset, flipY=false), 19 unique rujukan citations
+  - docs/materials.md (17,220 bytes) — 27 materials, 4 notAlwaysDestroyable, per-block material assignments verified, 76 unique rujukan citations
+  - ACCEPTANCE.md (25,704 bytes) — 16 machine-decidable acceptance tests for every ported system, summary table with test status (✅ tested / ⚠ untested), 66 unique rujukan citations
+
+- Total rujukan source citations across all docs: 288 unique `§File:line` citations (counted from union of all 9 files)
+- Total acceptance tests documented: 16 systems in ACCEPTANCE.md (with status: tested/untested for each)
+- Test suite verified green after doc creation: `bun run test:game-core` → 163 pass / 0 fail / 2318 expect() calls (unchanged — docs are non-code)
+
+Stage Summary:
+- 8 self-contained spec files created in /tmp/Surprise564/docs/ following weltendaemmerung methodology (Overview → Constants → Formulas → Acceptance test → Verification). Each file cites rujukan source with `§File:line` for every constant.
+- /tmp/Surprise564/ACCEPTANCE.md created as the single source of truth for machine-decidable definitions of done (awesome-rea philosophy). 16 systems documented, each with a one-line definition, an acceptance test snippet, a verified-by list, and a rujukan source citation.
+- /tmp/Surprise564/README.md updated with a "Documentation" section linking to all 8 spec files + ACCEPTANCE.md, explaining the spec-driven methodology + acceptance-test philosophy.
+- Total new doc content: ~120 KB across 9 files (8 specs + 1 acceptance). 288 unique rujukan citations, 0 code changes.
+- Discrepancies documented for next agent (5 items, all in respective docs/ files):
+  1. EMERALD→DIAMOND naming (cosmetic, no fix needed)
+  2. 27 materials (not 26 — task spec miscounted)
+  3. SEA_LEVEL=63 vs waterHeight=64 (rujukan source has both — port uses 64)
+  4. Redstone ore tier gate MISSING in TS port (bug — suggested fix in tools.md)
+  5. Survival mode doesn't apply durability end-to-end (functional gap — suggested fix in durability.md)
+- Untested systems documented (next agent should add tests):
+  - Day length 19200 ticks
+  - Per-face brightness c10/c11/c2/c3
+  - Player physics constants (gravity 0.08, airDrag 0.98, jump 0.42, friction2)
+  - Mining 100x fallback formula (stone+bare_hand=4500)
+  - Block hardness values (pinned individually)
+  - World dimensions (16x16x128, waterHeight=64)
+  - Texture atlas (256x256, 0.01 inset, flipY=false)
+
+---
+Task ID: 18-B
+Agent: Z.ai Code (orchestrator)
+Task: Apply weltendaemmerung + awesome-rea methodology to VoxelCraft
+
+Work Log:
+- User shared 2 reference URLs:
+  1. https://github.com/s-macke/weltendaemmerung — C64 game ported to web with AI
+  2. https://github.com/yibie/awesome-rea — curated AI-assisted RE projects with acceptance tests
+
+- Studied both references:
+  - weltendaemmerung methodology: spec-driven (not prompting), docs/ directory with one
+    file per system, explicit verification, keep CLAUDE.md minimal but reference all docs
+  - awesome-rea core question: 'how does this project define done?' — every project
+    must state a machine-decidable acceptance test (byte comparison, hash match, build
+    green) — NOT 'AI is impressive'
+
+- Delegated to subagent (Task ID: 18-A) to create:
+  - docs/ directory with 8 spec files (mining, tools, durability, physics, day-night,
+    world-gen, rendering, materials) — each with rujukan source citations (§File:line)
+  - ACCEPTANCE.md with 16 machine-decidable acceptance tests
+  - Updated README.md with Documentation section
+
+- Subagent results:
+  - 9 new files (~120KB total): 8 docs/*.md + ACCEPTANCE.md
+  - 288 unique rujukan source citations across all docs
+  - 16 acceptance tests documented (9 ✅ tested, 7 ⚠ untested)
+  - 163 tests still passing (no code modified by subagent)
+
+- Subagent reported 5 discrepancies between spec and test suite. I verified each:
+  1. EMERALD vs DIAMOND naming — cosmetic, no fix needed
+  2. 27 materials vs my note of 26 — cosmetic, already documented as 27
+  3. **BUG REAL**: redstone_ore tier gate MISSING in TS port
+     - rujukan §PickaxeItem.cpp:41: `if (tile == redStoneOre || tile == redStoneOre_lit) return tier.getLevel() >= 2;`
+     - TS port pickaxeCanDestroy() skipped this branch
+     - Fixed in src/game/items/tools.ts + added 5 new tests verifying:
+         wood_pickaxe on redstone_ore → false (was: would have been true)
+         stone_pickaxe on redstone_ore → false (was: would have been true)
+         iron_pickaxe on redstone_ore → true (correct)
+         same for redstone_ore_lit
+     - All 163 tests pass (2323 expect() calls, +5 from previous 2318)
+  4. **SUBAGENT ERROR**: claimed engine doesn't wire up applyToolDurability
+     - This was WRONG. Task 17 (commit feb53f30) wired it in engine.ts:144-156
+     - Subagent checked mining.ts only, didn't see engine.ts wiring
+     - Fixed docs/durability.md to reflect actual state (applyToolDurability IS
+       wired, verified end-to-end via Agent Browser in Task 17)
+     - Updated ACCEPTANCE.md to add '11b | Tool durability (end-to-end) | ✅ tested'
+  5. Per-face brightness + physics constants only in minecraft.html (not in TS
+     engine tests) — valid observation, marked as ⚠ UNTESTED in ACCEPTANCE.md.
+     Next-agent task: extract these to TS engine + add tests.
+
+- bun run test:game-core: 163 pass, 0 fail, 2323 expect() calls
+- bun run lint: passes
+- Commit 95269a44 + push to origin/main
+- Workflows:
+  - static.yml #528 → SUCCESS (Pages deploy)
+  - rebuild-engine.yml #464 → SUCCESS (tests + build)
+  - pocket-engine-ci.yml #21 → SUCCESS (Kitab Suci integrity, ran on previous
+    commit since this commit didn't touch rujukan/ or public/VoxelCraft/)
+
+Stage Summary:
+- Branch: main (commit 95269a44 pushed to origin)
+- 9 new files (~120KB docs):
+  - docs/mining.md, tools.md, durability.md, physics.md, day-night.md,
+    world-gen.md, rendering.md, materials.md (8 spec files)
+  - ACCEPTANCE.md (16 acceptance tests)
+- 1 real bug fixed: redstone_ore tier gate (PickaxeItem.cpp:41) — wood/stone
+  pickaxes can no longer mine redstone ore (must use iron pickaxe or better)
+- 1 doc error corrected: durability IS wired in engine.ts (subagent missed it)
+- README.md updated with Documentation section
+- Total rujukan source citations: 288 unique §File:line references
+- Spec-driven methodology now in place: any future change to a system should
+  update the corresponding docs/<system>.md + ACCEPTANCE.md entry, and a test
+  must exist that verifies the acceptance criterion
+- 7 acceptance tests marked ⚠ UNTESTED (next-agent work):
+  - Day length (19200 ticks)
+  - Per-face brightness (c10/c11/c2/c3)
+  - Player physics constants (gravity 0.08, airDrag 0.98, jump 0.42)
+  - Mining dirt+bare_hand=16 ticks
+  - Mining stone+bare_hand=4500 ticks
+  - Block hardness values
+  - World dimensions
+  These live only in minecraft.html (browser port), not in the TS engine test
+  suite. Next agent should extract these to TS engine + add unit tests.
