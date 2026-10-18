@@ -3094,3 +3094,52 @@ Stage Summary:
   - Hearts: correct sprites, blink logic, low-health jitter (Gui.cpp:567-601)
   - Crosshair: icons.png (0,0) with mix-blend-mode: difference (Gui.cpp:505-511)
   - Vignette: CSS radial-gradient (browser approximation, no vignette.png in rujukan assets)
+
+---
+Task ID: 20 (continued — deep 1:1 audit)
+Agent: Z.ai Code (orchestrator)
+Task: "masih jauh dari kata 1:1" — VLM exhaustive audit found more deviations
+
+Work Log:
+- VLM exhaustive UI audit found 5 more deviations:
+
+  Commit 71df7171 — 5 text/label fixes:
+
+  1. Pause title: "Game Menu" → "Game menu" (lowercase 'm')
+     §PauseScreen.cpp:144 — drawCenteredString(font, "Game menu", width / 2, 24, 0xffffff)
+
+  2. Pause subtitle "Permainan dijeda" removed (not in rujukan, browser addition)
+
+  3. Pause buttons — match rujukan PauseScreen.cpp:53-55 EXACTLY:
+     "Resume Game" → "Back to game" (§PauseScreen.cpp:53)
+     "Save World" → REMOVED (not in rujukan pause screen)
+     "Save & Return to Title" → "Quit to title" (§PauseScreen.cpp:54)
+     ADDED: "Quit and copy map" (§PauseScreen.cpp:55)
+     Button order: Back to game / Quit to title / Quit and copy map
+
+  4. Start menu buttons — match rujukan StartMenuScreen.cpp:27-29:
+     "Play Game" → "Start Game" (§StartMenuScreen.cpp:27)
+     ADDED: "Join Game" (disabled, multiplayer not available in browser)
+     "Help & Options" → "Options" (§StartMenuScreen.cpp:29)
+
+  5. Footer text — match rujukan StartMenuScreen.cpp:170-171:
+     "VoxelCraft 3D · Browser Edition" → "VoxelCraft v0.1.1 alpha" (version string)
+     "Not an official Minecraft product." → "Mojang AB" (copyright)
+
+- VLM final verification:
+  Start menu: "MINECRAFT" + "POCKET EDITION" + "Start Game" + "Join Game" + "Options" + "VoxelCraft v0.1.1 alpha" + "Mojang AB" ✓
+  Pause menu: "Game menu" + "Back to game" + "Quit to title" + "Quit and copy map" ✓
+  In-game: "9 slots" + "..." + "no text bar" + "clean HUD" ✓
+  Button CSS: color=rgb(224,224,224)=#e0e0e0 + bgPos=0px -66px ✓ (Button.cpp:80,83)
+
+- Total GUI commits across Task 20 (8 commits):
+  1. b0e268b6: Button CSS (text colors + sprite positions)
+  2. 1cdae9bd: Start menu title.png + dirt background
+  3. 9d4929c9: HUD minimal + per-slot names hidden
+  4. dbb218e2: Pause overlay gradient
+  5. 90649574: Slot numbers removed + "..." 9th slot + loading screen
+  6. 30d31c56: Hearts blink + low-health jitter + inventory bg
+  7. 71df7171: Pause/start labels + version/copyright text
+
+- Tests: 213 pass, 0 fail, 2448 expect() calls
+- Workflows: all SUCCESS
