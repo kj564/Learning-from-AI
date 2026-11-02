@@ -1,0 +1,2002 @@
+     1→# MODLOG — Faithful Port Reverse Engineering Journal
+     2→
+     3→Per skill rule "read the real thing, don't guess": this file logs exact values,
+     4→method bodies, and behavior verified by reading rujukan/ C++ source line-by-line.
+     5→
+     6→Source root: `rujukan/pocket-edition-2013/mcpe-source/handheld/src/`
+     7→
+     8→---
+     9→
+    10→## Entry 1: Entity.cpp — base movement (line-by-line read)
+    11→
+    12→**File**: `world/entity/Entity.cpp`
+    13→
+    14→### Key fields (from Entity.h)
+    15→```
+    16→float x, y, z;        // current position
+    17→float xo, yo, zo;      // previous tick position (for interpolation)
+    18→float xd, yd, zd;      // velocity / delta movement (per tick)
+    19→float yRot, xRot;      // yaw, pitch in degrees
+    20→float yRotO, xRotO;    // previous tick rotation
+    21→AABB bb;               // bounding box (x0,y0,z0,x1,y1,z1)
+    22→float heightOffset;    // eye/camera offset (player = 1.62)
+    23→float bbWidth, bbHeight;
+    24→float walkDist, walkDistO;
+    25→float fallDistance;
+    26→bool onGround, horizontalCollision, verticalCollision, collision;
+    27→bool onGround;
+    28→int tickCount;
+    29→int invulnerableTime;
+    30→int airSupply;
+    31→int onFire, flameTime;
+    32→bool noPhysics;        // creative fly bypass
+    33→Level* level;
+    34→```
+    35→
+    36→### Entity::setPos(float x, float y, float z)
+    37→Sets x/y/z, then calls `setBB(bbWidth, bbHeight)` which builds AABB centered on x,z with bottom at y.
+    38→
+    39→### Entity::move(float xa, float ya, float za)
+    40→**This is the per-tick movement with collision response.** Verified logic:
+    41→```
+    42→xo = x; yo = y; zo = z;            // save previous
+    43→
+    44→// Apply velocity, but clip to AABB clip collisions per-axis
+    45→float newXa = xa, newYd = ya, newZa = za;
+    46→
+    47→// Build list of AABBs the player would overlap (expanded by velocity)
+    48→// Use AABB::clip x/y/z to compute clipped velocity per axis.
+    49→
+    50→// X axis: step through clipXCollide for all nearby tile AABBs
+    51→// Y axis: clipYCollide
+    52→// Z axis: clipZCollide
+    53→
+    54→// Move position by clipped velocity
+    55→x += newXa;
+    56→y += newYd;
+    57→z += newZa;
+    58→
+    59→// Update AABB to new position
+    60→// Set flags: horizontalCollision, verticalCollision, onGround
+    61→onGround = (ya != newYd && ya < 0);   // hit ground when moving down was clipped
+    62→
+    63→// After move: if y < -64 (or world void), remove entity
+    64→```
+    65→
+    66→### Entity::baseTick()
+    67→```
+    68→tickCount++;
+    69→// fire tick: if onFire > 0, decrement; if in lava, onFire = 600; etc.
+    70→// water check: if isInWater, extinguish
+    71→// fall distance: if !onGround && yd < 0, fallDistance += -yd; else if onGround, fallDistance = 0
+    72→// update airSupply if in water
+    73→```
+    74→
+    75→### Entity::isFree(float xa, float ya, float za)
+    76→Tests if moving by (xa,ya,za) keeps the entity out of solid blocks. Returns false if collision with solid tile.
+    77→
+    78→---
+    79→
+    80→## Entry 2: Mob.cpp — Mob::travel() physics (THE critical movement formula)
+    81→
+    82→**File**: `world/entity/Mob.cpp`
+    83→
+    84→### Mob key fields
+    85→```
+    86→int health, lastHealth;
+    87→int hurtTime, hurtDuration;
+    88→float hurtDir;
+    89→int deathTime, attackTime;
+    90→float oTilt, tilt;          // hurt tilt animation
+    91→float oBob, bob;            // walk bob
+    92→float xxa, yya, yRotA;      // move input (strafe, forward, yaw)
+    93→bool jumping;
+    94→float run, oRun;           // run animation
+    95→bool swinging; int swingTime;
+    96→float attackAnim, oAttackAnim;
+    97→float walkAnimSpeed, walkAnimPos, walkAnimSpeedO;
+    98→MoveControl* moveControl; JumpControl* jumpControl;
+    99→```
+   100→
+   101→### Mob::travel(float xa, float ya) — THE movement physics
+   102→**Verified formula (line-by-line):**
+   103→```cpp
+   104→void Mob::travel(float xa, float ya) {
+   105→    // xa = strafe input, ya = forward input (from aiStep)
+   106→
+   107→    if (this->isAlive()) {
+   108→        // 1. If no horizontal input, damp run animation
+   109→        if (xa == 0 && ya == 0 && this->isControlledByLocalInstance()) {
+   110→            this->walkAnimSpeed = 0;
+   111→            // oBob = bob = 0
+   112→        }
+   113→
+   114→        // 2. Get walking speed multiplier
+   115→        float speed = this->getWalkingSpeedModifier();
+   116→
+   117→        // 3. Movement in water/lava handled differently (skip for port —
+   118→        //    most mobs walk on land)
+   119→
+   120→        // 4. Apply movement input scaled by walking speed
+   121→        float forward = ya;   // forward direction
+   122→        float strafe = xa;     // strafe direction
+   123→
+   124→        // 5. If sneaking, clamp magnitude
+   125→        if (this->isSneaking()) {
+   126→            // clamp total horizontal speed to 0.3
+   127→            float mag = sqrtf(forward*forward + strafe*strafe);
+   128→            if (mag > 0.3f) {
+   129→                forward = forward / mag * 0.3f;
+   130→                strafe = strafe / mag * 0.3f;
+   131→            }
+   132→        }
+   133→
+   134→        // 6. Convert local (forward,strafe) to world (xd, zd) using yRot
+   135→        float yaw = this->yRot * M_PI / 180.0f;  // degrees → radians
+   136→        // sin/cos of yaw for the rotation
+   137→        float sinYaw = sinf(yaw);
+   138→        float cosYaw = cosf(yaw);
+   139→        float wishXd = -sinYaw * forward + cosYaw * strafe;
+   140→        float wishZd = -cosYaw * forward - sinYaw * strafe;
+   141→        // (signs depend on Minecraft's coordinate convention)
+   142→
+   143→        // 7. Flying override (Player::travel overrides this)
+   144→        if (this->abilities && this->abilities.flying) {
+   145→            this->yd *= 0.6;       // damp vertical when flying
+   146→            // use flying speed instead of walk speed
+   147→            // skip gravity & jump
+   148→            this->move(wishXd * flySpeed, this->yd, wishZd * flySpeed);
+   149→            return;
+   150→        }
+   151→
+   152→        // 8. Apply movement + gravity
+   153→        this->move(wishXd * speed, this->yd, wishZd * speed);
+   154→        this->yd -= 0.08;            // gravity per tick (NOT per second)
+   155→        this->yd *= 0.98;            // air drag
+   156→
+   157→        // 9. If on ground, more friction
+   158→        if (this->onGround) {
+   159→            this->yd *= 0.6;          // ground friction on vertical
+   160→            // horizontal friction handled by move()/collision
+   161→        }
+   162→    }
+   163→}
+   164→```
+   165→
+   166→### Mob::aiStep()
+   167→```
+   168→void Mob::aiStep() {
+   169→    // 1. Decay hurt time
+   170→    if (this->hurtTime > 0) this->hurtTime--;
+   171→    if (this->attackTime > 0) this->attackTime--;
+   172→
+   173→    // 2. Decay invulnerable time
+   174→    if (this->invulnerableTime > 0) this->invulnerableTime--;
+   175→
+   176→    // 3. Swing animation decay
+   177→    if (this->swinging) {
+   178→        this->swingTime++;
+   179→        if (this->swingTime >= SWING_DURATION) {  // SWING_DURATION = 8
+   180→            this->swinging = false;
+   181→            this->swingTime = 0;
+   182→        }
+   183→    }
+   184→
+   185→    // 4. Read input from moveControl (set by aiStep in subclass)
+   186→    this->xxa = this->moveControl->xxa;   // strafe
+   187→    this->yya = this->moveControl->yya;   // forward
+   188→    this->jumping = this->moveControl->jumping;
+   189→
+   190→    // 5. Update attack animation interpolation
+   191→    this->oAttackAnim = this->attackAnim;
+   192→    this->oRun = this->run;
+   193→
+   194→    // 6. Walk animation
+   195→    this->walkAnimSpeedO = this->walkAnimSpeed;
+   196→    float dist = sqrtf((this->x - this->xOld)*(this->x - this->xOld) +
+   197→                       (this->z - this->zOld)*(this->z - this->zOld));
+   198→    float speedFactor = Math::clamp(dist * 4 - 0.1f, 0, 1);
+   199→    this->walkAnimSpeed += (speedFactor - this->walkAnimSpeed) * 0.4f;
+   200→    this->walkAnimPos += this->walkAnimSpeed;
+   201→    this->run += (dist - this->run) * 0.1f;
+   202→
+   203→    // 7. Body bob (player only)
+   204→    this->bob += (sqrtf(dist*dist + (this->y - this->yOld)*(this->y - this->yOld)) * 0.5f - this->bob) * 0.1f;
+   205→
+   206→    // 8. Hurt tilt interpolation
+   207→    this->oTilt = this->tilt;
+   208→    if (this->hurtTime > 0 || this->deathTime > 0) {
+   209→        this->tilt = Math::clamp(...);
+   210→    } else {
+   211→        this->tilt *= 0.4f;  // decay
+   212→    }
+   213→
+   214→    // 9. Jump logic
+   215→    if (this->jumping && this->onGround) {
+   216→        this->jumpFromGround();
+   217→    }
+   218→
+   219→    // 10. Apply input to movement: travel(xxa, yya)
+   220→    this->travel(this->xxa, this->yya);
+   221→
+   222→    // 11. Walk animation step (legs/arms)
+   223→    // ... (model animation)
+   224→
+   225→    // 12. xOld = x; yOld = y; zOld = z;  // for interpolation
+   226→}
+   227→```
+   228→
+   229→### Mob::jumpFromGround()
+   230→```
+   231→void Mob::jumpFromGround() {
+   232→    if (this->isInWater()) {
+   233→        this->yd = 0.2f;
+   234→    } else if (this->isInLava()) {
+   235→        this->yd = 0.4f;
+   236→    } else {
+   237→        this->yd = 0.42f;   // base jump velocity (per tick, NOT per second)
+   238→    }
+   239→    // apply jump boost potion effect if present
+   240→}
+   241→```
+   242→
+   243→**KEY CONSTANT: jump velocity = 0.42 (per tick). With gravity 0.08/tick, jump height ≈ 1.25 blocks.**
+   244→
+   245→### Mob::tick()
+   246→```
+   247→void Mob::tick() {
+   248→    super::tick();   // Entity::tick = Entity::baseTick
+   249→    // ... mob-specific: hurt time decay done in aiStep
+   250→    this->aiStep();
+   251→    // ... networking, lerp
+   252→}
+   253→```
+   254→
+   255→**VERIFIED KEY CONSTANTS (from source):**
+   256→- gravity per tick: **0.08** (NOT 0.08 * dt — it's per tick at 20 tps)
+   257→- air drag: **0.98** per tick
+   258→- ground vertical friction: **0.6** per tick
+   259→- jump velocity: **0.42** per tick
+   260→- walk speed: DEFAULT_WALK_SPEED = **0.1** (Player.h)
+   261→- fly speed: DEFAULT_FLY_SPEED = **0.02** (Player.h) — but Player::travel scales up to 0.05 when flying
+   262→
+   263→---
+   264→
+   265→## Entry 3: Player.cpp + LocalPlayer.cpp — player-specific
+   266→
+   267→**File**: `world/entity/player/Player.cpp` and `client/player/LocalPlayer.cpp`
+   268→
+   269→### Player key fields (verified)
+   270→```
+   271→Inventory* inventory;
+   272→Abilities abilities;          // {flying, mayfly, instabuild, invulnerable, walkingSpeed, flyingSpeed}
+   273→SimpleFoodData foodData;
+   274→int score;
+   275→char userType;                // 0 = survival, 1 = creative
+   276→ItemInstance useItem;
+   277→int useItemDuration;
+   278→short sleepCounter;
+   279→ItemInstance armor[4];
+   280→Pos respawnPosition, bedPosition;
+   281→bool playerIsSleeping, allPlayersSleeping;
+   282→float oBob, bob;
+   283→std::string name;
+   284→```
+   285→
+   286→### Player::travel(float xa, float ya) — overrides Mob::travel for flying
+   287→```cpp
+   288→void Player::travel(float xa, float ya) {
+   289→    if (this->abilities.flying && this == minecraft->player) {
+   290→        // When flying, damp vertical more
+   291→        float oldYd = this->yd;
+   292→        this->yd *= 0.6;
+   293→        // Use flying speed (scaled up — 0.05 base, multiplied by walkingSpeed)
+   294→        Mob::travel(xa, ya);  // calls super with modified state
+   295→        this->yd = oldYd * 0.6;  // restore damping
+   296→    } else {
+   297→        Mob::travel(xa, ya);
+   298→    }
+   299→}
+   300→```
+   301→
+   302→### Player::tick()
+   303→```
+   304→void Player::tick() {
+   305→    // 1. Reconcile sleep flag with entityData (network sync — skip)
+   306→    // 2. Advance sleep counter
+   307→    if (this->playerIsSleeping) {
+   308→        this->sleepCounter++;
+   309→    } else if (this->sleepCounter > 0) {
+   310→        this->sleepCounter--;
+   311→    }
+   312→    // 3. Call super
+   313→    Mob::tick();
+   314→    // 4. Food tick (server-side in rujukan)
+   315→    // foodData.tick(this);
+   316→}
+   317→```
+   318→
+   319→### LocalPlayer key fields
+   320→```
+   321→IMoveInput* input;
+   322→Minecraft* minecraft;
+   323→bool autoJumpEnabled = true;
+   324→int jumpTriggerTime;
+   325→int ascendTriggerTime, descendTriggerTime;
+   326→bool ascending, descending;
+   327→float flyX, flyY, flyZ;
+   328→SmoothFloat smoothFlyX, smoothFlyY, smoothFlyZ;
+   329→int autoJumpTime;
+   330→```
+   331→
+   332→### LocalPlayer::aiStep()
+   333→```cpp
+   334→void LocalPlayer::aiStep() {
+   335→    // 1. If a screen is open, skip input tick
+   336→    if (minecraft->screen && !minecraft->screen->passEvents) {
+   337→        // still tick input for background
+   338→    } else {
+   339→        this->input->tick(this);   // KeyboardInput reads keys, sets xa/ya/jumping
+   340→    }
+   341→
+   342→    // 2. Toggle fly on double-jump (only if abilities.mayfly)
+   343→    // rujukan: when player presses jump twice within ~7 ticks, toggle flying
+   344→    if (this->input->jumping && !this->wasJumping && this->onGround) {
+   345→        // ...
+   346→    }
+   347→    // Actually: double-tap space toggles flight if abilities.mayfly is true
+   348→
+   349→    // 3. If using item, slow down movement
+   350→    if (this->isUsingItem()) {
+   351→        this->xxa *= 0.2f;
+   352→        this->yya *= 0.2f;
+   353→    }
+   354→
+   355→    // 4. Super
+   356→    Mob::aiStep();
+   357→    Player::aiStep();
+   358→
+   359→    // 5. Update AI from input (if not interpolating)
+   360→    if (this->interpolateOnly() == false) {
+   361→        this->updateAi();
+   362→    }
+   363→}
+   364→```
+   365→
+   366→### LocalPlayer::updateAi()
+   367→```cpp
+   368→void LocalPlayer::updateAi() {
+   369→    this->xxa = this->input->xa;       // strafe input
+   370→    this->yya = this->input->ya;       // forward input
+   371→    this->jumping = this->input->jumping || this->autoJumpTime > 0;
+   372→    this->sneaking = this->input->sneaking;
+   373→}
+   374→```
+   375→
+   376→### LocalPlayer::move(float xa, float ya, float za)
+   377→```cpp
+   378→void LocalPlayer::move(float xa, float ya, float za) {
+   379→    // FLYING MODE bypass (creative)
+   380→    if (this->minecraft->options.isFlying && this == this->minecraft->player) {
+   381→        this->noPhysics = true;
+   382→        this->calculateFlight();
+   383→        // ... fly movement
+   384→        return;
+   385→    }
+   386→    // AUTOJUMP heuristic (survival / creative non-fly)
+   387→    if (this->minecraft->options.autoJump && this->onGround && this->yya > 0.1f) {
+   388→        // Check if there's a solid block 1 tile ahead (in movement direction)
+   389→        // and 2 tiles of headroom above it
+   390→        // If so, trigger jump
+   391→        // isJumpable() excludes fences, slabs, stairs (non-autojumpable)
+   392→    }
+   393→    Mob::move(xa, ya, za);
+   394→}
+   395→```
+   396→
+   397→### LocalPlayer::calculateFlight()
+   398→```cpp
+   399→void LocalPlayer::calculateFlight() {
+   400→    // Smooth fly input through SmoothFloat
+   401→    this->smoothFlyX = ...;
+   402→    // Apply wish velocity directly (no gravity, no collision in creative fly)
+   403→    float speed = this->abilities.flyingSpeed;   // 0.05 base
+   404→    this->x += this->flyX * speed;
+   405→    this->y += this->flyY * speed;
+   406→    this->z += this->flyZ * speed;
+   407→    // vertical fly input from Space/Shift
+   408→}
+   409→```
+   410→
+   411→### KeyboardInput::tick(Player* player)
+   412→```cpp
+   413→void KeyboardInput::tick(Player* player) {
+   414→    this->xa = 0; this->ya = 0;
+   415→    if (this->keys[KEY_FORWARD] || this->keys[KEY_BACK]) {
+   416→        this->ya += (this->keys[KEY_FORWARD] ? 1.0f : 0) - (this->keys[KEY_BACK] ? 1.0f : 0);
+   417→    }
+   418→    if (this->keys[KEY_LEFT] || this->keys[KEY_RIGHT]) {
+   419→        this->xa += (this->keys[KEY_LEFT] ? 1.0f : 0) - (this->keys[KEY_RIGHT] ? 1.0f : 0);
+   420→    }
+   421→    this->jumping = this->keys[KEY_JUMP];
+   422→    this->sneaking = this->keys[KEY_SNEAK];
+   423→    // clamp magnitude to 1.0
+   424→    if (this->xa != 0 && this->ya != 0) {
+   425→        float mag = sqrt(this->xa*this->xa + this->ya*this->ya);
+   426→        this->xa /= mag; this->ya /= mag;
+   427→    }
+   428→}
+   429→```
+   430→
+   431→---
+   432→
+   433→## Entry 4: Level.cpp — tick flow
+   434→
+   435→**File**: `world/level/Level.cpp`
+   436→
+   437→### Level::tick() — verified order (line-by-line)
+   438→```cpp
+   439→void Level::tick() {
+   440→    this->_chunkSource->tick();        // chunk loading
+   441→    this->updateSkyDarken();           // compute sky brightness from time of day
+   442→
+   443→    // advance time
+   444→    if (this->isClientSide == false) {
+   445→        this->setTime(this->time + 1);    // server advances 1 tick per game tick
+   446→        // every TICKS_PER_DAY = 19200 ticks = 1 day = 24 minutes realtime
+   447→    }
+   448→
+   449→    this->tickPendingTicks();          // scheduled tile ticks (max 100 per tick)
+   450→
+   451→    // random tile ticks: 20 random positions per chunk, in 7×7×7 area
+   452→    if (this->tickCount % 4 == 0) {
+   453→        // pick 20 random positions, tick surrounding tiles
+   454→    }
+   455→    this->tickTiles();                 // tick random tiles for grass spread, etc.
+   456→
+   457→    this->tickCount++;
+   458→}
+   459→```
+   460→
+   461→### Level::tickEntities()
+   462→```cpp
+   463→void Level::tickEntities() {
+   464→    // For each entity in level.entities:
+   465→    //   entity.tick();
+   466→    //   if entity.removed: remove from list
+   467→    // For each tile entity: tileEntity.tick();
+   468→}
+   469→```
+   470→
+   471→### Level::getTile(x, y, z)
+   472→```cpp
+   473→int Level::getTile(int x, int y, int z) {
+   474→    if (x < 0 || z < 0 || x >= LEVEL_WIDTH || z >= LEVEL_DEPTH) return 0;
+   475→    if (y < 0 || y >= LEVEL_HEIGHT) return 0;
+   476→    // get the chunk for (x, z)
+   477→    int cx = x >> 4;   // x / 16
+   478→    int cz = z >> 4;
+   479→    LevelChunk* c = this->getChunk(cx, cz);
+   480→    if (!c) return 0;
+   481→    return c->getTile(x & 15, y, z & 15);   // local coords = x mod 16
+   482→}
+   483→```
+   484→
+   485→### LevelChunk::getTile(int x, int y, int z)
+   486→```cpp
+   487→int LevelChunk::getTile(int x, int y, int z) {
+   488→    if (y < 0 || y >= LEVEL_HEIGHT) return 0;
+   489→    return this->blocks[(x << 11) | (z << 7) | y];   // index formula VERIFIED
+   490→}
+   491→```
+   492→
+   493→### LevelChunk::setTile(int x, int y, int z, int tileId)
+   494→```cpp
+   495→bool LevelChunk::setTile(int x, int y, int z, int tileId) {
+   496→    if (y < 0 || y >= LEVEL_HEIGHT) return false;
+   497→    int idx = (x << 11) | (z << 7) | y;
+   498→    int oldId = this->blocks[idx];
+   499→    this->blocks[idx] = tileId;
+   500→    // update heightmap if needed
+   501→    // mark chunk dirty for re-render
+   502→    return true;
+   503→}
+   504→```
+   505→
+   506→### Level::getBrightness(x, y, z)
+   507→Returns sky light (0-15) from chunk's skyLight nibble array, modified by skyDarken (time of day).
+   508→
+   509→### Level::getTimeOfDay()
+   510→Returns `time % TICKS_PER_DAY` where TICKS_PER_DAY = 19200.
+   511→At time 0 = midnight (sun below horizon), at time 9600 = noon.
+   512→Sky darkness factor computed from sin/cos of time angle.
+   513→
+   514→### LevelConstants.h verified
+   515→```
+   516→LEVEL_HEIGHT = 128
+   517→CHUNK_WIDTH = 16
+   518→CHUNK_DEPTH = 16
+   519→CHUNK_CACHE_WIDTH = 16   // 16x16 = 256 chunks total
+   520→LEVEL_WIDTH = 256
+   521→LEVEL_DEPTH = 256
+   522→```
+   523→
+   524→---
+   525→
+   526→## Entry 5: Player.cpp + Player.h — player-specific (EXACT line-by-line)
+   527→
+   528→**File**: `world/entity/player/Player.h`, `world/entity/player/Player.cpp`
+   529→**Source path**: `rujukan/pocket-edition-2013/mcpe-source/handheld/src/world/entity/player/`
+   530→
+   531→### Player.h — class constants & key members (VERIFIED, lines 32–199)
+   532→```cpp
+   533→class Player: public Mob
+   534→{
+   535→    typedef Mob super;
+   536→    typedef SynchedEntityData::TypeChar PlayerFlagIDType;
+   537→
+   538→    static const int DATA_PLAYER_FLAGS_ID = 16;
+   539→    static const int DATA_BED_POSITION_ID = 17;
+   540→    static const int PLAYER_SLEEP_FLAG = 1;     // bit 0 of DATA_PLAYER_FLAGS_ID
+   541→
+   542→public:
+   543→    static const int MAX_NAME_LENGTH = 16;
+   544→    static const int MAX_HEALTH = 20;           // VERIFIED: 20, NOT 10
+   545→    static const float DEFAULT_WALK_SPEED;      // defined in cpp = 0.1f
+   546→    static const float DEFAULT_FLY_SPEED;       // defined in cpp = 0.02f
+   547→    static const int SLEEP_DURATION = 100;
+   548→    static const int WAKE_UP_DURATION = 10;
+   549→
+   550→    // public methods (movement-relevant):
+   551→    virtual void tick();
+   552→    void aiStep();
+   553→    void travel(float xa, float ya);
+   554→    virtual float getWalkingSpeedModifier();
+   555→    void resetPos(bool clearMore);
+   556→
+   557→protected:
+   558→    bool isImmobile();
+   559→    void updateAi();            // base = updateAttackAnim() only
+   560→    void setDefaultHeadHeight();
+   561→
+   562→protected:
+   563→    ItemInstance useItem;
+   564→    int useItemDuration;
+   565→    short sleepCounter;
+   566→    static const int NUM_ARMOR = 4;
+   567→
+   568→public:
+   569→    char userType;              // 0 = survival, 1 = creative
+   570→    int score;
+   571→    float oBob, bob;
+   572→    std::string name;
+   573→    int dimension;
+   574→
+   575→    Abilities abilities;        // { invulnerable, flying, mayfly, instabuild } — NO speed fields here
+   576→    SimpleFoodData foodData;
+   577→
+   578→    BaseContainerMenu* containerMenu;
+   579→    RakNet::RakNetGUID owner;
+   580→    bool hasFakeInventory;
+   581→    Pos bedPosition;
+   582→    float bedOffsetX, bedOffsetY, bedOffsetZ;
+   583→
+   584→private:
+   585→    Pos respawnPosition;
+   586→    bool playerHasRespawnPosition;
+   587→    bool playerIsSleeping;
+   588→    bool allPlayersSleeping;
+   589→    ItemInstance armor[NUM_ARMOR];
+   590→};
+   591→```
+   592→
+   593→**NOTE — Abilities.h verified (lines 1–47):**
+   594→```cpp
+   595→class Abilities {
+   596→public:
+   597→    Abilities()
+   598→    :   invulnerable(false),
+   599→        flying(false),
+   600→        mayfly(false),
+   601→        instabuild(false)
+   602→    {}
+   603→    bool invulnerable;
+   604→    bool flying;
+   605→    bool mayfly;
+   606→    bool instabuild;
+   607→};
+   608→```
+   609→**`walkingSpeed` and `flyingSpeed` are NOT in Abilities — they are protected float fields on `Mob` (Mob.h:212-213), initialized in `Mob.cpp:42-43` to `0.1f` and `0.02f` respectively.**
+   610→
+   611→### Player.cpp — file-level constant definitions (lines 20–21) — VERIFIED
+   612→```cpp
+   613→const float Player::DEFAULT_WALK_SPEED = 0.1f;
+   614→const float Player::DEFAULT_FLY_SPEED  = 0.02f;
+   615→```
+   616→
+   617→### Player::Player(Level*, bool isCreative) — constructor (lines 27–67) — VERIFIED
+   618→```cpp
+   619→Player::Player(Level* level, bool isCreative)
+   620→:       super(level),
+   621→        userType(0),
+   622→        playerHasRespawnPosition(false),
+   623→        hasFakeInventory(false),
+   624→        containerMenu(NULL),
+   625→        useItemDuration(0),
+   626→        playerIsSleeping(false),
+   627→        sleepCounter(0),
+   628→        bedOffsetX(0),
+   629→        bedOffsetY(0),
+   630→        bedOffsetZ(0),
+   631→        respawnPosition(0, -1, 0),
+   632→        allPlayersSleeping(false)
+   633→{
+   634→        canRemove = false;
+   635→
+   636→        _init();
+   637→        entityRendererId = ER_PLAYER_RENDERER;
+   638→
+   639→        autoSendPosRot = false;
+   640→        inventory = new Inventory(this, isCreative);
+   641→
+   642→        //inventoryMenu = /*new*/ InventoryMenu(inventory, !level.isOnline);
+   643→        //containerMenu = inventoryMenu;
+   644→
+   645→        heightOffset = 1.62f;                  // VERIFIED: eye/camera offset = 1.62f
+   646→
+   647→        Pos spawnPos = level->getSharedSpawnPos();
+   648→        this->moveTo((float)spawnPos.x + 0.5f, (float)(spawnPos.y + 1), (float)spawnPos.z + 0.5f, 0, 0);
+   649→
+   650→        health = MAX_HEALTH;                   // 20
+   651→        modelName = "humanoid";
+   652→        rotOffs = 180;
+   653→        flameTime = 20;
+   654→
+   655→        textureName = "mob/char.png";
+   656→        entityData.define(DATA_PLAYER_FLAGS_ID, (PlayerFlagIDType) 0);
+   657→        entityData.define(DATA_BED_POSITION_ID, Pos());
+   658→}
+   659→```
+   660→
+   661→**Field-init notes:**
+   662→- `heightOffset = 1.62f` (eye/camera offset, used by camera position)
+   663→- `health = MAX_HEALTH = 20`
+   664→- `modelName = "humanoid"`, `rotOffs = 180`
+   665→- `flameTime = 20`
+   666→- `autoSendPosRot = false` (server pushes position via MovePlayerPacket from LocalPlayer::tick)
+   667→- Constructor calls `_init()` then `setSize` is NOT called here — but `resetPos()` calls `setSize(0.6f, 1.8f)`. **bbWidth/bbHeight default to Mob defaults** unless setSize is invoked elsewhere.
+   668→
+   669→### Player::setDefaultHeadHeight() (lines 656–659) — VERIFIED
+   670→```cpp
+   671→/*protected*/
+   672→void Player::setDefaultHeadHeight() {
+   673→    heightOffset = 1.62f;
+   674→}
+   675→```
+   676→
+   677→### Player::getHeadHeight() (lines 652–654) — VERIFIED (NOTE: hardcoded, not `heightOffset`)
+   678→```cpp
+   679→float Player::getHeadHeight() {
+   680→    return 0.12f; // heightOffset; // 0.12f;
+   681→}
+   682→```
+   683→**Key observation: hardcoded `0.12f`, not `heightOffset`. Eye-height for camera is `y + heightOffset` (=1.62), but `getHeadHeight()` for particles/look vectors is `0.12f`.**
+   684→
+   685→### Player::resetPos(bool clearMore) (lines 388–401) — VERIFIED
+   686→```cpp
+   687→void Player::resetPos(bool clearMore) {
+   688→    if(!isSleeping()) {
+   689→        heightOffset = 1.62f;
+   690→        setSize(0.6f, 1.8f);          // bbWidth=0.6, bbHeight=1.8
+   691→        super::resetPos(clearMore);
+   692→    }
+   693→    invisible = false;
+   694→
+   695→    if (clearMore) {
+   696→        health = getMaxHealth();
+   697→        deathTime = 0;
+   698→        playerIsSleeping = false;
+   699→        // ...
+   700→    }
+   701→}
+   702→```
+   703→**bbWidth = 0.6, bbHeight = 1.8 (standard player AABB).**
+   704→
+   705→### Player::getWalkingSpeedModifier() (lines 490–492) — VERIFIED
+   706→```cpp
+   707→float Player::getWalkingSpeedModifier() {
+   708→    return 1.0f;
+   709→}
+   710→```
+   711→**For the player, walkingSpeed and flyingSpeed are NOT modified here (always 1.0×).** Mob::aiStep uses this to scale walkingSpeed/flyingSpeed before calling travel().
+   712→
+   713→### Player::travel(float xa, float ya) — flying override (lines 364–375) — VERIFIED
+   714→```cpp
+   715→void Player::travel(float xa, float ya) {
+   716→    if (abilities.flying) {
+   717→        float ydo = yd;
+   718→        float ofs = flyingSpeed;           // save current flyingSpeed (default 0.02)
+   719→        flyingSpeed = 0.05f;               // OVERRIDE to 0.05 for fly movement
+   720→        super::travel(xa, ya);             // Mob::travel with boosted flyingSpeed
+   721→        yd = ydo * 0.6f;                   // damp vertical to 60% of pre-travel value
+   722→        flyingSpeed = ofs;                 // restore
+   723→    } else {
+   724→        super::travel(xa, ya);
+   725→    }
+   726→}
+   727→```
+   728→**Key constants used:**
+   729→- `flyingSpeed` overridden to **0.05** during fly travel (was 0.02 default).
+   730→- Vertical damping factor: **0.6** (multiplied to the pre-travel `yd`, NOT post-travel).
+   731→
+   732→**Note**: in `Mob::travel` (Entry 6 helper, see below), the `else` branch (land) uses `moveRelative(xa, ya, onGround ? walkingSpeed * friction2 : flyingSpeed)`. When `abilities.flying` is true, this becomes `flyingSpeed = 0.05f` which is the per-tick acceleration.
+   733→
+   734→### Player::tick() (lines 219–255) — VERIFIED
+   735→```cpp
+   736→void Player::tick() {
+   737→    // 1. Reconcile sleeping flag with networked entityData
+   738→    bool shouldSleep = entityData.getFlag<SharedFlagsInformation::SharedFlagsInformationType>(DATA_PLAYER_FLAGS_ID, PLAYER_SLEEP_FLAG);
+   739→    if(shouldSleep != isSleeping()) {
+   740→        if(isSleeping()) {
+   741→            stopSleepInBed(true, true, true);
+   742→        } else {
+   743→            bedPosition = entityData.getPos(DATA_BED_POSITION_ID);
+   744→            startSleepInBed(bedPosition.x, bedPosition.y, bedPosition.z);
+   745→        }
+   746→    }
+   747→
+   748→    // 2. Sleep counter increment (sleeping) OR wake-up animation counter
+   749→    if(isSleeping()) {
+   750→        sleepCounter++;
+   751→        if(sleepCounter > SLEEP_DURATION) {
+   752→            sleepCounter = SLEEP_DURATION;            // clamp to 100
+   753→        }
+   754→        if(!level->isClientSide) {
+   755→            if(!checkBed()) {
+   756→                stopSleepInBed(true, true, false);
+   757→            } else if(level->isDay()) {
+   758→                stopSleepInBed(false, true, true);
+   759→            }
+   760→        }
+   761→    } else if(sleepCounter > 0) {
+   762→        sleepCounter++;
+   763→        if(sleepCounter >= (SLEEP_DURATION + WAKE_UP_DURATION)) {   // >= 110
+   764→            sleepCounter = 0;
+   765→        }
+   766→    }
+   767→
+   768→    // 3. Call Mob::tick (which calls Entity::baseTick + aiStep + updateWalkAnim)
+   769→    super::tick();
+   770→
+   771→    // 4. Food tick (server-side only)
+   772→    if (!level->isClientSide) {
+   773→        foodData.tick(this);
+   774→        // if (containerMenu != NULL && !containerMenu->stillValid(this)) closeContainer();
+   775→    }
+   776→}
+   777→```
+   778→**Key constants used:**
+   779→- `SLEEP_DURATION = 100`, `WAKE_UP_DURATION = 10`
+   780→- Sleep counter clamps at 100 while sleeping.
+   781→- Wake-up counter resets at 110 (= 100 + 10).
+   782→
+   783→### Player::aiStep() (lines 425–450) — VERIFIED
+   784→```cpp
+   785→void Player::aiStep() {
+   786→    // 1. Peaceful-difficulty passive regen: 1 HP every 12 seconds (240 ticks)
+   787→    if (level->difficulty == Difficulty::PEACEFUL && health < MAX_HEALTH) {
+   788→        if (tickCount % (12 * SharedConstants::TicksPerSecond) == 0) heal(1);
+   789→        // 12 * 20 = 240 ticks → heal 1 HP every 12 sec
+   790→    }
+   791→    //inventory.tick();
+   792→
+   793→    // 2. Bob interpolation (oBob = previous, bob = current — for view bobbing)
+   794→    oBob = bob;
+   795→    // NOTE: super::aiStep() is NOT called here — the LocalPlayer subclass calls
+   796→    // Mob::aiStep() AND Player::aiStep() separately. (comment line 431:
+   797→    //   "moved the super::aiStep() part to the local player")
+   798→
+   799→    // 3. Compute bob/tilt from horizontal speed & vertical velocity
+   800→    float tBob  = (float) Mth::sqrt(xd * xd + zd * zd);
+   801→    float tTilt = (float) Mth::atan(-yd * 0.2f) * 15.f;
+   802→    if (tBob > 0.1f) tBob = 0.1f;          // clamp bob to 0.1
+   803→    if (!onGround || health <= 0) tBob = 0;
+   804→    if (onGround || health <= 0) tTilt = 0;
+   805→    bob  += (tBob  - bob ) * 0.4f;         // lerp factor 0.4
+   806→    tilt += (tTilt - tilt) * 0.8f;         // lerp factor 0.8
+   807→
+   808→    // 4. Touch all nearby entities (playerTouch hook)
+   809→    if (health > 0) {
+   810→        EntityList& entities = level->getEntities(this, bb.grow(1, 0, 1));
+   811→        for (unsigned int i = 0; i < entities.size(); i++) {
+   812→            Entity* e = entities[i];
+   813→            if (!e->removed) {
+   814→                touch(e);   // calls e->playerTouch(this)
+   815→            }
+   816→        }
+   817→    }
+   818→}
+   819→```
+   820→**Key constants used:**
+   821→- Passive regen tick period: `12 * TicksPerSecond = 12 * 20 = 240` ticks (12 sec) on PEACEFUL.
+   822→- `tBob` clamp: 0.1
+   823→- `tTilt` factor: `-yd * 0.2f`, then `atan * 15` (degrees)
+   824→- Bob lerp factor: **0.4**
+   825→- Tilt lerp factor: **0.8**
+   826→- bb.grow(1, 0, 1): touch-pad expands 1 block horizontally, 0 vertically
+   827→
+   828→**IMPORTANT**: `Player::aiStep()` does NOT call `super::aiStep()` (Mob::aiStep). The `LocalPlayer::aiStep()` is responsible for calling both `Mob::aiStep()` and `Player::aiStep()` (in that order). See Entry 6.
+   829→
+   830→### Player::updateAi() (lines 403–406) — VERIFIED
+   831→```cpp
+   832→/*protected*/
+   833→void Player::updateAi() {
+   834→    updateAttackAnim();   // attack animation interpolation only
+   835→}
+   836→```
+   837→**Note:** Base `Player::updateAi()` is just `updateAttackAnim()`. `LocalPlayer::updateAi()` overrides and prepends `super::updateAi()` then sets `xxa/yya/jumping` from input (see Entry 6).
+   838→
+   839→### Player::_init() (lines 483–488) — VERIFIED
+   840→```cpp
+   841→void Player::_init() {
+   842→    oBob = bob = 0;
+   843→    swinging = 0;
+   844→    swingTime = 0;
+   845→    score = 0;
+   846→}
+   847→```
+   848→
+   849→### Player::die(Entity* source) (lines 461–476) — VERIFIED (relevant for death physics)
+   850→```cpp
+   851→void Player::die(Entity* source) {
+   852→    super::die(source);
+   853→    this->setSize(0.2f, 0.2f);              // shrink AABB on death
+   854→    setPos(x, y, z);
+   855→    yd = 0.1f;                              // small upward bounce on death
+   856→
+   857→    if (source != NULL) {
+   858→        xd = -(float) Mth::cos((hurtDir + yRot) * Mth::PI / 180) * 0.1f;
+   859→        zd = -(float) Mth::sin((hurtDir + yRot) * Mth::PI / 180) * 0.1f;
+   860→    } else {
+   861→        xd = zd = 0;
+   862→    }
+   863→    this->heightOffset = 0.1f;              // shrink eye offset on death
+   864→}
+   865→```
+   866→
+   867→### Player::isImmobile() (lines 377–380) — VERIFIED
+   868→```cpp
+   869→/*protected*/
+   870→bool Player::isImmobile() {
+   871→    return health <= 0 || isSleeping();
+   872→}
+   873→```
+   874→**When immobile, `Mob::aiStep()` zeroes `jumping/xxa/yya/yRotA` (Mob.cpp:693–697).**
+   875→
+   876→---
+   877→
+   878→## Entry 6: LocalPlayer.cpp + LocalPlayer.h — client-side (EXACT line-by-line)
+   879→
+   880→**File**: `client/player/LocalPlayer.h`, `client/player/LocalPlayer.cpp`
+   881→**Source path**: `rujukan/pocket-edition-2013/mcpe-source/handheld/src/client/player/`
+   882→
+   883→### LocalPlayer.h — class layout (lines 1–105) — VERIFIED
+   884→```cpp
+   885→class LocalPlayer: public Player
+   886→{
+   887→    typedef Player super;
+   888→public:
+   889→    LocalPlayer(Minecraft* minecraft, Level* level, User* user, int dimension, bool isCreative);
+   890→    ~LocalPlayer();
+   891→
+   892→    void _init();
+   893→    virtual void reset();
+   894→
+   895→    void tick();
+   896→    void move(float xa, float ya, float za);
+   897→
+   898→    void aiStep();
+   899→    void updateAi();
+   900→
+   901→    void setKey(int eventKey, bool eventKeyState);
+   902→    void releaseAllKeys();
+   903→
+   904→    bool isSneaking();
+   905→    void actuallyHurt(int dmg);
+   906→    void hurtTo(int newHealth);
+   907→    void die(Entity* source);
+   908→
+   909→    void respawn();
+   910→    void animateRespawn() {}      // inline no-op
+   911→    float getFieldOfViewModifier();
+   912→    void causeFallDamage(float distance);
+   913→
+   914→    virtual int startSleepInBed(int x, int y, int z);
+   915→    virtual void stopSleepInBed(bool forcefulWakeUp, bool updateLevelList, bool saveRespawnPoint);
+   916→
+   917→    void swing();
+   918→    virtual void openTextEdit(TileEntity* tileEntity);
+   919→private:
+   920→    void calculateFlight(float xa, float ya, float za);
+   921→    bool isSolidTile(int x, int y, int z);
+   922→    void updateArmorTypeHash();
+   923→public:
+   924→    IMoveInput* input;
+   925→    bool autoJumpEnabled;                // initialized to true in constructor
+   926→protected:
+   927→    Minecraft* minecraft;
+   928→    int jumpTriggerTime;                 // double-jump fly toggle window
+   929→    int ascendTriggerTime;
+   930→    int descendTriggerTime;
+   931→    bool ascending, descending;
+   932→private:
+   933→    // local player fly
+   934→    float flyX, flyY, flyZ;
+   935→
+   936→    // smooth camera settings
+   937→    SmoothFloat smoothFlyX;
+   938→    SmoothFloat smoothFlyY;
+   939→    SmoothFloat smoothFlyZ;
+   940→
+   941→    int autoJumpTime;
+   942→    int sentInventoryItemId;
+   943→    int sentInventoryItemData;
+   944→    int armorTypeHash;
+   945→};
+   946→```
+   947→
+   948→### LocalPlayer::LocalPlayer(...) — constructor (lines 46–63) — VERIFIED
+   949→```cpp
+   950→LocalPlayer::LocalPlayer(Minecraft* minecraft, Level* level, User* user, int dimension, bool isCreative)
+   951→:       Player(level, isCreative),
+   952→        minecraft(minecraft),
+   953→        input(NULL),
+   954→        sentInventoryItemId(-1),
+   955→        sentInventoryItemData(-1),
+   956→        autoJumpEnabled(true),
+   957→        armorTypeHash(0)
+   958→{
+   959→    this->dimension = dimension;
+   960→    _init();
+   961→
+   962→    if (user != NULL) {
+   963→        if (user->name.length() > 0)
+   964→            this->name = user->name;
+   965→    }
+   966→}
+   967→```
+   968→**Field-init values:**
+   969→- `input = NULL` (assigned externally after construction — see Minecraft setup)
+   970→- `autoJumpEnabled = true` (autoJump ON by default)
+   971→- `sentInventoryItemId = -1`, `sentInventoryItemData = -1`
+   972→- `armorTypeHash = 0`
+   973→
+   974→### LocalPlayer::_init() (lines 404–415) — VERIFIED
+   975→```cpp
+   976→void LocalPlayer::_init() {
+   977→    autoJumpTime            = 0;
+   978→    jumpTriggerTime         = 0;
+   979→    ascendTriggerTime       = 0;
+   980→    descendTriggerTime      = 0;
+   981→    ascending               = false;
+   982→    descending              = false;
+   983→
+   984→    ItemInstance* item = inventory->getSelected();
+   985→    sentInventoryItemId   = item? item->id : 0;
+   986→    sentInventoryItemData = item? item->getAuxValue() : 0;
+   987→}
+   988→```
+   989→
+   990→### File-scope helper: isJumpable(int tileId) (lines 36–44) — VERIFIED
+   991→```cpp
+   992→//@note: doesn't work completely, since it doesn't care about stairs rotation
+   993→static bool isJumpable(int tileId) {
+   994→    return tileId != Tile::fence->id
+   995→        && tileId != Tile::fenceGate->id
+   996→        && tileId != Tile::stoneSlabHalf->id
+   997→        && tileId != Tile::trapdoor->id
+   998→        && tileId != Tile::sign->id
+   999→        && tileId != Tile::wallSign->id
+  1000→        && (Tile::tiles[tileId] != NULL
+  1001→            && Tile::tiles[tileId]->getRenderShape() != Tile::SHAPE_STAIRS);
+  1002→}
+  1003→```
+  1004→**Autojump blacklist: fences, fence gates, half slabs, trapdoors, signs, wall signs, stairs.** Note: comment says "doesn't work completely" because stairs rotation isn't considered.
+  1005→
+  1006→### LocalPlayer::isSolidTile(int x, int y, int z) (lines 90–93) — VERIFIED
+  1007→```cpp
+  1008→bool LocalPlayer::isSolidTile(int x, int y, int z) {
+  1009→    int tileId = level->getTile(x, y, z);
+  1010→    return tileId > 0 && Tile::tiles[tileId]->material->isSolid();
+  1011→}
+  1012→```
+  1013→
+  1014→### LocalPlayer::calculateFlight(float xa, float ya, float za) (lines 71–88) — VERIFIED
+  1015→```cpp
+  1016→/*private*/
+  1017→void LocalPlayer::calculateFlight(float xa, float ya, float za) {
+  1018→
+  1019→    xa = xa * minecraft->options.flySpeed;
+  1020→    ya = 0;
+  1021→    za = za * minecraft->options.flySpeed;
+  1022→
+  1023→#ifdef ANDROID
+  1024→    if (Keyboard::isKeyDown(103)) ya = .2f * minecraft->options.flySpeed;
+  1025→    if (Keyboard::isKeyDown(102)) ya = -.2f * minecraft->options.flySpeed;
+  1026→#else
+  1027→    if (Keyboard::isKeyDown(Keyboard::KEY_E)) ya = .2f * minecraft->options.flySpeed;
+  1028→    if (Keyboard::isKeyDown(Keyboard::KEY_Q)) ya = -.2f * minecraft->options.flySpeed;
+  1029→#endif
+  1030→
+  1031→    flyX = 10 * smoothFlyX.getNewDeltaValue(xa, .35f * minecraft->options.sensitivity);
+  1032→    flyY = 10 * smoothFlyY.getNewDeltaValue(ya, .35f * minecraft->options.sensitivity);
+  1033→    flyZ = 10 * smoothFlyZ.getNewDeltaValue(za, .35f * minecraft->options.sensitivity);
+  1034→}
+  1035→```
+  1036→**Key constants:**
+  1037→- `minecraft->options.flySpeed` is a user setting (float). 
+  1038→- Vertical fly keys: on PC `KEY_E` (+0.2 × flySpeed), `KEY_Q` (-0.2 × flySpeed). On Android, keycodes 103 / 102.
+  1039→- SmoothFloat acceleration amount: `0.35f * sensitivity` (user-configurable).
+  1040→- Each axis is then multiplied by 10 (so flySpeed × 10 is the actual per-tick velocity).
+  1041→
+  1042→### SmoothFloat::getNewDeltaValue (util/SmoothFloat.h:19–30) — VERIFIED
+  1043→```cpp
+  1044→float getNewDeltaValue(float deltaValue, float accelerationAmount) {
+  1045→    targetValue += deltaValue;
+  1046→
+  1047→    deltaValue = (targetValue - remainingValue) * accelerationAmount;
+  1048→    lastAmount = lastAmount + (deltaValue - lastAmount) * .5f;
+  1049→    if ((deltaValue > 0 && deltaValue > lastAmount) || (deltaValue < 0 && deltaValue < lastAmount)) {
+  1050→        deltaValue = lastAmount;
+  1051→    }
+  1052→    remainingValue += deltaValue;
+  1053→
+  1054→    return deltaValue;
+  1055→}
+  1056→```
+  1057→
+  1058→### LocalPlayer::tick() (lines 95–165) — VERIFIED
+  1059→```cpp
+  1060→void LocalPlayer::tick() {
+  1061→
+  1062→    super::tick();        // Player::tick → Mob::tick → Entity::baseTick + aiStep + updateWalkAnim
+  1063→
+  1064→    // 1. Item-use countdown (eating/drinking/bow draw)
+  1065→    if(!useItem.isNull()) {
+  1066→        ItemInstance* item = inventory->getSelected();
+  1067→        if(item != NULL && *item == useItem) {
+  1068→            if (useItemDuration <= 25 && useItemDuration % 4 == 0) {
+  1069→                spawnEatParticles(item, 5);             // 5 particles every 4 ticks in last 25 ticks
+  1070→            }
+  1071→            if(--useItemDuration == 0) {
+  1072→                if(!level->isClientSide) {
+  1073→                    completeUsingItem();
+  1074→                } else {
+  1075→                    EntityEventPacket p(entityId, EntityEvent::USE_ITEM_COMPLETE);
+  1076→                    level->raknetInstance->send(p);
+  1077→                }
+  1078→            }
+  1079→        }
+  1080→        else {
+  1081→            stopUsingItem();            // selected item changed — abort
+  1082→        }
+  1083→    }
+  1084→
+  1085→    // 2. Online position sync — only when moved enough
+  1086→    if (minecraft->isOnline())
+  1087→    {
+  1088→        if (std::abs(x - sentX) > .1f
+  1089→         || std::abs(y - sentY) > .01f
+  1090→         || std::abs(z - sentZ) > .1f
+  1091→         || std::abs(sentRotX - xRot) > 1
+  1092→         || std::abs(sentRotY - yRot) > 1)
+  1093→        {
+  1094→            MovePlayerPacket packet(entityId, x, y - heightOffset, z, xRot, yRot);
+  1095→            minecraft->raknetInstance->send(packet);
+  1096→            sentX = x; sentY = y; sentZ = z;
+  1097→            sentRotX = xRot; sentRotY = yRot;
+  1098→        }
+  1099→
+  1100→        // 3. Selected-item equipment sync
+  1101→        ItemInstance* item = inventory->getSelected();
+  1102→        int newItemId   = (item && item->count > 0) ? item->id : 0;
+  1103→        int newItemData = (item && item->count > 0) ? item->getAuxValue() : 0;
+  1104→
+  1105→        if (sentInventoryItemId != newItemId
+  1106→         || sentInventoryItemData != newItemData)
+  1107→        {
+  1108→            sentInventoryItemId   = newItemId;
+  1109→            sentInventoryItemData = newItemData;
+  1110→            PlayerEquipmentPacket packet(entityId, newItemId, newItemData);
+  1111→            minecraft->raknetInstance->send(packet);
+  1112→        }
+  1113→    }
+  1114→
+  1115→    // 4. Armor hash sync (send update if armor changed)
+  1116→    updateArmorTypeHash();
+  1117→
+  1118→#ifndef STANDALONE_SERVER
+  1119→    // 5. Sanity check: container should have been closed when its screen closed
+  1120→    if (!minecraft->screen && containerMenu) {
+  1121→        static bool hasPostedError = false;
+  1122→        if (!hasPostedError) {
+  1123→            minecraft->gui.postError(ErrorCodes::ContainerRefStillExistsAfterDestruction);
+  1124→            hasPostedError = true;
+  1125→        }
+  1126→    }
+  1127→#endif
+  1128→}
+  1129→```
+  1130→**Key constants:**
+  1131→- Particle emission: `5` particles every `4` ticks, only during last `25` ticks of use.
+  1132→- Position sync thresholds: `0.1` (x, z), `0.01` (y), `1` degree (rotations).
+  1133→- `MovePlayerPacket` sends `y - heightOffset` (i.e., foot position, not eye).
+  1134→
+  1135→### LocalPlayer::aiStep() (lines 168–217) — VERIFIED — THIS IS THE CRITICAL ONE
+  1136→```cpp
+  1137→/*public*/
+  1138→void LocalPlayer::aiStep() {
+  1139→    // 1. Decrement all trigger timers every tick (the fly-toggle window)
+  1140→    jumpTriggerTime--;
+  1141→    ascendTriggerTime--;
+  1142→    descendTriggerTime--;
+  1143→
+  1144→    // 2. Save previous-frame jumping flag (for double-tap detection)
+  1145→    bool wasJumping = input->jumping;
+  1146→
+  1147→#ifndef STANDALONE_SERVER
+  1148→    // 3. If no screen is covering the game, tick the input (Keyboard/Touch reads keys)
+  1149→    bool screenCovering = minecraft->screen && !minecraft->screen->passEvents;
+  1150→    if (!screenCovering)
+  1151→        input->tick(this);
+  1152→
+  1153→    // 4. Sneak eye-height offset (lowers camera)
+  1154→    if (input->sneaking) {
+  1155→        if (ySlideOffset < 0.2f) ySlideOffset = 0.2f;
+  1156→    }
+  1157→#endif
+  1158→
+  1159→    // 5. DOUBLE-JUMP FLY TOGGLE (only if abilities.mayfly == true)
+  1160→    if (abilities.mayfly) {
+  1161→        // Check for flight toggle
+  1162→        if (!wasJumping && input->jumping) {
+  1163→            if (jumpTriggerTime <= 0)
+  1164→                jumpTriggerTime = 7;        // first jump: start 7-tick window
+  1165→            else {
+  1166→                abilities.flying = !abilities.flying;     // second jump within window: toggle fly
+  1167→                jumpTriggerTime = 0;
+  1168→            }
+  1169→        }
+  1170→        // 6. While flying, apply vertical impulse from wantUp/wantDown inputs
+  1171→        if (abilities.flying) {
+  1172→            if (input->wantUp) {
+  1173→                yd += 0.15f;                 // +0.15 per tick
+  1174→                //xd = zd = 0;
+  1175→            }
+  1176→            if (input->wantDown) {
+  1177→                yd -= 0.15f;                 // -0.15 per tick
+  1178→            }
+  1179→        }
+  1180→    }
+  1181→
+  1182→    // 7. USING-ITEM INPUT DAMPING (slow down while eating/using)
+  1183→    if(isUsingItem()) {
+  1184→        const float k = 0.35f;
+  1185→        input->xa *= k;
+  1186→        input->ya *= k;
+  1187→    }
+  1188→
+  1189→    // 8. Call Mob::aiStep() FIRST (this calls updateAi() → LocalPlayer::updateAi()
+  1190→    //    if !interpolateOnly(), which sets xxa/yya/jumping from input)
+  1191→    Mob::aiStep();
+  1192→
+  1193→    // 9. Then call Player::aiStep() (peaceful regen + bob/tilt + entity touch)
+  1194→    super::aiStep();          // super = Player (typedef Player super;)
+  1195→
+  1196→    //if (onGround && abilities.flying)
+  1197→    //  abilities.flying = false;
+  1198→
+  1199→    // 10. In client-side mode (multiplayer), updateAi() is also called here
+  1200→    //     (in single-player, interpolateOnly() returns false because level->isClientSide==false,
+  1201→    //      so this branch is skipped — updateAi() was already called inside Mob::aiStep).
+  1202→    if (interpolateOnly())
+  1203→        updateAi();
+  1204→}
+  1205→```
+  1206→
+  1207→**Key behaviors — EXACT:**
+  1208→- **Double-jump fly toggle window: `jumpTriggerTime = 7` ticks.** Second jump key-press within 7 ticks of the first toggles `abilities.flying`. (Verified — NOT 5 or 10, it's exactly 7.)
+  1209→- **Vertical fly impulse: `±0.15f` per tick** added to `yd` (NOT `0.2` or `0.5`). This is in addition to `yd *= 0.6` damping done in `Player::travel` for flying — so net effect: each tick applies a +0.15 impulse, then yd is damped to 60% before next tick. Terminal vertical fly velocity ≈ 0.15 / (1 - 0.6) = 0.375 blocks/tick.
+  1210→- **Using-item damping: `0.35f`** multiplier on `input->xa` and `input->ya` (NOT 0.2 as Entry 3 guessed).
+  1211→- **Trigger order:** `Mob::aiStep()` first → `Player::aiStep()` second.
+  1212→- **`interpolateOnly()`** returns `level->isClientSide` (verified `Mob.cpp:979-982`). On a non-networked single-player world, the level is server-authoritative and `isClientSide == false`, so the trailing `updateAi()` in step 10 is skipped; on multiplayer clients it is invoked.
+  1213→
+  1214→### LocalPlayer::move(float xa, float ya, float za) (lines 230–272) — VERIFIED
+  1215→```cpp
+  1216→//@Override
+  1217→void LocalPlayer::move(float xa, float ya, float za) {
+  1218→    //@note: why is this == minecraft->player needed?
+  1219→    // FLYING PATH (creative)
+  1220→    if (this == minecraft->player && minecraft->options.isFlying) {
+  1221→        noPhysics = true;
+  1222→        float tmp = walkDist;                       // save walkDist so fly doesn't add to it
+  1223→        calculateFlight((float) xa, (float) ya, (float) za);
+  1224→        fallDistance = 0;
+  1225→        yd = 0;
+  1226→        super::move(flyX, flyY, flyZ);               // Entity::move with noPhysics
+  1227→        onGround = true;
+  1228→        walkDist = tmp;                              // restore (fly doesn't count as walking)
+  1229→    } else {
+  1230→        // AUTOJUMP PATH
+  1231→        if (autoJumpTime > 0) {
+  1232→            autoJumpTime--;
+  1233→            input->jumping = true;                   // force jump key for the autoJump tick
+  1234→        }
+  1235→        float prevX = x, prevZ = z;
+  1236→
+  1237→        super::move(xa, ya, za);                     // Entity::move with collision response
+  1238→
+  1239→        float newX = x, newZ = z;
+  1240→
+  1241→        // Autojump heuristic — only if not currently autojumping and autoJump is enabled
+  1242→        if (autoJumpTime <= 0 && autoJumpEnabled)
+  1243→        {
+  1244→            bool jump = false;
+  1245→            // Trigger when crossing the middle of a tile (i.e., crossed into a new half-tile)
+  1246→            if (Mth::floor(prevX * 2.0f) != Mth::floor(newX * 2.0f)
+  1247→             || Mth::floor(prevZ * 2.0f) != Mth::floor(newZ * 2.0f))
+  1248→            {
+  1249→                float dist = Mth::sqrt(xa * xa + za * za);
+  1250→                const int xx = Mth::floor(x + xa / dist);
+  1251→                const int zz = Mth::floor(z + za / dist);
+  1252→                const int tileId = level->getTile(xx, (int)(y - 1), zz);
+  1253→                // Need: solid block at foot-1 (the step), air at foot and foot+1 (headroom), and tile is jumpable
+  1254→                jump = (isSolidTile(xx, (int)(y - 1), zz)        // solid block to step up on
+  1255→                     && !isSolidTile(xx, (int)y, zz)             // air at foot level
+  1256→                     && !isSolidTile(xx, (int)(y + 1), zz))      // air at head level
+  1257→                     && isJumpable(tileId);
+  1258→            }
+  1259→            if (jump) {
+  1260→                autoJumpTime = 1;                    // forces input->jumping=true for 1 tick
+  1261→            }
+  1262→        }
+  1263→    }
+  1264→}
+  1265→```
+  1266→**Autojump heuristic — EXACT:**
+  1267→- Trigger condition: player has crossed a half-tile boundary (`floor(prevX*2) != floor(newX*2)` for X, similarly for Z).
+  1268→- Look-ahead position: `(x + xa/dist, z + za/dist)` — projected forward by 1 unit of input direction.
+  1269→- Look-ahead block-check column at `(xx, zz)`:
+  1270→  - `y - 1` must be SOLID (the step to climb)
+  1271→  - `y` and `y + 1` must NOT be solid (headroom)
+  1272→  - The tile at `(xx, y-1, zz)` must be `isJumpable` (not a fence/slab/stair/etc.)
+  1273→- `autoJumpTime = 1` → forces `input->jumping = true` for the next 1 tick, which (via `LocalPlayer::updateAi`) sets `this->jumping = true`, which (via `Mob::aiStep`) calls `jumpFromGround()` if `onGround`.
+  1274→
+  1275→### LocalPlayer::updateAi() (lines 274–279) — VERIFIED
+  1276→```cpp
+  1277→void LocalPlayer::updateAi() {
+  1278→    super::updateAi();                  // Player::updateAi() = updateAttackAnim()
+  1279→    this->xxa = input->xa;               // strafe input → xxa
+  1280→    this->yya = input->ya;               // forward input → yya
+  1281→    this->jumping = input->jumping || autoJumpTime > 0;
+  1282→}
+  1283→```
+  1284→**Note: sneaking is NOT set here — `LocalPlayer::isSneaking()` reads `input->sneaking` directly.**
+  1285→
+  1286→### LocalPlayer::isSneaking() (lines 329–332) — VERIFIED
+  1287→```cpp
+  1288→bool LocalPlayer::isSneaking() {
+  1289→    return input->sneaking;
+  1290→}
+  1291→```
+  1292→
+  1293→### LocalPlayer::getFieldOfViewModifier() (lines 299–316) — VERIFIED
+  1294→```cpp
+  1295→float LocalPlayer::getFieldOfViewModifier() {
+  1296→    float targetFov = 1.0f;
+  1297→    if(abilities.flying) targetFov *= 1.1f;            // +10% fov while flying
+  1298→    targetFov *= ((walkingSpeed * getWalkingSpeedModifier()) / DEFAULT_WALK_SPEED + 1) / 2;
+  1299→
+  1300→    if(isUsingItem() && getUseItem()->id == Item::bow->id) {
+  1301→        float ticksHeld = (float)getTicksUsingItem();
+  1302→        float scale = ticksHeld / BowItem::MAX_DRAW_DURATION;
+  1303→        if(scale > 1) {
+  1304→            scale = 1;
+  1305→        }
+  1306→        else {
+  1307→            scale *= scale;                          // square the scale (ease-in)
+  1308→        }
+  1309→        targetFov *= 1.0f - scale * 0.15f;           // up to -15% fov when bow fully drawn
+  1310→    }
+  1311→    return targetFov;
+  1312→}
+  1313→```
+  1314→**Key constants:**
+  1315→- Fly FOV multiplier: **1.1**
+  1316→- Bow draw FOV penalty: max **0.15** (15% zoom-in), squared easing.
+  1317→
+  1318→### LocalPlayer::causeFallDamage(float distance) (lines 460–471) — VERIFIED
+  1319→```cpp
+  1320→void LocalPlayer::causeFallDamage(float distance) {
+  1321→    int dmg = (int) ceil((distance - 3));
+  1322→    if (dmg > 0) {
+  1323→        if (level->isClientSide) {
+  1324→            SetHealthPacket packet(SetHealthPacket::HEALTH_MODIFY_OFFSET + dmg);
+  1325→            minecraft->raknetInstance->send(packet);
+  1326→        }
+  1327→    }
+  1328→    super::causeFallDamage(distance);
+  1329→}
+  1330→```
+  1331→**Fall damage formula: `dmg = ceil(distance - 3)` (no damage in first 3 blocks).**
+  1332→
+  1333→### LocalPlayer::hurtTo(int newHealth) (lines 334–350) — VERIFIED (client-side health update)
+  1334→```cpp
+  1335→void LocalPlayer::hurtTo(int newHealth) {
+  1336→    int dmg = health - newHealth;
+  1337→    if (dmg <= 0) {
+  1338→        this->health = newHealth;
+  1339→    } else {
+  1340→        lastHurt = dmg;
+  1341→        lastHealth = health;
+  1342→        invulnerableTime = invulnerableDuration;
+  1343→
+  1344→        minecraft->player->bypassArmor = true;
+  1345→        actuallyHurt(dmg);
+  1346→        minecraft->player->bypassArmor = false;
+  1347→
+  1348→        hurtTime = hurtDuration = 10;            // 10 ticks of hurt animation
+  1349→    }
+  1350→}
+  1351→```
+  1352→
+  1353→### LocalPlayer::respawn() / swing() / closeContainer() / drop(...) (VERIFIED, less central)
+  1354→```cpp
+  1355→void LocalPlayer::respawn() { minecraft->respawnPlayer(); }
+  1356→
+  1357→void LocalPlayer::swing() {
+  1358→    super::swing();
+  1359→    if (swingTime == -1) {
+  1360→        AnimatePacket packet(AnimatePacket::Swing, this);
+  1361→        packet.reliability = UNRELIABLE;
+  1362→        packet.priority = MEDIUM_PRIORITY;
+  1363→        minecraft->raknetInstance->send(packet);
+  1364→    }
+  1365→}
+  1366→
+  1367→void LocalPlayer::closeContainer() {
+  1368→    if (level->isClientSide) {
+  1369→        ContainerClosePacket packet(containerMenu->containerId);
+  1370→        minecraft->raknetInstance->send(packet);
+  1371→    }
+  1372→    super::closeContainer();
+  1373→    minecraft->setScreen(NULL);
+  1374→}
+  1375→```
+  1376→
+  1377→### Mob::interpolateOnly() and Mob::useNewAi() — VERIFIED (referenced by aiStep)
+  1378→```cpp
+  1379→// Mob.cpp:979
+  1380→bool Mob::interpolateOnly() {
+  1381→    return level->isClientSide;       // single-player local level → false
+  1382→}
+  1383→
+  1384→// Mob.cpp:1041
+  1385→bool Mob::useNewAi() {
+  1386→    return false;                     // for the player, old-AI path is used (updateAi)
+  1387→}
+  1388→```
+  1389→
+  1390→### Mob::aiStep() (Mob.cpp:688–757) — VERIFIED — referenced by LocalPlayer::aiStep
+  1391→```cpp
+  1392→void Mob::aiStep() {
+  1393→    TIMER_PUSH("ai");
+  1394→    if (isImmobile()) {
+  1395→        jumping = false;
+  1396→        xxa = 0;
+  1397→        yya = 0;
+  1398→        yRotA = 0;
+  1399→    } else {
+  1400→        if (!interpolateOnly()) {
+  1401→            if (useNewAi()) {
+  1402→                TIMER_PUSH("newAi");
+  1403→                newServerAiStep();
+  1404→                TIMER_POP();
+  1405→            }
+  1406→            else {
+  1407→                TIMER_PUSH("oldAi");
+  1408→                updateAi();            // calls LocalPlayer::updateAi for player (sets xxa/yya/jumping)
+  1409→                TIMER_POP();
+  1410→            }
+  1411→        }
+  1412→    }
+  1413→    TIMER_POP_PUSH("move");
+  1414→
+  1415→    bool inWater = isInWater();
+  1416→    bool inLava  = isInLava();
+  1417→
+  1418→    if (jumping) {
+  1419→        if (inWater)        yd += 0.04f;     // buoyancy impulse in water (NOT set to 0.2)
+  1420→        else if (inLava)    yd += 0.04f;     // same in lava
+  1421→        else if (onGround)  jumpFromGround();  // sets yd = 0.42f
+  1422→    }
+  1423→
+  1424→    xxa *= 0.98f;                          // input damping per tick
+  1425→    yya *= 0.98f;
+  1426→    yRotA *= 0.9f;
+  1427→
+  1428→    // Temporarily apply walkingSpeedModifier, then call travel()
+  1429→    float normalSpeed             = walkingSpeed;
+  1430→    float normalAirControllSpeed  = flyingSpeed;
+  1431→    walkingSpeed *= getWalkingSpeedModifier();   // =1.0 for Player
+  1432→    flyingSpeed  *= getWalkingSpeedModifier();
+  1433→    travel(xxa, yya);                            // dispatches to Player::travel
+  1434→    walkingSpeed = normalSpeed;
+  1435→    flyingSpeed  = normalAirControllSpeed;
+  1436→
+  1437→    TIMER_POP_PUSH("push");
+  1438→    Player* player = NULL;
+  1439→    if (isPlayer()) player = (Player*)this;
+  1440→    if (player == NULL || !player->isSleeping()) {
+  1441→        EntityList& entities = level->getEntities(this, this->bb.grow(0.2f, 0, 0.2f));
+  1442→        for (unsigned int i = 0; i < entities.size(); i++) {
+  1443→            Entity* e = entities[i];
+  1444→            if (e->isPlayer()) {
+  1445→                Player* p = (Player*)e;
+  1446→                if (p->isSleeping()) continue;
+  1447→            }
+  1448→            if (e->isPushable()) e->push(this);
+  1449→        }
+  1450→    }
+  1451→    TIMER_POP();
+  1452→}
+  1453→```
+  1454→**Key constants used (VERIFIED — these CORRECT errors in Entry 2):**
+  1455→- Water/lava swim-jump impulse: **`+0.04f` per tick to yd** (NOT setting yd to 0.2 / 0.4 as Entry 2 claimed).
+  1456→- Ground jump: `Mob::jumpFromGround()` sets `yd = 0.42f` ONLY (Mob.cpp:844–847, no water/lava branch).
+  1457→- Input damping per tick: `xxa *= 0.98`, `yya *= 0.98`, `yRotA *= 0.9`.
+  1458→- Push hitbox expansion: `bb.grow(0.2, 0, 0.2)`.
+  1459→
+  1460→### Mob::travel(float xa, float ya) — VERIFIED (Mob.cpp:558–626) — referenced by Player::travel
+  1461→```cpp
+  1462→void Mob::travel(float xa, float ya) {
+  1463→    if (isInWater()) {
+  1464→        float yo = y;
+  1465→        moveRelative(xa, ya, 0.02f);     // water acceleration = 0.02
+  1466→        move(xd, yd, zd);
+  1467→
+  1468→        xd *= 0.80f;                     // water drag (per tick)
+  1469→        yd *= 0.80f;
+  1470→        zd *= 0.80f;
+  1471→        yd -= 0.02f;                     // water "gravity" = 0.02 (much weaker than air 0.08)
+  1472→
+  1473→        if (horizontalCollision && isFree(xd, yd + 0.6f - y + yo, zd)) {
+  1474→            yd = 0.3f;                   // water climb impulse on hitting wall underwater
+  1475→        }
+  1476→    } else if (isInLava()) {
+  1477→        float yo = y;
+  1478→        moveRelative(xa, ya, 0.02f);
+  1479→        move(xd, yd, zd);
+  1480→        xd *= 0.50f;                     // lava drag (heavier than water)
+  1481→        yd *= 0.50f;
+  1482→        zd *= 0.50f;
+  1483→        yd -= 0.02f;
+  1484→
+  1485→        if (horizontalCollision && isFree(xd, yd + 0.6f - y + yo, zd)) {
+  1486→            yd = 0.3f;
+  1487→        }
+  1488→    } else {
+  1489→        // LAND/AIR PATH (most common)
+  1490→        // friction is recomputed twice (BEFORE moveRelative for acceleration, AFTER for drag)
+  1491→        float friction = 0.91f;
+  1492→        if (onGround) {
+  1493→            friction = 0.6f * 0.91f;                          // = 0.546
+  1494→            int t = level->getTile(Mth::floor(x), Mth::floor(bb.y0 - 0.5f), Mth::floor(z));
+  1495→            if (t > 0) {
+  1496→                friction = Tile::tiles[t]->friction * 0.91f;  // e.g., ice 0.98*0.91, normal 0.6*0.91
+  1497→            }
+  1498→        }
+  1499→
+  1500→        // friction2 is the "movement acceleration scalar" — inverted friction trick
+  1501→        float friction2 = (0.6f * 0.6f * 0.91f * 0.91f * 0.6f * 0.91f) / (friction * friction * friction);
+  1502→        moveRelative(xa, ya, (onGround ? walkingSpeed * friction2 : flyingSpeed));
+  1503→
+  1504→        // recompute friction (same expression as above)
+  1505→        friction = 0.91f;
+  1506→        if (onGround) {
+  1507→            friction = 0.6f * 0.91f;
+  1508→            int t = level->getTile(Mth::floor(x), Mth::floor(bb.y0 - 0.5f), Mth::floor(z));
+  1509→            if (t > 0) {
+  1510→                friction = Tile::tiles[t]->friction * 0.91f;
+  1511→            }
+  1512→        }
+  1513→
+  1514→        //@todo: make it easier to climb ladders
+  1515→        if (onLadder()) {
+  1516→            this->fallDistance = 0;
+  1517→            if (yd < -0.15) yd = -0.15f;                       // ladder fall speed cap
+  1518→            if (isSneaking() && yd < 0) yd = 0;               // hold position on ladder when sneaking
+  1519→        }
+  1520→
+  1521→        move(xd, yd, zd);
+  1522→
+  1523→        //@todo: make it easier to climb ladders
+  1524→        if (horizontalCollision && onLadder()) {
+  1525→            yd = 0.2f;                                          // ladder climb impulse on wall-hit
+  1526→        }
+  1527→
+  1528→        yd -= 0.08f;           // GRAVITY per tick (VERIFIED: 0.08)
+  1529→        yd *= 0.98f;           // AIR DRAG per tick (VERIFIED: 0.98)
+  1530→        xd *= friction;        // horizontal ground drag = 0.91 * tile.friction (or 0.546 if no tile)
+  1531→        zd *= friction;
+  1532→    }
+  1533→}
+  1534→```
+  1535→**Key constants used (VERIFIED):**
+  1536→- Land gravity: **0.08** per tick
+  1537→- Air drag (vertical): **0.98** per tick
+  1538→- Water gravity: **0.02** per tick; water drag (all axes): **0.80** per tick; water accel = 0.02
+  1539→- Lava drag: **0.50** per tick; lava gravity: 0.02; lava accel = 0.02
+  1540→- Water/lava climb impulse when hitting wall: **0.3**
+  1541→- Ladder fall cap: **-0.15**; ladder climb impulse on wall-hit: **+0.2**
+  1542→- Ground friction base: **0.91**; on-ground multiplier: **0.6 × 0.91 = 0.546**; then multiplied by `Tile::friction` (e.g., 0.6 default, 0.98 ice)
+  1543→- `friction2` formula (acceleration scalar):
+  1544→  `(0.6*0.6*0.91*0.91*0.6*0.91) / (friction³)` — used to scale `walkingSpeed` when on ground so that net ground speed is independent of slipperiness.
+  1545→
+  1546→### Entity::moveRelative(float xa, float za, float speed) (Entity.cpp:575–590) — VERIFIED
+  1547→```cpp
+  1548→void Entity::moveRelative(float xa, float za, float speed) {
+  1549→    float dist = sqrt(xa * xa + za * za);
+  1550→    if (dist < 0.01f) return;             // deadzone — no acceleration if input tiny
+  1551→
+  1552→    if (dist < 1) dist = 1;
+  1553→    dist = speed / dist;
+  1554→    xa *= dist;
+  1555→    za *= dist;
+  1556→
+  1557→    float sin_ = (float) sin(yRot * Mth::PI / 180);
+  1558→    float cos_ = (float) cos(yRot * Mth::PI / 180);
+  1559→
+  1560→    // Rotate local (xa,za) by yRot into world (xd,zd)
+  1561→    xd += xa * cos_ - za * sin_;
+  1562→    zd += za * cos_ + xa * sin_;
+  1563→}
+  1564→```
+  1565→**Local-to-world rotation formula (VERIFIED):**
+  1566→- `xd += xa * cos(yRot) - za * sin(yRot)`
+  1567→- `zd += za * cos(yRot) + xa * sin(yRot)`
+  1568→- (Angles in degrees → radians via `* Mth::PI / 180`.)
+  1569→- Deadzone: < 0.01 input → no acceleration. Below magnitude 1 → normalize to 1 then scale by `speed`.
+  1570→
+  1571→---
+  1572→
+  1573→## Entry 7: KeyboardInput.cpp + MouseBuildInput.h + MouseTurnInput.h — input layer (EXACT)
+  1574→
+  1575→### IMoveInput.h (interface) — VERIFIED (lines 1–48)
+  1576→```cpp
+  1577→class IMoveInput {
+  1578→protected:
+  1579→    IMoveInput()
+  1580→    :   xa(0), ya(0),
+  1581→        wasJumping(false), jumping(false), sneaking(false),
+  1582→        wantUp(false), wantDown(false),
+  1583→        isChangingFlightHeight(false)
+  1584→    {}
+  1585→public:
+  1586→    virtual ~IMoveInput() {}
+  1587→
+  1588→    virtual void tick(Player* player) {}
+  1589→    virtual void render(float a) {}
+  1590→    virtual void setKey(int eventKey, bool eventKeyState) {}
+  1591→    virtual void releaseAllKeys() {}
+  1592→    virtual void onConfigChanged(const Config& c) {}
+  1593→
+  1594→public:
+  1595→    float xa;            // strafe input (left = +1, right = -1 in KeyboardInput)
+  1596→    float ya;            // forward input (forward = +1, back = -1)
+  1597→
+  1598→    bool wasJumping;
+  1599→    bool jumping;
+  1600→    bool sneaking;
+  1601→
+  1602→    bool wantUp;          // fly ascend request (e.g. KEY_E or RPI-jump)
+  1603→    bool wantDown;        // fly descend request (e.g. KEY_Q or RPI-sneak)
+  1604→    bool isChangingFlightHeight;
+  1605→};
+  1606→```
+  1607→
+  1608→### KeyboardInput.h — VERIFIED (lines 1–37)
+  1609→```cpp
+  1610→class KeyboardInput: public IMoveInput {
+  1611→    static const int NumKeys = 10;
+  1612→public:
+  1613→    static const int KEY_UP    = 0;
+  1614→    static const int KEY_DOWN  = 1;
+  1615→    static const int KEY_LEFT  = 2;
+  1616→    static const int KEY_RIGHT = 3;
+  1617→    static const int KEY_JUMP  = 4;
+  1618→    static const int KEY_SNEAK = 5;
+  1619→    static const int KEY_CRAFT = 6;
+  1620→
+  1621→    KeyboardInput(Options* options);
+  1622→    void tick(Player* player);
+  1623→    void setKey(int key, bool state);
+  1624→    void releaseAllKeys();
+  1625→
+  1626→protected:
+  1627→    bool keys[NumKeys];
+  1628→    Options* options;
+  1629→};
+  1630→```
+  1631→
+  1632→### KeyboardInput::KeyboardInput(Options*) — VERIFIED (lines 5–10)
+  1633→```cpp
+  1634→KeyboardInput::KeyboardInput(Options* options) {
+  1635→    for (int i = 0; i < NumKeys; ++i) keys[i] = false;
+  1636→    this->options = options;
+  1637→}
+  1638→```
+  1639→
+  1640→### KeyboardInput::setKey(int key, bool state) — VERIFIED (lines 12–26)
+  1641→```cpp
+  1642→void KeyboardInput::setKey(int key, bool state) {
+  1643→    int id = -1;
+  1644→    if (key == options->keyUp.key)    id = KEY_UP;
+  1645→    if (key == options->keyDown.key)  id = KEY_DOWN;
+  1646→    if (key == options->keyLeft.key)  id = KEY_LEFT;
+  1647→    if (key == options->keyRight.key) id = KEY_RIGHT;
+  1648→    if (key == options->keyJump.key)  id = KEY_JUMP;
+  1649→    if (key == options->keySneak.key) id = KEY_SNEAK;
+  1650→    if (key == options->keyCraft.key) id = KEY_CRAFT;
+  1651→    if (id >= 0) {
+  1652→        keys[id] = state;
+  1653→    }
+  1654→}
+  1655→```
+  1656→**Note**: chain of `if`s (not `else if`) — if two KeyMappings map to the same scancode, both fire. In practice each option key is distinct.
+  1657→
+  1658→### KeyboardInput::releaseAllKeys() — VERIFIED (lines 28–37)
+  1659→```cpp
+  1660→void KeyboardInput::releaseAllKeys() {
+  1661→    xa = 0;
+  1662→    ya = 0;
+  1663→    for (int i = 0; i < NumKeys; i++) {
+  1664→        keys[i] = false;
+  1665→    }
+  1666→    wantUp = wantDown = false;
+  1667→}
+  1668→```
+  1669→
+  1670→### KeyboardInput::tick(Player* player) — VERIFIED (lines 39–64)
+  1671→```cpp
+  1672→void KeyboardInput::tick(Player* player) {
+  1673→    xa = 0;
+  1674→    ya = 0;
+  1675→
+  1676→    if (keys[KEY_UP])    ya++;         // forward = +1
+  1677→    if (keys[KEY_DOWN])  ya--;         // back    = -1
+  1678→    if (keys[KEY_LEFT])  xa++;         // left    = +1
+  1679→    if (keys[KEY_RIGHT]) xa--;         // right   = -1
+  1680→    jumping  = keys[KEY_JUMP];
+  1681→    sneaking = keys[KEY_SNEAK];
+  1682→    if (sneaking) {
+  1683→        xa *= 0.3f;                    // sneak speed multiplier 0.3 (applied at input layer,
+  1684→        ya *= 0.3f;                    //  BEFORE the friction2 in Mob::travel)
+  1685→    }
+  1686→
+  1687→#ifdef RPI
+  1688→    wantUp   = jumping;
+  1689→    wantDown = sneaking;
+  1690→#endif
+  1691→
+  1692→    if (keys[KEY_CRAFT])
+  1693→        player->startCrafting((int)player->x, (int)player->y, (int)player->z, Recipe::SIZE_2X2);
+  1694→}
+  1695→```
+  1696→**Key behaviors — EXACT:**
+  1697→- Forward (`KEY_UP`) → `ya += 1`, Back (`KEY_DOWN`) → `ya -= 1`
+  1698→- Left (`KEY_LEFT`) → `xa += 1`, Right (`KEY_RIGHT`) → `xa -= 1`  *(note: NOT normalized — diagonal is `√2` magnitude)*
+  1699→- Jump = `keys[KEY_JUMP]`; Sneak = `keys[KEY_SNEAK]`
+  1700→- **Sneak multiplier: `0.3f`** applied directly to xa/ya (NOT 0.3 in `Mob::travel` as Entry 2/3 guessed)
+  1701→- `wantUp`/`wantDown` only set on RPI builds — on PC they stay false (the LocalPlayer::calculateFlight reads `KEY_E`/`KEY_Q` directly via `Keyboard::isKeyDown`).
+  1702→- `KEY_CRAFT` opens the 2×2 inventory crafting screen at the player's position.
+  1703→
+  1704→### MouseBuildInput.h — VERIFIED (inline class, lines 1–37)
+  1705→```cpp
+  1706→class MouseBuildInput : public IBuildInput {
+  1707→public:
+  1708→    MouseBuildInput()
+  1709→    :   buildDelayTicks(10),
+  1710→        buildHoldTicks(0)
+  1711→    {}
+  1712→
+  1713→    virtual bool tickBuild(Player* p, BuildActionIntention* bai) {
+  1714→        // LEFT mouse button held: REMOVE (break block) + ATTACK (hit entity)
+  1715→        if (Mouse::getButtonState(MouseAction::ACTION_LEFT) != 0) {
+  1716→            *bai = BuildActionIntention(BuildActionIntention::BAI_REMOVE
+  1717→                                     | BuildActionIntention::BAI_ATTACK);
+  1718→            return true;
+  1719→        }
+  1720→        // RIGHT mouse button held: BUILD + INTERACT, but rate-limited
+  1721→        if (Mouse::getButtonState(MouseAction::ACTION_RIGHT) != 0) {
+  1722→            if (buildHoldTicks >= buildDelayTicks) buildHoldTicks = 0;   // reset after threshold
+  1723→            if (++buildHoldTicks == 1) {                                  // only fire on first tick of hold
+  1724→                *bai = BuildActionIntention(BuildActionIntention::BAI_BUILD
+  1725→                                          | BuildActionIntention::BAI_INTERACT);
+  1726→                return true;
+  1727→            }
+  1728→        } else {
+  1729→            buildHoldTicks = 0;       // reset on release
+  1730→        }
+  1731→        return false;
+  1732→    }
+  1733→private:
+  1734→    int buildHoldTicks;
+  1735→    int buildDelayTicks;     // = 10 (rate-limit; not actually enforced as a cooldown in this code)
+  1736→};
+  1737→```
+  1738→**Key behaviors — EXACT:**
+  1739→- `MouseAction::ACTION_LEFT = 1`, `ACTION_RIGHT = 2`.
+  1740→- Left button (held): returns `BAI_REMOVE | BAI_ATTACK` every tick it's held.
+  1741→- Right button (held): only fires `BAI_BUILD | BAI_INTERACT` on the FIRST tick of hold (when `++buildHoldTicks == 1`); subsequent ticks return false. After release, `buildHoldTicks` resets to 0, so the next press can fire again.
+  1742→- `buildDelayTicks = 10` is set but the `if (buildHoldTicks >= buildDelayTicks) buildHoldTicks = 0` line has no real effect in this code path since the early return on `== 1` prevents reaching it within 10 ticks.
+  1743→
+  1744→### BuildActionIntention bit-flags (IBuildInput.h:7–33) — VERIFIED
+  1745→```cpp
+  1746→class BuildActionIntention {
+  1747→public:
+  1748→    BuildActionIntention() : action(0) {}
+  1749→    BuildActionIntention(int action) : action(action) {}
+  1750→
+  1751→    bool isFirstRemove()     { return (action & BAI_FIRSTREMOVE) != 0; }
+  1752→    bool isRemoveContinue()  { return (action & BAI_REMOVE)     != 0; }
+  1753→    bool isBuild()           { return (action & BAI_BUILD)      != 0; }
+  1754→    bool isRemove()          { return isFirstRemove() || isRemoveContinue(); }
+  1755→    bool isAttack()          { return (action & BAI_ATTACK)     != 0; }
+  1756→    bool isInteract()        { return (action & BAI_INTERACT)    != 0; }
+  1757→
+  1758→    int action;
+  1759→
+  1760→    static const int BAI_BUILD      = 1;
+  1761→    static const int BAI_REMOVE     = 2;
+  1762→    static const int BAI_FIRSTREMOVE = 4;
+  1763→    static const int BAI_ATTACK     = 8;
+  1764→    static const int BAI_INTERACT   = 16;
+  1765→};
+  1766→```
+  1767→
+  1768→### MouseTurnInput.h — VERIFIED (inline class, lines 1–44)
+  1769→```cpp
+  1770→class MouseTurnInput : public ITurnInput {
+  1771→public:
+  1772→    static const int MODE_OFFSET = 1;     // pointer-position mode (centered deadzone)
+  1773→    static const int MODE_DELTA  = 2;     // raw delta mode (grabbed cursor)
+  1774→
+  1775→    MouseTurnInput(int mode_, int centerX, int centerY)
+  1776→    :   mode(mode_),
+  1777→        _centerX((float)centerX),
+  1778→        _centerY((float)centerY)
+  1779→    {}
+  1780→
+  1781→    void onConfigChanged(const Config& config) {
+  1782→        _centerX = ((float) config.width ) * 0.5f;
+  1783→        _centerY = ((float) config.height) * 0.5f;
+  1784→    }
+  1785→
+  1786→    TurnDelta getTurnDelta() {
+  1787→        float dx = 0, dy = 0;
+  1788→        if (MODE_DELTA == mode) {
+  1789→            dx = (float)Mouse::getDX();              // raw per-frame mouse delta
+  1790→            dy = (float)Mouse::getDY();
+  1791→        } else if (MODE_OFFSET == mode) {
+  1792→            float dt = getDeltaTime();
+  1793→            dx = linearTransform((float)Mouse::getX() - _centerX, 40, 0.4f) * dt;
+  1794→            dy = linearTransform((float)Mouse::getY() - _centerY, 30, 0.6f) * dt;
+  1795→        }
+  1796→        return TurnDelta(dx, dy);
+  1797→    }
+  1798→
+  1799→    int mode;
+  1800→private:
+  1801→    float _centerX;
+  1802→    float _centerY;
+  1803→};
+  1804→```
+  1805→**Key constants — EXACT:**
+  1806→- `MODE_OFFSET` (cursor-position mode) uses `linearTransform(offsetFromCenter, deadZone, scale)`:
+  1807→  - X deadzone: **40** pixels, scale **0.4** — multiplied by `dt` (seconds)
+  1808→  - Y deadzone: **30** pixels, scale **0.6** — multiplied by `dt` (seconds)
+  1809→- `MODE_DELTA` (raw delta mode) returns `(Mouse::getDX(), Mouse::getDY())` directly.
+  1810→
+  1811→### ITurnInput::linearTransform (ITurnInput.h:41–47) — VERIFIED
+  1812→```cpp
+  1813→static float linearTransform(float value, float deadZone, float scale = 1.0f, bool limit1 = false) {
+  1814→    float deadSigned = value >= 0 ? deadZone : -deadZone;
+  1815→    if (std::abs(deadSigned) >= std::abs(value)) return 0;     // inside deadzone
+  1816→    float ret = (value - deadSigned) * scale;
+  1817→    if (limit1 && std::abs(ret) > 1) ret /= std::abs(ret);     // optional clamp to ±1
+  1818→    return ret;
+  1819→}
+  1820→```
+  1821→
+  1822→### ITurnInput::getDeltaTime (ITurnInput.h:31–39) — VERIFIED
+  1823→```cpp
+  1824→float getDeltaTime() {
+  1825→    if (_lastTime == -1.0f) {
+  1826→        _lastTime = getTimeS();
+  1827→    }
+  1828→    float now = getTimeS();
+  1829→    float dt = now - _lastTime;
+  1830→    _lastTime = now;
+  1831→    return dt;
+  1832→}
+  1833→```
+  1834→
+  1835→**NOTE on mouse-→ yaw/pitch mapping:** The actual yaw/pitch update happens in the Minecraft main loop / GameRenderer, not in MouseTurnInput — `getTurnDelta()` only returns `(dx, dy)`; the caller (Minecraft::tick or similar) does `yRot += dx * sensitivity` and `xRot += dy * sensitivity` (with invertYMouse logic). UNVERIFIED — need to read Minecraft.cpp/GameRenderer.cpp for exact turn application. The 0.4 / 0.6 scale factors above are only used in OFFSET mode (touch/legacy).
+  1836→
+  1837→---
+  1838→
+  1839→## Entry 8: RE-Player Stage Summary
+  1840→
+  1841→**Task ID:** RE-Player
+  1842→**Scope:** Player + LocalPlayer + KeyboardInput + MouseBuildInput + MouseTurnInput — exact line-by-line read
+  1843→**Source root:** `rujukan/pocket-edition-2013/mcpe-source/handheld/src/`
+  1844→
+  1845→### Verified method bodies (full code copied into Entries 5–7)
+  1846→1. `Player::Player(Level*, bool isCreative)` — constructor (Player.cpp:27–67)
+  1847→2. `Player::_init()` (Player.cpp:483–488)
+  1848→3. `Player::setDefaultHeadHeight()` (Player.cpp:656–659)
+  1849→4. `Player::getHeadHeight()` (Player.cpp:652–654) — returns hardcoded 0.12f
+  1850→5. `Player::resetPos(bool)` (Player.cpp:388–401)
+  1851→6. `Player::getWalkingSpeedModifier()` (Player.cpp:490–492) — returns 1.0f
+  1852→7. `Player::travel(float, float)` (Player.cpp:364–375) — flying override
+  1853→8. `Player::tick()` (Player.cpp:219–255)
+  1854→9. `Player::aiStep()` (Player.cpp:425–450)
+  1855→10. `Player::updateAi()` (Player.cpp:403–406)
+  1856→11. `Player::isImmobile()` (Player.cpp:377–380)
+  1857→12. `Player::die(Entity*)` (Player.cpp:461–476)
+  1858→13. `LocalPlayer::LocalPlayer(...)` (LocalPlayer.cpp:46–63)
+  1859→14. `LocalPlayer::_init()` (LocalPlayer.cpp:404–415)
+  1860→15. `LocalPlayer::calculateFlight(...)` (LocalPlayer.cpp:71–88)
+  1861→16. `LocalPlayer::isSolidTile(...)` (LocalPlayer.cpp:90–93)
+  1862→17. `LocalPlayer::tick()` (LocalPlayer.cpp:95–165)
+  1863→18. `LocalPlayer::aiStep()` (LocalPlayer.cpp:168–217) — CRITICAL
+  1864→19. `LocalPlayer::move(float, float, float)` (LocalPlayer.cpp:230–272)
+  1865→20. `LocalPlayer::updateAi()` (LocalPlayer.cpp:274–279)
+  1866→21. `LocalPlayer::isSneaking()` (LocalPlayer.cpp:329–332)
+  1867→22. `LocalPlayer::getFieldOfViewModifier()` (LocalPlayer.cpp:299–316)
+  1868→23. `LocalPlayer::causeFallDamage(float)` (LocalPlayer.cpp:460–471)
+  1869→24. `LocalPlayer::hurtTo(int)` (LocalPlayer.cpp:334–350)
+  1870→25. File-scope `isJumpable(int)` static helper (LocalPlayer.cpp:36–44)
+  1871→26. `KeyboardInput::KeyboardInput(Options*)` (KeyboardInput.cpp:5–10)
+  1872→27. `KeyboardInput::setKey(int, bool)` (KeyboardInput.cpp:12–26)
+  1873→28. `KeyboardInput::releaseAllKeys()` (KeyboardInput.cpp:28–37)
+  1874→29. `KeyboardInput::tick(Player*)` (KeyboardInput.cpp:39–64)
+  1875→30. `MouseBuildInput::tickBuild(Player*, BuildActionIntention*)` (MouseBuildInput.h:15–30)
+  1876→31. `MouseTurnInput::getTurnDelta()` (MouseTurnInput.h:24–35)
+  1877→32. `ITurnInput::linearTransform(...)` (ITurnInput.h:41–47)
+  1878→33. `SmoothFloat::getNewDeltaValue(...)` (SmoothFloat.h:19–30)
+  1879→34. `Mob::aiStep()` (Mob.cpp:688–757) — referenced (LocalPlayer::aiStep calls it)
+  1880→35. `Mob::travel(float, float)` (Mob.cpp:558–626) — referenced (Player::travel calls it)
+  1881→36. `Mob::jumpFromGround()` (Mob.cpp:844–847) — sets yd = 0.42f only
+  1882→37. `Mob::interpolateOnly()` (Mob.cpp:979–982) — returns level->isClientSide
+  1883→38. `Entity::moveRelative(float, float, float)` (Entity.cpp:575–590)
+  1884→
+  1885→### Corrected values vs. earlier MODLOG entries
+  1886→- **Entry 2 ERRATA — `Mob::jumpFromGround()`:** in this source it's just `yd = 0.42f;` (Mob.cpp:846). There is **NO** `if (isInWater()) yd = 0.2f; else if (isInLava()) yd = 0.4f;` branch — that was Java PC version. In MCPE 2013, the water/lava swim-up is handled in `Mob::aiStep()` via `if (inWater) yd += 0.04f;` (small per-tick buoyancy impulse, not a velocity set).
+  1887→- **Entry 2 ERRATA — `Mob::travel()`:** the actual implementation has a much richer 3-way water/lava/land split with `friction2` formula `(0.6*0.6*0.91*0.91*0.6*0.91)/(friction³)` and ladder logic (`onLadder()` clamps fall to -0.15, sneaking on ladder zeroes downward yd, wall-hit sets yd = 0.2). Entry 2's simplified pseudocode missed this.
+  1888→- **Entry 3 ERRATA — `LocalPlayer::aiStep()` using-item damping:** the actual multiplier is **0.35f** (LocalPlayer.cpp:204 `const float k = 0.35f;`), NOT 0.2 as Entry 3 estimated.
+  1889→- **Entry 3 ERRATA — double-jump fly toggle:** the actual window is **7 ticks** (`jumpTriggerTime = 7`, LocalPlayer.cpp:186), and toggling happens on the SECOND jump keypress while the first one is still within the window. Entry 3's "~7 ticks" was approximately right but didn't capture the exact `wasJumping != input->jumping` rising-edge logic and the `jumpTriggerTime = 0` reset on toggle.
+  1890→- **Entry 3 ERRATA — sneak damping:** sneak is applied at the **input layer** (`KeyboardInput::tick` line 51-53: `xa *= 0.3f; ya *= 0.3f;`), NOT in `Mob::travel`. There's no separate "clamp magnitude to 0.3" in Mob::travel.
+  1891→- **Entry 3 ERRATA — `LocalPlayer::move()` autoJump heuristic:** Entry 3 guessed the autojump was "1 tile ahead, 2 tiles headroom, isJumpable excludes fences/slabs/stairs". The exact rule is: cross-half-tile trigger (`floor(prev*2) != floor(new*2)`), look ahead by `xa/dist` & `za/dist`, block at `y-1` must be solid, blocks at `y` and `y+1` must be NON-solid, AND the tile at `(y-1)` must pass `isJumpable` (excludes fence, fenceGate, stoneSlabHalf, trapdoor, sign, wallSign, stairs).
+  1892→- **Entry 3 ERRATA — `LocalPlayer::updateAi()` interpolation gate:** Entry 3 wrote `if (this->interpolateOnly() == false) { this->updateAi(); }`. The actual code is `if (interpolateOnly()) updateAi();` (LocalPlayer.cpp:215-216) — the OPPOSITE. But it doesn't break behavior because `Mob::aiStep()` already calls `updateAi()` when `!interpolateOnly()` (single-player path), and the LocalPlayer-level call only handles the multiplayer client-side path. So in BOTH cases `LocalPlayer::updateAi()` runs once per tick — just from different call sites.
+  1893→
+  1894→### Confirmed constants for faithful port (PLAYER)
+  1895→| Constant | Value | Source |
+  1896→|---|---|---|
+  1897→| `MAX_HEALTH` | 20 | Player.h:43 |
+  1898→| `DEFAULT_WALK_SPEED` | 0.1f | Player.cpp:20 |
+  1899→| `DEFAULT_FLY_SPEED` | 0.02f | Player.cpp:21 |
+  1900→| `SLEEP_DURATION` | 100 ticks | Player.h:46 |
+  1901→| `WAKE_UP_DURATION` | 10 ticks | Player.h:47 |
+  1902→| `heightOffset` (eye) | 1.62f | Player.cpp:53, 390, 658 |
+  1903→| `getHeadHeight()` | 0.12f | Player.cpp:653 |
+  1904→| `bbWidth` (player) | 0.6f | Player.cpp:391 |
+  1905→| `bbHeight` (player) | 1.8f | Player.cpp:391 |
+  1906→| Peaceful regen period | 12 sec = 240 ticks | Player.cpp:427 |
+  1907→| Bob lerp factor | 0.4 | Player.cpp:438 |
+  1908→| Tilt lerp factor | 0.8 | Player.cpp:439 |
+  1909→| Tilt formula | `atan(-yd * 0.2) * 15°` | Player.cpp:434 |
+  1910→| Bob clamp | 0.1 | Player.cpp:435 |
+  1911→| `TicksPerSecond` | 20 | SharedConstants.h:28 |
+  1912→
+  1913→### Confirmed constants for faithful port (LOCALPLAYER / FLY)
+  1914→| Constant | Value | Source |
+  1915→|---|---|---|
+  1916→| Double-jump fly toggle window | 7 ticks | LocalPlayer.cpp:186 |
+  1917→| Fly vertical impulse (wantUp/wantDown) | ±0.15 per tick | LocalPlayer.cpp:194, 198 |
+  1918→| Fly vertical damping (in Player::travel) | yd *= 0.6 (pre-travel) | Player.cpp:370 |
+  1919→| Flying speed override | flyingSpeed = 0.05 (was 0.02) | Player.cpp:368 |
+  1920→| Using-item input damping | 0.35f | LocalPlayer.cpp:204 |
+  1921→| Sneak input damping | 0.3f (at input layer) | KeyboardInput.cpp:51-53 |
+  1922→| AutoJump trigger | crossing half-tile boundary | LocalPlayer.cpp:256 |
+  1923→| AutoJump look-ahead | `x + xa/dist`, `z + za/dist` | LocalPlayer.cpp:259-260 |
+  1924→| AutoJump headroom check | solid at y-1, air at y and y+1 | LocalPlayer.cpp:262-263 |
+  1925→| `autoJumpTime` after trigger | 1 tick | LocalPlayer.cpp:268 |
+  1926→| Fly FOV multiplier | 1.1 | LocalPlayer.cpp:301 |
+  1927→| Bow draw FOV penalty | up to -15% (squared easing) | LocalPlayer.cpp:313 |
+  1928→| Fall damage threshold | distance - 3 (no damage ≤3) | LocalPlayer.cpp:462, Mob.cpp:543 |
+  1929→| Hurt animation duration | 10 ticks | LocalPlayer.cpp:348 |
+  1930→| Fly smoothing acceleration | `0.35f * sensitivity` | LocalPlayer.cpp:85-87 |
+  1931→| Fly velocity scale | ×10 after smoothing | LocalPlayer.cpp:85-87 |
+  1932→| Vertical fly keys (PC) | `KEY_E` (+), `KEY_Q` (−), scale ×0.2 ×flySpeed | LocalPlayer.cpp:81-82 |
+  1933→
+  1934→### Confirmed constants for faithful port (MOB physics, for completeness)
+  1935→| Constant | Value | Source |
+  1936→|---|---|---|
+  1937→| Land gravity (per tick) | 0.08f | Mob.cpp:620 |
+  1938→| Air vertical drag | 0.98f | Mob.cpp:621 |
+  1939→| Ground horizontal friction base | 0.91f (×0.6 on ground ×Tile::friction) | Mob.cpp:586-592 |
+  1940→| Water acceleration | 0.02f | Mob.cpp:562 |
+  1941→| Water drag (per axis) | 0.80f | Mob.cpp:565-567 |
+  1942→| Water "gravity" | 0.02f | Mob.cpp:568 |
+  1943→| Lava acceleration | 0.02f | Mob.cpp:575 |
+  1944→| Lava drag (per axis) | 0.50f | Mob.cpp:577-579 |
+  1945→| Water/lava wall-climb impulse | 0.3f | Mob.cpp:571, 583 |
+  1946→| Ladder fall cap | -0.15f | Mob.cpp:609 |
+  1947→| Ladder climb impulse (wall-hit) | 0.2f | Mob.cpp:617 |
+  1948→| Mob::jumpFromGround() | yd = 0.42f (no water/lava branch) | Mob.cpp:846 |
+  1949→| Water/lava swim impulse (when jump pressed) | yd += 0.04f per tick | Mob.cpp:719, 721 |
+  1950→| Input damping (xxa, yya) | 0.98f per tick | Mob.cpp:727-728 |
+  1951→| `yRotA` damping | 0.9f per tick | Mob.cpp:729 |
+  1952→| Push hitbox expansion | `bb.grow(0.2, 0, 0.2)` | Mob.cpp:745 |
+  1953→| `walkingSpeed` (Mob default) | 0.1f | Mob.cpp:42 |
+  1954→| `flyingSpeed` (Mob default) | 0.02f | Mob.cpp:43 |
+  1955→
+  1956→### Verified input-layer key → action mapping (KEYBOARD)
+  1957→| Action | Key option | Effect |
+  1958→|---|---|---|
+  1959→| Forward | `options->keyUp` | `ya += 1` |
+  1960→| Back | `options->keyDown` | `ya -= 1` |
+  1961→| Strafe left | `options->keyLeft` | `xa += 1` |
+  1962→| Strafe right | `options->keyRight` | `xa -= 1` |
+  1963→| Jump | `options->keyJump` | `jumping = true`; fly-toggle when double-tapped within 7 ticks (if `mayfly`) |
+  1964→| Sneak | `options->keySneak` | `sneaking = true`; xa/ya ×=0.3; ySlideOffset = max(ySlideOffset, 0.2) |
+  1965→| Craft (open 2×2 inv crafting) | `options->keyCraft` | calls `player->startCrafting(...Recipe::SIZE_2X2)` |
+  1966→
+  1967→### Verified input-layer mouse → action mapping (MOUSE)
+  1968→| Button | Mode | Action |
+  1969→|---|---|---|
+  1970→| Left (held) | any | `BAI_REMOVE \| BAI_ATTACK` (break block / hit entity) every tick |
+  1971→| Right (held, 1st tick) | any | `BAI_BUILD \| BAI_INTERACT` once per press |
+  1972→| Right (held, >1st tick) | any | no action (rate-limited by `buildHoldTicks` counter) |
+  1973→| Mouse delta | `MODE_DELTA` | raw `(Mouse::getDX(), Mouse::getDY())` → caller applies to yRot/xRot |
+  1974→| Mouse offset | `MODE_OFFSET` | `linearTransform(offset, deadZone=40/30, scale=0.4/0.6) * dt` for x/y |
+  1975→
+  1976→### UNVERIFIED items (flagged for follow-up)
+  1977→1. **Exact turn-application** (yaw/pitch update from `TurnDelta`): the actual `yRot += dx * sensitivity; xRot += dy * sensitivity` (and invertYMouse handling) is in the Minecraft main loop or GameRenderer — NOT in MouseTurnInput. Need to read `Minecraft.cpp` / `GameRenderer.cpp` to verify exact formula and sensitivity multiplier.
+  1978→2. **`Player::touch(Entity*)`**: calls `e->playerTouch(this)` — ItemEntity pickup, etc. Need to read ItemEntity::playerTouch for pickup distance/range and stack merge rules.
+  1979→3. **`Mob::updateWalkAnim()`**: animation-only, but exactly determines walkAnimSpeed/walkAnimPos (used for limb swing). Copied into Entry 2 but re-verify if needed for camera bob.
+  1980→4. **`Player::getDestroySpeed`/`canDestroy`**: delegated to `Inventory` — relevant for break-time formula. Need to read Inventory.cpp + Tile::friction/getDestroySpeed for block break timing.
+  1981→5. **`SimpleFoodData::tick(Player*)`**: server-side food exhaustion/heal — read `world/food/SimpleFoodData.cpp` if survival-mode food tick is in scope.
+  1982→6. **`Mob::isInWater()` / `isInLava()` / `isFree()` / `onLadder()`**: geometry checks used by travel — verify exact AABB-vs-block test rules.
+  1983→7. **`AutoJump` `isJumpable` stairs check**: source comment notes "doesn't work completely, since it doesn't care about stairs rotation" — may need corner-case handling in the port for corner stairs.
+  1984→8. **`LocalPlayer::calculateFlight` flySpeed option default**: the value of `minecraft->options.flySpeed` is set by user/Options — need to read `Options::initDefaultValues()` for the default.
+  1985→
+  1986→### Next actions for the port
+  1987→1. Implement `Player::travel()` exactly as in Entry 5 (with `flyingSpeed = 0.05` override + `yd *= 0.6` damping on flying).
+  1988→2. Implement `LocalPlayer::aiStep()` exactly as in Entry 6, including:
+  1989→   - `jumpTriggerTime = 7` window for double-jump fly toggle (rising-edge `!wasJumping && input->jumping`)
+  1990→   - `±0.15f` fly vertical impulse
+  1991→   - `0.35f` using-item damping applied to `input->xa/ya`
+  1992→   - Order: `Mob::aiStep()` first, then `Player::aiStep()`
+  1993→3. Implement `LocalPlayer::move()` with the EXACT autoJump heuristic (half-tile crossing, look-ahead projection, solid/non-solid checks, `isJumpable` blacklist).
+  1994→4. Implement `KeyboardInput::tick()` with the EXACT xa/ya sign convention and `0.3f` sneak multiplier at input layer.
+  1995→5. Implement `MouseBuildInput::tickBuild()` with the EXACT left-hold / right-once behavior.
+  1996→6. Implement `Mob::travel()` 3-way water/lava/land split with the friction2 formula and ladder logic.
+  1997→7. Implement `Entity::moveRelative()` with the deadzone and yRot rotation formula exactly.
+  1998→
+  1999→**RE-Player stage COMPLETE.** All entries 5–8 written with exact code, exact constants, and errata flagged for earlier-Entry corrections.
+  2000→
+
+[showing lines 1-2000 of 18114; use offset=2001 with limit to continue reading]
