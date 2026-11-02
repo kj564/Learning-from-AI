@@ -3,78 +3,113 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-<title>VoxelCraft — MCPE 2013 WASM (Patched)</title>
+<title>VoxelCraft — MCPE 2013 WASM (Mobile Patched)</title>
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
-html, body { width: 100%; height: 100%; overflow: hidden; background: #000; user-select: none; -webkit-user-select: none; }
+html, body { width: 100%; height: 100%; overflow: hidden; background: #000; user-select: none; -webkit-user-select: none; -webkit-tap-highlight-color: transparent; }
 #loading { position: fixed; inset: 0; z-index: 100; background: #0d1117; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; }
 #loading.hidden { display: none; }
-#loading h1 { font-size: 24px; color: #34d399; font-family: system-ui, sans-serif; }
+#loading h1 { font-size: 22px; color: #34d399; font-family: system-ui, sans-serif; }
 #loading p { font-size: 13px; color: #8b949e; font-family: system-ui, sans-serif; }
 .spinner { width: 28px; height: 28px; border: 2px solid #34d399; border-top-color: transparent; border-radius: 50%; animation: spin 0.8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 canvas { position: fixed; inset: 0; width: 100%; height: 100%; display: block; image-rendering: pixelated; touch-action: none; -webkit-tap-highlight-color: transparent; }
 
-/* §Patch overlay — bug-fix HUD */
-#patch-hud { position: fixed; top: 8px; left: 8px; z-index: 50; font-family: 'Courier New', monospace; font-size: 11px; color: #34d399; background: rgba(0,0,0,0.55); padding: 6px 10px; border-radius: 6px; pointer-events: none; line-height: 1.4; max-width: 280px; }
+/* §Patch overlay — mobile-first HUD */
+#patch-hud { position: fixed; top: 8px; left: 8px; z-index: 50; font-family: 'Courier New', monospace; font-size: 11px; color: #34d399; background: rgba(0,0,0,0.55); padding: 6px 10px; border-radius: 6px; pointer-events: none; line-height: 1.45; max-width: 290px; }
 #patch-hud b { color: #fbbf24; }
 #patch-hud .bug { color: #f87171; }
 #patch-hud .ok { color: #34d399; }
 #patch-hud .warn { color: #fbbf24; }
+#patch-hud .crit { color: #f87171; font-weight: bold; }
 
-#help-panel { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 60; background: rgba(13,17,23,0.96); color: #e6edf3; font-family: 'Courier New', monospace; font-size: 13px; padding: 20px 28px; border-radius: 10px; border: 1px solid #34d399; box-shadow: 0 10px 40px rgba(0,0,0,0.6); display: none; max-width: 520px; line-height: 1.55; }
+#help-panel { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 60; background: rgba(13,17,23,0.97); color: #e6edf3; font-family: 'Courier New', monospace; font-size: 13px; padding: 20px 26px; border-radius: 10px; border: 1px solid #34d399; box-shadow: 0 10px 40px rgba(0,0,0,0.6); display: none; max-width: 560px; line-height: 1.55; max-height: 90vh; overflow-y: auto; }
 #help-panel.show { display: block; }
-#help-panel h2 { color: #34d399; margin-bottom: 12px; font-size: 16px; }
+#help-panel h2 { color: #34d399; margin-bottom: 6px; font-size: 16px; }
+#help-panel h3 { color: #fbbf24; margin: 14px 0 4px 0; font-size: 13px; }
 #help-panel kbd { display: inline-block; background: #21262d; border: 1px solid #30363d; border-radius: 4px; padding: 1px 7px; font-size: 12px; color: #fbbf24; min-width: 18px; text-align: center; }
 #help-panel table { border-collapse: collapse; }
 #help-panel td { padding: 3px 8px; vertical-align: top; }
 #help-panel .col-keys { color: #fbbf24; white-space: nowrap; }
-#help-panel .close { margin-top: 14px; color: #8b949e; font-size: 11px; text-align: center; }
+#help-panel .note { color: #8b949e; font-size: 11px; margin-top: 10px; padding: 8px; background: rgba(255,255,255,0.04); border-radius: 4px; }
+#help-panel .crit-note { color: #f87171; font-size: 11px; margin-top: 8px; padding: 8px; background: rgba(248,113,113,0.08); border-left: 3px solid #f87171; border-radius: 4px; }
 
 #toast { position: fixed; bottom: 12px; left: 50%; transform: translateX(-50%); z-index: 70; background: rgba(220,38,38,0.92); color: #fff; font-family: system-ui, sans-serif; font-size: 13px; padding: 10px 18px; border-radius: 8px; box-shadow: 0 4px 20px rgba(0,0,0,0.5); opacity: 0; transition: opacity 0.3s; pointer-events: none; max-width: 90%; text-align: center; }
 #toast.show { opacity: 1; }
+#toast.warn { background: rgba(217,119,6,0.95); }
+#toast.info { background: rgba(52,211,153,0.92); }
+
+/* §Touch indicator dots — show where touches land (helps debug multitouch) */
+#touch-debug { position: fixed; inset: 0; z-index: 40; pointer-events: none; }
+#touch-debug .dot { position: absolute; width: 32px; height: 32px; border: 3px solid; border-radius: 50%; transform: translate(-50%, -50%); box-shadow: 0 0 8px rgba(0,0,0,0.6); }
+#touch-debug .dot.p0 { border-color: #34d399; }
+#touch-debug .dot.p1 { border-color: #fbbf24; }
+#touch-debug .dot.p2 { border-color: #60a5fa; }
+#touch-debug .dot.p3 { border-color: #f87171; }
+#touch-debug .dot .label { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); font-family: monospace; font-size: 11px; color: #fff; font-weight: bold; text-shadow: 0 0 4px #000; }
 </style>
 </head>
 <body>
 <div id="loading">
-<h1>VoxelCraft · WASM <span style="color:#fbbf24;">(patched)</span></h1>
+<h1>VoxelCraft · WASM <span style="color:#fbbf24;">(mobile patched)</span></h1>
 <div class="spinner"></div>
 <p id="loading-text">Loading assets…</p>
 </div>
 <canvas id="canvas" width="854" height="480"></canvas>
 
+<div id="touch-debug"></div>
+
 <div id="patch-hud">
-  <div><b>VoxelCraft Patched Build</b></div>
-  <div class="ok">✓ Keyboard input (WASD, E, Q, Esc)</div>
-  <div class="ok">✓ Right-click place / use item</div>
-  <div class="ok">✓ Mouse-look delta (dx/dy)</div>
-  <div class="ok">✓ Pointer-lock (press P in-game)</div>
-  <div class="warn">⚠ Save still needs C++ recompile</div>
-  <div class="warn">⚠ Options text needs C++ recompile</div>
-  <div style="margin-top:4px;">Press <b>H</b> for controls · <b>F1</b> toggle HUD</div>
+  <div><b>VoxelCraft · Mobile Patch</b></div>
+  <div class="ok">✓ Touch dx/dy &amp; semua jari diteruskan</div>
+  <div class="ok">✓ Right-click (mouse) place/use item</div>
+  <div class="ok">✓ Keyboard fallback (desktop) — opsional</div>
+  <div class="crit">✗ Multitouch (gerak + lihat bareng) butuh recompile C++</div>
+  <div class="warn">⚠ Save disabled (butuh recompile C++)</div>
+  <div class="warn">⚠ Options text (butuh recompile C++)</div>
+  <div style="margin-top:4px;"><b>H</b> = bantuan · <b>F1</b> = toggle HUD · <b>T</b> = toggle touch-debug</div>
 </div>
 
 <div id="help-panel">
-  <h2>Controls — VoxelCraft (Patched)</h2>
+  <h2>Kontrol — VoxelCraft (Mobile)</h2>
+  <p style="color:#8b949e;font-size:11px;margin-bottom:10px;">Game ini port Minecraft Pocket Edition 2013 — desain aslinya pakai <b>touch screen</b>.</p>
+
+  <h3>📱 Touch (mobile)</h3>
   <table>
-    <tr><td class="col-keys"><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd></td><td>Move (synthetic D-pad touch)</td></tr>
-    <tr><td class="col-keys"><kbd>Space</kbd></td><td>Jump / fly up (creative)</td></tr>
-    <tr><td class="col-keys"><kbd>Shift</kbd></td><td>Sneak · hold while flying to descend</td></tr>
-    <tr><td class="col-keys"><kbd>E</kbd></td><td>Open inventory / fly up (creative)</td></tr>
-    <tr><td class="col-keys"><kbd>Q</kbd></td><td>Fly down (creative) / drop item</td></tr>
-    <tr><td class="col-keys"><kbd>1</kbd>–<kbd>9</kbd></td><td>Select hotbar slot</td></tr>
-    <tr><td class="col-keys"><kbd>Esc</kbd></td><td>Pause menu / back</td></tr>
-    <tr><td class="col-keys"><kbd>T</kbd></td><td>Chat (multiplayer)</td></tr>
-    <tr><td class="col-keys"><kbd>F</kbd></td><td>Toggle render distance (fog)</td></tr>
-    <tr><td class="col-keys"><kbd>U</kbd></td><td>Use held item (alt for right-click)</td></tr>
-    <tr><td class="col-keys"><kbd>X</kbd></td><td>Destroy block (alt for left-click)</td></tr>
-    <tr><td class="col-keys">Left-click</td><td>Destroy block / attack (hold)</td></tr>
-    <tr><td class="col-keys">Right-click</td><td>Place block / use item (bow, food, door)</td></tr>
-    <tr><td class="col-keys">Mouse drag</td><td>Look around (right half of screen = turn area)</td></tr>
-    <tr><td class="col-keys">Click canvas</td><td>Mouse-look drag (touch mode) — menus work normally</td></tr>
-    <tr><td class="col-keys"><kbd>P</kbd></td><td>Toggle pointer-lock for FPS free-look (only when in-game)</td></tr>
+    <tr><td class="col-keys">D-pad kiri-bawah</td><td>Tahan untuk gerak (atas/bawah/kiri/kanan). Tombol tengah = lompat.</td></tr>
+    <tr><td class="col-keys">Drag di area kanan</td><td>Lihat sekeliling (look around)</td></tr>
+    <tr><td class="col-keys">Tap hotbar</td><td>Pilih slot aktif (1-9)</td></tr>
+    <tr><td class="col-keys">Tap tombol "..."</td><td>Buka inventory full (block selection)</td></tr>
+    <tr><td class="col-keys">Tap &amp; tahan block</td><td>Hancurkan block (creative: instan)</td></tr>
+    <tr><td class="col-keys">Tap sekali pada block</td><td>Letakkan block / pakai item</td></tr>
   </table>
-  <div class="close">Press <kbd>H</kbd> to close this panel</div>
+
+  <h3>🖥️ Mouse + Keyboard (desktop fallback)</h3>
+  <table>
+    <tr><td class="col-keys">Left-click</td><td>Hancurkan block / serang</td></tr>
+    <tr><td class="col-keys">Right-click</td><td>Letakkan block / pakai item (bow, food, door)</td></tr>
+    <tr><td class="col-keys">Drag mouse</td><td>Lihat sekeliling (touch turn-area simulation)</td></tr>
+    <tr><td class="col-keys"><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd></td><td>Gerak (simulasi tap D-pad)</td></tr>
+    <tr><td class="col-keys"><kbd>Space</kbd></td><td>Lompat / terbang naik (creative)</td></tr>
+    <tr><td class="col-keys"><kbd>1</kbd>–<kbd>9</kbd></td><td>Pilih slot hotbar</td></tr>
+    <tr><td class="col-keys"><kbd>Esc</kbd></td><td>Pause / kembali</td></tr>
+    <tr><td class="col-keys"><kbd>P</kbd></td><td>Toggle pointer-lock (FPS free-look)</td></tr>
+  </table>
+
+  <div class="crit-note">
+    <b>⚠ Limitasi multitouch:</b> Build WASM ini menghardcode <code>pointerId=0</code> di
+    <code>wasm/main_emscripten.cpp:25</code>, jadi multitouch (1 jari di D-pad + 1 jari
+    di area look bersamaan) <b>tidak bisa</b>. Untuk fix perlu recompile C++ dengan
+    export baru <code>multitouch_feed(action, data, x, y, pointerId)</code>. Lihat
+    <code>PATCHES.md</code> §1 untuk detail.
+  </div>
+
+  <div class="note">
+    <b>Kenapa keyboard ada?</b> Karena multitouch rusak, desktop user perlu alternatif.
+    Di mobile asli, keyboard tidak dipakai — pakai touch saja.
+  </div>
+
+  <div style="margin-top:14px; color:#8b949e; font-size:11px; text-align:center;">Tekan <kbd>H</kbd> untuk tutup panel ini</div>
 </div>
 
 <div id="toast"></div>
@@ -86,6 +121,7 @@ var canvas = document.getElementById('canvas');
 var helpPanel = document.getElementById('help-panel');
 var patchHud = document.getElementById('patch-hud');
 var toastEl = document.getElementById('toast');
+var touchDebug = document.getElementById('touch-debug');
 
 // Pre-load MCPE 2013 textures
 var TEX = ['terrain.png','gui/gui.png','gui/icons.png','gui/title.png','gui/background.png','gui/items.png','gui/gui_blocks.png','gui/itemframe.png','gui/touchgui.png','font/default8.png','particles.png','environment/clouds.png','mob/char.png','mob/chicken.png','mob/cow.png','mob/pig.png','mob/sheep.png','mob/sheep_fur.png','mob/zombie.png','mob/skeleton.png','mob/spider.png','mob/creeper.png'];
@@ -145,18 +181,20 @@ window.__getAsset = function(p) {
   return a.ptr ? { ptr: a.ptr, size: a.length } : null;
 };
 
-// §=========== PATCH: Toast helper ===========
+// §=========== Toast helper ===========
 var toastTimer = null;
-function showToast(msg, ms) {
+function showToast(msg, kind, ms) {
   toastEl.textContent = msg;
-  toastEl.classList.add('show');
+  toastEl.className = 'show' + (kind ? ' ' + kind : '');
   if (toastTimer) clearTimeout(toastTimer);
-  toastTimer = setTimeout(function() { toastEl.classList.remove('show'); }, ms || 2500);
+  toastTimer = setTimeout(function() { toastEl.classList.remove('show'); }, ms || 3500);
 }
-// Show a persistent save warning 4 seconds after load
 setTimeout(function() {
-  showToast('⚠ Save is disabled in this WASM build (needs C++ recompile). Play in one sitting.', 6000);
+  showToast('⚠ Multitouch (gerak + lihat bareng) belum jalan — butuh recompile C++. Lihat H untuk detail.', 'warn', 7000);
 }, 6000);
+setTimeout(function() {
+  showToast('⚠ Save disabled di build WASM (butuh recompile C++)', 'warn', 5000);
+}, 12000);
 
 // §=========== GLES1 → WebGL2 translation layer (unchanged) ===========
 var GL1 = {
@@ -382,63 +420,131 @@ function startWasm() {
       _glPopMatrix = gl1Ovr._glPopMatrix;
       window.__gl1GetMatrix = function(which) { return which == 1 ? GL1.proj : GL1.mv; };
 
-      // §=========== PATCHED INPUT LAYER ============
-      // Bug fixes:
-      //   1. Keyboard events now forwarded to _keyboard_feed (was never called)
-      //   2. Right-click (action=2) forwarded for place/use-item (was missing)
-      //   3. Mouse dx/dy computed and passed for mouse-look (was always 0,0)
-      //   4. Pointer-lock for free-look on desktop
-      //   5. Synthetic D-pad touch events when WASD pressed (game is hard-coded to touch mode)
-      //   6. Hotbar 1-9 keys
-      //   7. Help overlay (H) + HUD toggle (F1)
-      // C++ key codes (from Keyboard.h / Options.cpp):
-      //   A=65 B=66 ... Z=90 · Space=32 · Esc=27 · Enter=13 · LSHIFT=10 (NOT 16!)
-      //   F=70 (fog) · E=69 (inventory+flyUp) · Q=81 (flyDown/drop) · T=84 (chat)
-      //   U=85 (use) · X=88 (destroy)
+      // §=========== PATCHED INPUT LAYER (mobile-first) ============
+      // Bugs fixed:
+      //   1. Touch dx/dy now computed and passed (was always 0,0)
+      //   2. ALL touches forwarded (was only touches[0])
+      //   3. Right-click (mouse) forwarded for place/use-item
+      //   4. Keyboard fallback for desktop (WASD, 1-9, Esc) — optional
+      //   5. Touch debug overlay (press T) shows where each finger lands
+      //
+      // Limitasi yang TIDAK bisa di-fix di JS (butuh recompile C++):
+      //   - main_emscripten.cpp:25 hardcode pointerId=0 ke Multitouch::feed,
+      //     jadi multitouch (D-pad + look bareng) gak bisa. Semua jari
+      //     jadi pointer 0 di C++, saling nimpa.
 
       function canvasCoords(cx, cy) {
         var r = canvas.getBoundingClientRect();
         return { x: Math.round((cx - r.left) * canvas.width / r.width), y: Math.round((cy - r.top) * canvas.height / r.height) };
       }
 
-      // --- Mouse: forward move + left/right buttons with dx/dy ---
-      // C++ mouse_feed signature: (action, data, x, y, dx, dy)
-      // action: 0=move, 1=left, 2=right, 3=wheel
-      var lastMx = -1, lastMy = -1;
-      function feedMouse(action, data, cx, cy) {
-        var dx = 0, dy = 0;
-        if (lastMx >= 0) { dx = cx - lastMx; dy = cy - lastMy; }
-        lastMx = cx; lastMy = cy;
-        // §Scale delta up so it's noticeable in the C++ MouseTurnInput (MODE_DELTA)
-        // The original game expects small per-frame deltas; multiply by 2 for snappier look.
-        if (typeof _mouse_feed === 'function') _mouse_feed(action, data, cx, cy, dx * 2, dy * 2);
+      // §----- Touch debug overlay (press T to toggle) -----
+      var touchDebugOn = false;
+      var touchDots = {};
+      function updateTouchDot(id, x, y, active) {
+        if (!touchDebugOn) {
+          if (touchDots[id]) { touchDots[id].remove(); delete touchDots[id]; }
+          return;
+        }
+        if (!active) {
+          if (touchDots[id]) { touchDots[id].remove(); delete touchDots[id]; }
+          return;
+        }
+        var r = canvas.getBoundingClientRect();
+        var sx = (x / canvas.width) * r.width + r.left;
+        var sy = (y / canvas.height) * r.height + r.top;
+        if (!touchDots[id]) {
+          var dot = document.createElement('div');
+          dot.className = 'dot p' + (id % 4);
+          var lbl = document.createElement('div');
+          lbl.className = 'label';
+          lbl.textContent = '#' + id;
+          dot.appendChild(lbl);
+          touchDebug.appendChild(dot);
+          touchDots[id] = dot;
+        }
+        touchDots[id].style.left = sx + 'px';
+        touchDots[id].style.top = sy + 'px';
       }
 
+      // §----- Touch: forward ALL touches (was only touches[0]) -----
+      // C++ `mouse_feed(action, data, x, y, dx, dy)` calls both
+      //   Mouse::feed(action, data, x, y, dx, dy)
+      //   Multitouch::feed(action, data, x, y, 0)   ← pointerId hardcoded 0
+      // So all touches collapse to Multitouch pointer 0 (a C++ bug — see PATCHES.md §1).
+      // We still forward every touch so single-finger drag works correctly.
+      var touchPositions = {}; // touch.identifier → {x, y} last canvas coords
+      canvas.addEventListener('touchstart', function(e) {
+        e.preventDefault();
+        for (var i = 0; i < e.changedTouches.length; i++) {
+          var t = e.changedTouches[i];
+          var c = canvasCoords(t.clientX, t.clientY);
+          touchPositions[t.identifier] = { x: c.x, y: c.y };
+          updateTouchDot(t.identifier, c.x, c.y, true);
+          if (typeof _mouse_feed === 'function') _mouse_feed(1, 1, c.x, c.y, 0, 0);
+        }
+      }, {passive:false});
+      canvas.addEventListener('touchmove', function(e) {
+        e.preventDefault();
+        for (var i = 0; i < e.changedTouches.length; i++) {
+          var t = e.changedTouches[i];
+          var c = canvasCoords(t.clientX, t.clientY);
+          var prev = touchPositions[t.identifier];
+          var dx = prev ? c.x - prev.x : 0;
+          var dy = prev ? c.y - prev.y : 0;
+          touchPositions[t.identifier] = { x: c.x, y: c.y };
+          updateTouchDot(t.identifier, c.x, c.y, true);
+          if (typeof _mouse_feed === 'function') _mouse_feed(0, 0, c.x, c.y, dx, dy);
+        }
+      }, {passive:false});
+      canvas.addEventListener('touchend', function(e) {
+        e.preventDefault();
+        for (var i = 0; i < e.changedTouches.length; i++) {
+          var t = e.changedTouches[i];
+          var c = canvasCoords(t.clientX, t.clientY);
+          delete touchPositions[t.identifier];
+          updateTouchDot(t.identifier, 0, 0, false);
+          if (typeof _mouse_feed === 'function') _mouse_feed(1, 0, c.x, c.y, 0, 0);
+        }
+      }, {passive:false});
+      canvas.addEventListener('touchcancel', function(e) {
+        e.preventDefault();
+        for (var i = 0; i < e.changedTouches.length; i++) {
+          var t = e.changedTouches[i];
+          delete touchPositions[t.identifier];
+          updateTouchDot(t.identifier, 0, 0, false);
+          var c = canvasCoords(t.clientX, t.clientY);
+          if (typeof _mouse_feed === 'function') _mouse_feed(1, 0, c.x, c.y, 0, 0);
+        }
+      }, {passive:false});
+
+      // §----- Mouse: for desktop testing -----
+      // Mouse maps to touch events (same _mouse_feed path). Right-click is
+      // forwarded as action=2 (was missing in original).
+      var lastMx = -1, lastMy = -1;
+      function feedMouseMove(cx, cy, dx, dy) {
+        if (typeof _mouse_feed === 'function') _mouse_feed(0, 0, cx, cy, dx, dy);
+      }
       canvas.addEventListener('mousemove', function(e) {
         var c = canvasCoords(e.clientX, e.clientY);
-        // If pointer-locked, use movementX/Y directly (these are deltas in screen px)
+        var dx = 0, dy = 0;
+        if (lastMx >= 0) { dx = c.x - lastMx; dy = c.y - lastMy; }
+        lastMx = c.x; lastMy = c.y;
         if (document.pointerLockElement === canvas) {
-          var mx = e.movementX || 0, my = e.movementY || 0;
-          // Map movement delta to canvas-space delta proportionally
           var r = canvas.getBoundingClientRect();
-          var cdx = Math.round(mx * canvas.width / r.width);
-          var cdy = Math.round(my * canvas.height / r.height);
-          lastMx = c.x; lastMy = c.y;
-          if (typeof _mouse_feed === 'function') _mouse_feed(0, 0, c.x, c.y, cdx * 2, cdy * 2);
+          var cdx = Math.round((e.movementX || 0) * canvas.width / r.width);
+          var cdy = Math.round((e.movementY || 0) * canvas.height / r.height);
+          feedMouseMove(c.x, c.y, cdx, cdy);
         } else {
-          feedMouse(0, 0, c.x, c.y);
+          feedMouseMove(c.x, c.y, dx, dy);
         }
       });
       canvas.addEventListener('mousedown', function(e) {
         e.preventDefault();
         var c = canvasCoords(e.clientX, e.clientY);
-        // §Forward button presses to the C++ Mouse queue.
-        // NOTE: pointer-lock is NOT auto-requested here because it breaks
-        // menu clicks (the lock swallows the click event). Use the 'P' key
-        // to toggle pointer-lock explicitly when in-game.
         if (e.button === 0)      { if (typeof _mouse_feed === 'function') _mouse_feed(1, 1, c.x, c.y, 0, 0); }
-        else if (e.button === 2) { if (typeof _mouse_feed === 'function') _mouse_feed(2, 1, c.x, c.y, 0, 0); } // §RIGHT-CLICK place/use (was missing!)
-        else if (e.button === 1) { if (typeof _mouse_feed === 'function') _mouse_feed(3, 1, c.x, c.y, 0, 0); } // middle = wheel
+        else if (e.button === 2) { if (typeof _mouse_feed === 'function') _mouse_feed(2, 1, c.x, c.y, 0, 0); } // §RIGHT-CLICK (was missing)
+        else if (e.button === 1) { if (typeof _mouse_feed === 'function') _mouse_feed(3, 1, c.x, c.y, 0, 0); }
       });
       canvas.addEventListener('mouseup', function(e) {
         e.preventDefault();
@@ -447,56 +553,23 @@ function startWasm() {
         else if (e.button === 2) { if (typeof _mouse_feed === 'function') _mouse_feed(2, 0, c.x, c.y, 0, 0); }
         else if (e.button === 1) { if (typeof _mouse_feed === 'function') _mouse_feed(3, 0, c.x, c.y, 0, 0); }
       });
-      // §Suppress context menu so right-click reaches the game
       canvas.addEventListener('contextmenu', function(e) { e.preventDefault(); return false; });
-
-      // Wheel for hotbar scroll
       canvas.addEventListener('wheel', function(e) {
         if (document.pointerLockElement !== canvas) return;
         e.preventDefault();
-        // §No direct hotbar API; fall through to C++ mouse wheel (action=3, data=delta)
         if (typeof _mouse_feed === 'function') _mouse_feed(3, e.deltaY > 0 ? 1 : 0, lastMx, lastMy, 0, 0);
       }, { passive: false });
 
-      // --- Touch: same as before but with proper dx/dy ---
-      var lastTx = -1, lastTy = -1;
-      canvas.addEventListener('touchstart', function(e) {
-        e.preventDefault();
-        if (e.touches.length > 0) {
-          var c = canvasCoords(e.touches[0].clientX, e.touches[0].clientY);
-          lastTx = c.x; lastTy = c.y;
-          if (typeof _mouse_feed === 'function') _mouse_feed(1, 1, c.x, c.y, 0, 0);
-        }
-      }, {passive:false});
-      canvas.addEventListener('touchmove', function(e) {
-        e.preventDefault();
-        if (e.touches.length > 0) {
-          var c = canvasCoords(e.touches[0].clientX, e.touches[0].clientY);
-          var dx = lastTx >= 0 ? c.x - lastTx : 0, dy = lastTy >= 0 ? c.y - lastTy : 0;
-          lastTx = c.x; lastTy = c.y;
-          if (typeof _mouse_feed === 'function') _mouse_feed(0, 0, c.x, c.y, dx * 2, dy * 2);
-        }
-      }, {passive:false});
-      canvas.addEventListener('touchend', function(e) {
-        e.preventDefault();
-        if (e.changedTouches.length > 0) {
-          var c = canvasCoords(e.changedTouches[0].clientX, e.changedTouches[0].clientY);
-          lastTx = -1; lastTy = -1;
-          if (typeof _mouse_feed === 'function') _mouse_feed(1, 0, c.x, c.y, 0, 0);
-        }
-      }, {passive:false});
-
-      // --- Keyboard: forward to _keyboard_feed (CRITICAL FIX) ---
-      // Maps JS keycodes → C++ Keyboard.h codes. Note LSHIFT in C++ = 10 (not 16).
+      // §----- Keyboard: desktop fallback (optional) -----
+      // C++ key codes: A=65..Z=90, Space=32, Esc=27, Enter=13, LSHIFT=10 (NOT 16!)
       function mapKey(e) {
         var kc = e.keyCode || e.which || 0;
-        // Shift: C++ KEY_LSHIFT = 10 (intentional value in this codebase)
-        if (kc === 16) return 10;
+        if (kc === 16) return 10; // C++ KEY_LSHIFT = 10
         return kc;
       }
       var heldKeys = {};
       window.addEventListener('keydown', function(e) {
-        // Handle our own hotkeys first
+        // Our own hotkeys
         if (e.keyCode === 72) { // H — toggle help
           helpPanel.classList.toggle('show');
           e.preventDefault();
@@ -507,44 +580,37 @@ function startWasm() {
           e.preventDefault();
           return;
         }
-        if (e.keyCode === 80) { // P — toggle pointer-lock for free-look
-          if (document.pointerLockElement === canvas) {
-            document.exitPointerLock();
-          } else {
-            try { canvas.requestPointerLock(); } catch(_) {}
-          }
+        if (e.keyCode === 84) { // T — toggle touch-debug
+          touchDebugOn = !touchDebugOn;
+          if (!touchDebugOn) Object.keys(touchDots).forEach(function(k){ touchDots[k].remove(); delete touchDots[k]; });
+          showToast('Touch debug ' + (touchDebugOn ? 'ON' : 'OFF'), 'info', 1500);
           e.preventDefault();
           return;
         }
-        // Don't forward browser-only keys (F5 refresh, F12 devtools, etc.)
+        if (e.keyCode === 80) { // P — pointer-lock
+          if (document.pointerLockElement === canvas) document.exitPointerLock();
+          else { try { canvas.requestPointerLock(); } catch(_) {} }
+          e.preventDefault();
+          return;
+        }
         if (e.keyCode >= 112 && e.keyCode <= 123 && e.keyCode !== 112) return;
         var k = mapKey(e);
         if (k === 0) return;
-        if (heldKeys[k]) { e.preventDefault(); return; } // ignore auto-repeat
+        if (heldKeys[k]) { e.preventDefault(); return; }
         heldKeys[k] = true;
-        if (typeof _keyboard_feed === 'function') {
-          _keyboard_feed(k, 1); // state 1 = KEYDOWN
-        }
-        // §Also trigger D-pad synthetic touch for WASD / Space / Shift so the
-        // touch-mode game responds to keyboard movement.
+        if (typeof _keyboard_feed === 'function') _keyboard_feed(k, 1);
+        // §Keyboard → synthetic D-pad touch (desktop fallback, since multitouch is broken)
         driveDpadForMovement(k, true);
-        // Hotbar 1-9 → select slot
-        if (k >= 49 && k <= 57) {
-          try { selectHotbar(k - 49); } catch(_) {}
-        }
-        // Prevent page scroll on space/arrows
+        if (k >= 49 && k <= 57) { try { selectHotbar(k - 49); } catch(_) {} }
         if ([32, 37, 38, 39, 40].indexOf(e.keyCode) >= 0) e.preventDefault();
       });
       window.addEventListener('keyup', function(e) {
         var k = mapKey(e);
         if (k === 0) return;
         heldKeys[k] = false;
-        if (typeof _keyboard_feed === 'function') {
-          _keyboard_feed(k, 0); // state 0 = KEYUP
-        }
+        if (typeof _keyboard_feed === 'function') _keyboard_feed(k, 0);
         driveDpadForMovement(k, false);
       });
-      // Blur → release all keys
       window.addEventListener('blur', function() {
         for (var k in heldKeys) {
           if (heldKeys[k] && typeof _keyboard_feed === 'function') _keyboard_feed(parseInt(k), 0);
@@ -553,29 +619,24 @@ function startWasm() {
         Object.keys(dpadActive).forEach(function(k) { dpadActive[k] = false; });
       });
 
-      // --- Synthetic D-pad touch (WASD → movement in touch-mode game) ---
-      // MCPE 2013 touch UI places a 3×3 D-pad on the bottom-left of the screen.
-      // Source: TouchscreenInput_TestFps::onConfigChanged() in
-      //   rujukan/.../player/input/touchscreen/TouchscreenInput.cpp:109-159
-      // For right-handed (isLeftHanded=false), w=854, h=480, pixelsPerMillimeter=6:
-      //   Bw = Bh = 84 (capped from 0.11*854=93.94 → 6*14=84)
-      //   BaseX = 8, BaseY = -8 + 480 - 3*84 = 220
-      //   D-pad covers x:[8,260], y:[220,472] with 5 active buttons:
-      //     N(up)    : x:[92,176]  y:[220,304]  center (134,262)
-      //     S(down)  : x:[92,176]  y:[388,472]  center (134,430)
-      //     W(left)  : x:[8,92]    y:[304,388]  center (50,346)
-      //     E(right) : x:[176,260] y:[304,388]  center (218,346)
-      //     C(jump)  : x:[92,176]  y:[304,388]  center (134,346)
+      // §----- Synthetic D-pad touch for keyboard (desktop fallback) -----
+      // D-pad layout from TouchscreenInput_TestFps::onConfigChanged()
+      // (TouchscreenInput.cpp:109-159) for w=854, h=480, pixelsPerMillimeter=6:
+      //   Bw=Bh=84, BaseX=8, BaseY=220
+      //   N(up)   center (134, 262)
+      //   S(down) center (134, 430)
+      //   W(left) center ( 50, 346)
+      //   E(right) center (218, 346)
+      //   C(jump) center (134, 346)
       var dpadActive = { w:false, a:false, s:false, d:false, jump:false };
       var dpadBtns = {
-        w:    { x: 134, y: 262, k: 'w'    },
-        s:    { x: 134, y: 430, k: 's'    },
-        a:    { x:  50, y: 346, k: 'a'    },
-        d:    { x: 218, y: 346, k: 'd'    },
-        jump: { x: 134, y: 346, k: 'jump' }
+        w:    { x: 134, y: 262 },
+        s:    { x: 134, y: 430 },
+        a:    { x:  50, y: 346 },
+        d:    { x: 218, y: 346 },
+        jump: { x: 134, y: 346 }
       };
       function driveDpadForMovement(kc, down) {
-        // §Map keycode → dpad button: W=87, A=65, S=83, D=68, Space=32
         var btn = null;
         if (kc === 87) btn = 'w';
         else if (kc === 65) btn = 'a';
@@ -588,16 +649,10 @@ function startWasm() {
         dpadActive[btn] = down;
         var p = dpadBtns[btn];
         if (typeof _mouse_feed === 'function') {
-          // §Send a touch event at the D-pad button position.
-          // action=1 (left/touch), data=1 down / 0 up. pointerId is 1 (distinct from mouse pointer 0)
           _mouse_feed(1, down ? 1 : 0, p.x, p.y, 0, 0);
         }
       }
 
-      // --- Hotbar slot selection (keys 1-9) ---
-      // The hotbar is at the bottom of the screen. Slot i is at:
-      //   x = (canvas.width - 9*20)/2 + i*20 + 10, y = canvas.height - 22 + 11
-      // We send a click on the slot position.
       function selectHotbar(idx) {
         var slotW = 20, slotH = 22;
         var totalW = 9 * slotW;
