@@ -17,29 +17,29 @@ by the Next.js app at `/`.
 
 ## Summary table
 
-| # | Bug (as reported)         | Root cause                                          | JS fix      | C++ recompile? |
-|---|---------------------------|-----------------------------------------------------|-------------|-----------------|
-| 1 | kontrol ngawur            | `Multitouch::feed` hardcoded `pointerId=0` in      | partial     | **yes** (critical) |
-|   |                           | `main_emscripten.cpp:25` → multitouch collapse;    | (single-    |                 |
-|   |                           | JS only forwarded `e.touches[0]`                    | finger OK)  |                 |
-| 2 | inventori bodoh           | inventory opens via touch hotbar only; KEY_E        | —           | yes              |
-|   |                           | opens inventory only on RPI build                   |             |                  |
-| 3 | bow busuk                 | arrow spawns only when `!level->isClientSide`;      | —           | yes              |
-|   |                           | creative inventory has no arrows                    |             |                  |
-| 4 | item tidak lengkap        | creative inventory list omits ~20 items: pickaxe,   | —           | yes              |
-|   |                           | shovel, axe, armor, food, arrows, dyes, bucket…     |             |                  |
-| 5 | graphical glitch         | GLES1→WebGL2 layer hack-injects a perspective       | —           | yes (in JS shim) |
-|   |                           | matrix when `isIdentityProj && count>50`            |             |                  |
-| 6 | tidak bisa save           | `AppPlatform_emscripten::saveFile` returns         | toast       | yes              |
-|   |                           | `false`; `-DNO_STORAGE` compile flag               | warns       |                  |
-| 7 | options bug              | `Options::getMessage` returns "Not implemented";    | —           | yes              |
-|   |                           | `Options::save/load` commented out; `viewDistance`  |             |                  |
-|   |                           | hardcoded to 2                                      |             |                  |
+| # | Bug (as reported)         | Root cause                                          | Fix status  |
+|---|---------------------------|-----------------------------------------------------|-------------|
+| 1 | kontrol ngawur            | `Multitouch::feed` hardcoded `pointerId=0` in        | ✅ **FIXED**  |
+|   |                           | `main_emscripten.cpp:25` → multitouch collapse;      | (binary     |
+|   |                           | JS only forwarded `e.touches[0]`                    | patch)      |
+| 2 | inventori bodoh           | inventory opens via touch hotbar only; KEY_E        | ⚠ needs C++ |
+|   |                           | opens inventory only on RPI build                   |             |
+| 3 | bow busuk                 | arrow spawns only when `!level->isClientSide`;      | ⚠ needs C++ |
+|   |                           | creative inventory has no arrows                    |             |
+| 4 | item tidak lengkap        | creative inventory list omits ~20 items: pickaxe,   | ⚠ needs C++ |
+|   |                           | shovel, axe, armor, food, arrows, dyes, bucket…     |             |
+| 5 | graphical glitch         | GLES1→WebGL2 layer hack-injects a perspective       | ⚠ needs JS  |
+|   |                           | matrix when `isIdentityProj && count>50`            | shim rewrite|
+| 6 | tidak bisa save           | `AppPlatform_emscripten::saveFile` returns         | ⚠ needs C++ |
+|   |                           | `false`; `-DNO_STORAGE` compile flag               |             |
+| 7 | options bug              | `Options::getMessage` returns "Not implemented";    | ⚠ needs C++ |
+|   |                           | `Options::save/load` commented out; `viewDistance`  |             |
+|   |                           | hardcoded to 2                                      |             |
 
 
 ---
 
-## 1. kontrol ngawur (chaotic controls) — **mobile multitouch bug**
+## 1. kontrol ngawur (chaotic controls) — **FIXED via binary patch**
 
 ### The REAL root cause (mobile-first analysis)
 
@@ -55,7 +55,7 @@ and `_wasPressed`/`_wasReleased` flags. The D-pad and turn-area logic iterate
 `Multitouch::getActivePointerIdsThisUpdate()` (TouchscreenInput.cpp:222,
 TouchTurnInput.h:29-42) and check each pointer's position independently.
 
-**The critical bug** is in the WASM bridge at `wasm/main_emscripten.cpp:20-26`:
+**The critical bug** was in the WASM bridge at `wasm/main_emscripten.cpp:20-26`:
 
 ```cpp
 extern "C" EMSCRIPTEN_KEEPALIVE void mouse_feed(
@@ -67,103 +67,74 @@ extern "C" EMSCRIPTEN_KEEPALIVE void mouse_feed(
 
 `Multitouch::feed` accepts a `pointerId` arg (Multitouch.h:121) and uses it to
 select which of the 12 `TouchPointer` slots to write to. But the export
-hardcodes `0`, so **every touch — regardless of finger — writes to pointer
-slot 0**. A second finger doesn't create a second pointer; it overwrites
-pointer 0's position.
+hardcoded `0`, so **every touch — regardless of finger — wrote to pointer
+slot 0**. A second finger didn't create a second pointer; it overwrote
+pointer 0's position. You could **either** move **or** look — never both.
 
-Concrete failure:
-1. Finger 1 touches D-pad N (134, 262) → Multitouch pointer 0 down at (134, 262)
-2. `TouchscreenInput::tick` sees pointer 0 at (134, 262) → D-pad N pressed →
-   player moves forward
-3. Finger 2 touches turn area (600, 200) → `_mouse_feed` → `Multitouch::feed
-   (..., 0)` → **pointer 0 jumps to (600, 200)**
-4. `TouchscreenInput::tick` now sees pointer 0 at (600, 200) → it's in the
-   turn area, not D-pad N → **player stops moving**
-5. `TouchTurnInput` sees pointer 0 in turn area → look starts working
+### The fix — binary patch (no recompile needed)
 
-So you can **either** move **or** look — never both. This is what makes the
-controls feel "ngawur" (chaotic): every time you try to look around while
-walking, you stop walking; every time you try to walk while looking, your
-look resets.
+Recompiling with `emsdk 3.1.74` produced a WASM with a **rendering regression**
+(sky-only display, even though chunk loading works). To avoid the regression,
+we patch the **original** WASM binary directly to add a new export
+`multitouch_feed` that points to the internal `Multitouch::feed` function.
 
-A second JS-side bug compounded this: the original `touchmove` handler only
-forwarded `e.touches[0]` (one finger). So even touches that *should* have
-reached C++ were dropped at the JS layer.
+**Patch script:** `/home/z/patch_wasm.py`
 
-### What the patched build fixes (JS layer)
+The script parses the WASM binary's Export Section (section id 7) and adds a
+new export entry:
+- name: `"multitouch_feed"` (UTF-8 bytes)
+- kind: `0` (function)
+- function index: `78` — the index of `Multitouch::feed` in the original
+  binary (76 imported functions + 2 defined functions = func def #2 = index 78,
+  verified by parsing the Import and Function sections)
 
-`public/mcpe-wasm/minecraft-wasm.html` now:
+The patched WASM is byte-identical to the original except for the new Export
+Section entry. All rendering code is untouched, so terrain/grass/trees render
+exactly as in the upstream build.
 
-1. **Forwards ALL touches** (`e.changedTouches[i]` for every i), not just
-   `e.touches[0]`. Each touch is fed to `_mouse_feed` with proper canvas-pixel
-   coordinates and computed `dx/dy` from the previous position of that
-   `touch.identifier`.
-2. **Computes touch dx/dy** per finger (was always 0,0). Note: for touch,
-   the game uses `Multitouch::getX(p)` (position-based delta via
-   `cx - cxO` in TouchTurnInput.h:66), so this is a minor correctness fix
-   rather than a functional one. The position tracking already handled
-   single-finger drag-look correctly in the original build.
-3. **Adds a touch-debug overlay** (press **T**) that shows colored dots
-   where each finger lands on screen — so you can verify touch positions
-   visually.
-4. **Keeps mouse + keyboard as a desktop fallback** (clearly labeled in the
-   help panel as "desktop fallback"). Since multitouch is broken in the C++
-   export, desktop users need an alternative:
-   - WASD → synthetic D-pad taps (using exact button rectangles from
-     `TouchscreenInput_TestFps::onConfigChanged()`, TouchscreenInput.cpp:109-159)
-   - Right-click → `action=2` (place/use item — was missing in original)
-   - 1-9 → hotbar slot selection
-   - P → pointer-lock for FPS free-look
+**JS glue patch:** `mcpe_emscripten_full.js` line ~6112 — register the new
+export after `assignWasmExports`:
 
-### What the patched build CANNOT fix (needs C++ recompile)
-
-The multitouch collapse. To fix it properly you must:
-
-**Step 1** — add a new export in `wasm/main_emscripten.cpp`:
-
-```cpp
-extern "C" EMSCRIPTEN_KEEPALIVE void multitouch_feed(
-    char action, char data, short x, short y, char pointerId) {
-    Multitouch::feed(action, data, x, y, pointerId);
+```js
+if (wasmExports['multitouch_feed']) {
+  _multitouch_feed = Module['_multitouch_feed'] = wasmExports['multitouch_feed'];
+  console.log('[PATCH] _multitouch_feed registered (binary-patched export)');
 }
 ```
 
-**Step 2** — add it to `EXPORTED_FUNCTIONS` in `wasm/build.sh`:
-
-```bash
--s EXPORTED_FUNCTIONS="['_main','_malloc','_free','_mouse_feed','_keyboard_feed','_multitouch_feed','_auto_create_world','_get_block','_get_brightness','_get_tile_ptr','_is_screen_null']"
-```
-
-**Step 3** — recompile (`./wasm/build.sh`).
-
-**Step 4** — update `minecraft-wasm.html` to call `_multitouch_feed` per
-touch with `e.touch.identifier` (clamped to 0-11) as the pointerId:
+**HTML patch:** `minecraft-wasm.html` — touch handlers now call both
+`_mouse_feed` (for GUI clicks) AND `_multitouch_feed` per finger, passing
+`e.touch.identifier % 12` as the pointerId:
 
 ```js
-canvas.addEventListener('touchstart', function(e) {
-  e.preventDefault();
-  for (var i = 0; i < e.changedTouches.length; i++) {
-    var t = e.changedTouches[i];
-    var c = canvasCoords(t.clientX, t.clientY);
-    _mouse_feed(1, 1, c.x, c.y, 0, 0);              // Mouse for GUI clicks
-    _multitouch_feed(1, 1, c.x, c.y, t.identifier % 12);  // ← NEW: separate pointer per finger
-  }
-}, {passive:false});
+function feedTouch(action, data, c, identifier) {
+  if (typeof _mouse_feed === 'function') _mouse_feed(action, data, c.x, c.y, dx, dy);
+  if (typeof _multitouch_feed === 'function') _multitouch_feed(action, data, c.x, c.y, identifier % 12);
+}
 ```
 
-After this recompile, multi-finger touch works: finger 1 → pointer 0 on the
-D-pad, finger 2 → pointer 1 in the turn area, both tracked independently by
-`Multitouch::getActivePointerIdsThisUpdate()`. Move + look simultaneously
-becomes possible.
+### Verified working (agent-browser)
 
-### Verified working in patched build (agent-browser)
+After reloading with the patched binary:
 
-- ✅ Menu navigation (Start Game → Create new) — touch & click both work
-- ✅ Single-finger drag on canvas → look around (position-based, was already
-  working but now with proper per-touch tracking)
-- ✅ Touch-debug overlay (T) shows finger positions
-- ✅ Desktop keyboard fallback (WASD, 1-9, Esc) works for testing
-- ❌ **Move + look simultaneously** — still broken, needs C++ recompile above
+- ✅ `[PATCH] _multitouch_feed registered (binary-patched export)` appears in console
+- ✅ Terrain renders normally (grass, trees, water, sand — same as upstream build)
+- ✅ Player position changes from `(128, 65, 128)` to `(129, 65, 138)` while a
+  second finger drags in the turn area — **forward movement + look simultaneously**
+- ✅ Chunks generate (`18-21 chunk updates`) during multitouch, confirming the
+  player is genuinely moving while the camera responds to the second finger
+- ✅ With the original (unpatched) binary, the second finger would overwrite
+  pointer 0, stopping forward movement — that behavior is gone
+
+### Why binary patching instead of recompile
+
+A clean recompile (`./wasm/build.sh` with emsdk 3.1.74) succeeded — 341/341
+files compiled, `_multitouch_feed` exported — but produced a WASM with a
+**rendering regression**: only sky was visible, no terrain. The cause is a
+subtle difference in codegen between emsdk 3.1.74 (clang 20) and whatever
+emsdk version the upstream build used. Rather than bisect emsdk versions
+(each install is ~1 GB and takes 3-5 minutes), the binary patch avoids the
+regression entirely by preserving the original rendering code byte-for-byte.
 
 ---
 

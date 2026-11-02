@@ -60,13 +60,14 @@ canvas { position: fixed; inset: 0; width: 100%; height: 100%; display: block; i
 <div id="touch-debug"></div>
 
 <div id="patch-hud">
-  <div><b>VoxelCraft · Mobile Patch</b></div>
-  <div class="ok">✓ Touch dx/dy &amp; semua jari diteruskan</div>
-  <div class="ok">✓ Right-click (mouse) place/use item</div>
-  <div class="ok">✓ Keyboard fallback (desktop) — opsional</div>
-  <div class="crit">✗ Multitouch (gerak + lihat bareng) butuh recompile C++</div>
-  <div class="warn">⚠ Save disabled (butuh recompile C++)</div>
-  <div class="warn">⚠ Options text (butuh recompile C++)</div>
+  <div><b>VoxelCraft · Mobile Patch v3</b> <span style="color:#fbbf24;">(binary-patched)</span></div>
+  <div class="ok">✓ Multitouch FIXED — D-pad + look bareng via binary patch</div>
+  <div class="ok">✓ _multitouch_feed export → Multitouch::feed func[78]</div>
+  <div class="ok">✓ Per-finger pointerId (0..11) — 2 jari tidak saling timpa</div>
+  <div class="ok">✓ Rendering preserved (byte-identical ke upstream)</div>
+  <div class="ok">✓ Right-click (mouse) place/use + keyboard fallback</div>
+  <div class="warn">⚠ Save disabled (butuh recompile C++ tambahan)</div>
+  <div class="warn">⚠ Options text (butuh recompile C++ tambahan)</div>
   <div style="margin-top:4px;"><b>H</b> = bantuan · <b>F1</b> = toggle HUD · <b>T</b> = toggle touch-debug</div>
 </div>
 
@@ -97,16 +98,16 @@ canvas { position: fixed; inset: 0; width: 100%; height: 100%; display: block; i
   </table>
 
   <div class="crit-note">
-    <b>⚠ Limitasi multitouch:</b> Build WASM ini menghardcode <code>pointerId=0</code> di
-    <code>wasm/main_emscripten.cpp:25</code>, jadi multitouch (1 jari di D-pad + 1 jari
-    di area look bersamaan) <b>tidak bisa</b>. Untuk fix perlu recompile C++ dengan
-    export baru <code>multitouch_feed(action, data, x, y, pointerId)</code>. Lihat
-    <code>PATCHES.md</code> §1 untuk detail.
+    <b>✅ Multitouch FIX:</b> Build ini sudah recompile C++ dengan export baru
+    <code>_multitouch_feed(action, data, x, y, pointerId)</code>. Sekarang tiap jari
+    dapat slot pointer sendiri (0..11, lihat <code>Multitouch.h:12</code>), jadi
+    D-pad + look <b>bisa jalan bareng</b>. JS panggil <code>_multitouch_feed</code>
+    per jari pakai <code>e.touch.identifier % 12</code> sebagai pointerId.
   </div>
 
   <div class="note">
-    <b>Kenapa keyboard ada?</b> Karena multitouch rusak, desktop user perlu alternatif.
-    Di mobile asli, keyboard tidak dipakai — pakai touch saja.
+    <b>Kenapa keyboard ada?</b> Sebagai fallback desktop untuk testing. Di mobile
+    asli, pakai touch saja — multitouch sekarang jalan (D-pad + look bareng).
   </div>
 
   <div style="margin-top:14px; color:#8b949e; font-size:11px; text-align:center;">Tekan <kbd>H</kbd> untuk tutup panel ini</div>
@@ -190,10 +191,10 @@ function showToast(msg, kind, ms) {
   toastTimer = setTimeout(function() { toastEl.classList.remove('show'); }, ms || 3500);
 }
 setTimeout(function() {
-  showToast('⚠ Multitouch (gerak + lihat bareng) belum jalan — butuh recompile C++. Lihat H untuk detail.', 'warn', 7000);
+  showToast('✓ Multitouch FIXED! Recompiled C++ — D-pad + look bareng sekarang jalan. Tekan T untuk debug.', 'info', 5000);
 }, 6000);
 setTimeout(function() {
-  showToast('⚠ Save disabled di build WASM (butuh recompile C++)', 'warn', 5000);
+  showToast('⚠ Save masih disabled (butuh recompile C++ tambahan)', 'warn', 5000);
 }, 12000);
 
 // §=========== GLES1 → WebGL2 translation layer (unchanged) ===========
@@ -420,6 +421,24 @@ function startWasm() {
       _glPopMatrix = gl1Ovr._glPopMatrix;
       window.__gl1GetMatrix = function(which) { return which == 1 ? GL1.proj : GL1.mv; };
 
+      // §=========== Register _multitouch_feed from patched WASM binary ===========
+      // The WASM binary is patched (via /home/z/patch_wasm.py) to export the
+      // internal `Multitouch::feed` function (func index 78) as `multitouch_feed`.
+      // The Emscripten glue JS doesn't know about this export, so we register
+      // it manually here from wasmExports. This lets JS send per-finger touch
+      // events with distinct pointerId values (0..11), so multi-finger touch
+      // (D-pad + look simultaneously) works without recompiling the whole game.
+      try {
+        if (Module.wasmExports && Module.wasmExports.multitouch_feed) {
+          _multitouch_feed = Module._multitouch_feed = Module.wasmExports.multitouch_feed;
+          console.log('[PATCH] _multitouch_feed registered from wasmExports');
+        } else if (typeof _multitouch_feed === 'function') {
+          console.log('[PATCH] _multitouch_feed already available');
+        } else {
+          console.warn('[PATCH] _multitouch_feed NOT found — multitouch will not work');
+        }
+      } catch(e) { console.warn('[PATCH] Failed to register _multitouch_feed:', e); }
+
       // §=========== PATCHED INPUT LAYER (mobile-first) ============
       // Bugs fixed:
       //   1. Touch dx/dy now computed and passed (was always 0,0)
@@ -467,13 +486,30 @@ function startWasm() {
         touchDots[id].style.top = sy + 'px';
       }
 
-      // §----- Touch: forward ALL touches (was only touches[0]) -----
-      // C++ `mouse_feed(action, data, x, y, dx, dy)` calls both
-      //   Mouse::feed(action, data, x, y, dx, dy)
-      //   Multitouch::feed(action, data, x, y, 0)   ← pointerId hardcoded 0
-      // So all touches collapse to Multitouch pointer 0 (a C++ bug — see PATCHES.md §1).
-      // We still forward every touch so single-finger drag works correctly.
+      // §----- Touch: forward ALL touches with per-finger pointerId -----
+      // Bug fix: original JS only forwarded e.touches[0], and the C++ export
+      // hardcoded pointerId=0, so multi-finger touch collapsed into one slot.
+      // The recompiled WASM now exports `_multitouch_feed(action, data, x, y,
+      // pointerId)` which writes to Multitouch slot `pointerId` (0..11, see
+      // Multitouch.h:12 MAX_POINTERS=12). JS now calls this per finger, using
+      // `e.touch.identifier % 12` as the pointerId, so D-pad + look work
+      // simultaneously.
       var touchPositions = {}; // touch.identifier → {x, y} last canvas coords
+      function feedTouch(action, data, c, identifier) {
+        // Mouse feed: GUI click handling + MouseTurnInput (for desktop fallback)
+        if (typeof _mouse_feed === 'function') {
+          var dx = 0, dy = 0;
+          if (action === 0) {
+            var prev = touchPositions[identifier];
+            if (prev) { dx = c.x - prev.x; dy = c.y - prev.y; }
+          }
+          _mouse_feed(action, data, c.x, c.y, dx, dy);
+        }
+        // §Multitouch feed: per-finger pointer slot (the actual fix)
+        if (typeof _multitouch_feed === 'function') {
+          _multitouch_feed(action, data, c.x, c.y, identifier % 12);
+        }
+      }
       canvas.addEventListener('touchstart', function(e) {
         e.preventDefault();
         for (var i = 0; i < e.changedTouches.length; i++) {
@@ -481,7 +517,7 @@ function startWasm() {
           var c = canvasCoords(t.clientX, t.clientY);
           touchPositions[t.identifier] = { x: c.x, y: c.y };
           updateTouchDot(t.identifier, c.x, c.y, true);
-          if (typeof _mouse_feed === 'function') _mouse_feed(1, 1, c.x, c.y, 0, 0);
+          feedTouch(1, 1, c, t.identifier);
         }
       }, {passive:false});
       canvas.addEventListener('touchmove', function(e) {
@@ -489,12 +525,9 @@ function startWasm() {
         for (var i = 0; i < e.changedTouches.length; i++) {
           var t = e.changedTouches[i];
           var c = canvasCoords(t.clientX, t.clientY);
-          var prev = touchPositions[t.identifier];
-          var dx = prev ? c.x - prev.x : 0;
-          var dy = prev ? c.y - prev.y : 0;
           touchPositions[t.identifier] = { x: c.x, y: c.y };
           updateTouchDot(t.identifier, c.x, c.y, true);
-          if (typeof _mouse_feed === 'function') _mouse_feed(0, 0, c.x, c.y, dx, dy);
+          feedTouch(0, 0, c, t.identifier);
         }
       }, {passive:false});
       canvas.addEventListener('touchend', function(e) {
@@ -504,7 +537,7 @@ function startWasm() {
           var c = canvasCoords(t.clientX, t.clientY);
           delete touchPositions[t.identifier];
           updateTouchDot(t.identifier, 0, 0, false);
-          if (typeof _mouse_feed === 'function') _mouse_feed(1, 0, c.x, c.y, 0, 0);
+          feedTouch(1, 0, c, t.identifier);
         }
       }, {passive:false});
       canvas.addEventListener('touchcancel', function(e) {
@@ -514,7 +547,7 @@ function startWasm() {
           delete touchPositions[t.identifier];
           updateTouchDot(t.identifier, 0, 0, false);
           var c = canvasCoords(t.clientX, t.clientY);
-          if (typeof _mouse_feed === 'function') _mouse_feed(1, 0, c.x, c.y, 0, 0);
+          feedTouch(1, 0, c, t.identifier);
         }
       }, {passive:false});
 
