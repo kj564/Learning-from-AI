@@ -19,10 +19,9 @@ by the Next.js app at `/`.
 
 | # | Bug (as reported)         | Root cause                                          | Fix status  |
 |---|---------------------------|-----------------------------------------------------|-------------|
-| 1 | kontrol ngawur            | `Multitouch::feed` hardcoded `pointerId=0` in        | ⚠ source   |
-|   |                           | `main_emscripten.cpp:25` → multitouch collapse;      | fix staged |
-|   |                           | JS only forwarded `e.touches[0]`                    | (recompile |
-|   |                           |                                                     | regression)|
+| 1 | kontrol ngawur            | `Multitouch::feed` hardcoded `pointerId=0` in        | ✅ FIXED   |
+|   |                           | `main_emscripten.cpp:25` → multitouch collapse;      | (recompile |
+|   |                           | JS only forwarded `e.touches[0]`                    | emsdk 2.0.34)|
 | 2 | inventori bodoh           | inventory opens via touch hotbar `...` slot;       | ✅ FIXED   |
 |   |                           | KEY_E only on RPI build; JS tap works              | (JS tap)   |
 | 3 | bow busuk                 | arrow spawns only when `!level->isClientSide`;      | ⚠ needs C++ |
@@ -39,8 +38,16 @@ by the Next.js app at `/`.
 
 **Rule Zero compliance:** All fixes target `wasm/` (browser adaptation
 layer) or `minecraft-wasm.html` (JS shim). `rujukan/` source tree is
-immutable. No binary patching of the compiled WASM. See §1 for why the
-multitouch recompile produces a rendering regression with modern emsdk.
+immutable. No binary patching of the compiled WASM.
+
+**Build:** Recompiled with emsdk 2.0.34 (the version that produces correct
+rendering codegen). Key changes in `wasm/`:
+- `main_emscripten.cpp` — added `multitouch_feed` export
+- `build.sh` — added `_multitouch_feed` to `EXPORTED_FUNCTIONS`; added
+  `-DanGenBuffers=anGenBuffers_gles_impl` compile flag for gles.cpp only
+  (to avoid duplicate symbol with the override in platform_stubs.cpp)
+- `platform_stubs.cpp` — restored `anGenBuffers` override (calls real
+  `glGenBuffers` instead of the fake counter in gles.cpp:49-53)
 
 
 ---

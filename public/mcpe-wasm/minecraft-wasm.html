@@ -60,12 +60,13 @@ canvas { position: fixed; inset: 0; width: 100%; height: 100%; display: block; i
 <div id="touch-debug"></div>
 
 <div id="patch-hud">
-  <div><b>VoxelCraft · MCPE 2013 WASM</b> <span style="color:#fbbf24;">(upstream)</span></div>
-  <div class="ok">✓ Rendering 1:1 dengan upstream (terrain, blocks, GUI)</div>
-  <div class="ok">✓ Touch dx/dy &amp; semua jari diteruskan ke C++</div>
+  <div><b>VoxelCraft · MCPE 2013 WASM</b> <span style="color:#34d399;">(recompiled v5)</span></div>
+  <div class="ok">✓ Multitouch FIXED — recompiled emsdk 2.0.34 + export _multitouch_feed</div>
+  <div class="ok">✓ Rendering 1:1 (terrain, grass, trees, water) via anGenBuffers override</div>
+  <div class="ok">✓ Per-finger pointerId (0..11) — D-pad + look bareng</div>
+  <div class="ok">✓ Touch dx/dy &amp; semua jari diteruskan</div>
   <div class="ok">✓ Right-click (mouse) place/use + keyboard fallback</div>
-  <div class="crit">✗ Multitouch (gerak + look bareng) butuh recompile C++</div>
-  <div class="warn">⚠ Recompile emsdk modern → rendering regression (sky-only)</div>
+  <div class="ok">✓ Inventory: tap slot "..." di hotbar</div>
   <div class="warn">⚠ Save disabled (butuh recompile C++ tambahan)</div>
   <div class="warn">⚠ Options text (butuh recompile C++ tambahan)</div>
   <div style="margin-top:4px;"><b>H</b> = bantuan · <b>F1</b> = toggle HUD · <b>T</b> = toggle touch-debug</div>
@@ -98,14 +99,13 @@ canvas { position: fixed; inset: 0; width: 100%; height: 100%; display: block; i
   </table>
 
   <div class="crit-note">
-    <b>⚠ Limitasi multitouch:</b> Untuk fix multitouch (D-pad + look bareng),
-    perlu recompile C++ dengan export baru <code>_multitouch_feed</code> di
-    <code>wasm/main_emscripten.cpp</code> (browser adaptation, Rule Zero
-    compliant). Tapi recompile dengan emsdk modern (3.1.45+) menghasilkan
-    <b>rendering regression</b> (sky-only, terrain tidak render). Upstream
-    build pakai emsdk versi lama yang codegen-nya berbeda. Solusi: cari emsdk
-    versi yang cocok, atau install emsdk versi yang sama dengan upstream build.
-    Lihat <code>PATCHES.md</code> §1.
+    <b>✅ Multitouch FIXED via recompile:</b> Build ini recompile C++ dari source
+    dengan emsdk 2.0.34 + export baru <code>_multitouch_feed(action, data, x, y,
+    pointerId)</code> di <code>wasm/main_emscripten.cpp</code> (Rule Zero compliant —
+    <code>rujukan/</code> immutable). <code>anGenBuffers</code> override di
+    <code>platform_stubs.cpp</code> panggil <code>glGenBuffers</code> asli (bukan
+    fake counter) supaya VBO rendering jalan. Tiap jari dapat slot pointer sendiri
+    (0..11, <code>Multitouch.h:12</code>), jadi D-pad + look <b>bisa jalan bareng</b>.
   </div>
 
   <div class="note">
@@ -194,10 +194,10 @@ function showToast(msg, kind, ms) {
   toastTimer = setTimeout(function() { toastEl.classList.remove('show'); }, ms || 3500);
 }
 setTimeout(function() {
-  showToast('⚠ Multitouch (gerak + look bareng) butuh recompile C++. Recompile emsdk modern → rendering regression. Lihat H.', 'warn', 7000);
+  showToast('✓ Multitouch FIXED! D-pad + look bareng sekarang jalan. Tekan H untuk bantuan.', 'info', 5000);
 }, 6000);
 setTimeout(function() {
-  showToast('⚠ Save disabled di build WASM (butuh recompile C++)', 'warn', 5000);
+  showToast('⚠ Save masih disabled (butuh recompile C++ tambahan)', 'warn', 5000);
 }, 12000);
 
 // §=========== GLES1 → WebGL2 translation layer (unchanged) ===========
