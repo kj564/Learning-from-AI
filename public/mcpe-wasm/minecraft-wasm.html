@@ -357,6 +357,17 @@ function startWasm() {
       }
     },
   };
+  // §NOTE: _glMultMatrixf and _glLoadMatrixf are intentionally NOT in
+  // gl1Overrides. The upstream WASM was built with these as no-ops (they're
+  // in gl1Names → stubbed as noop). The JS shim's isIdentityProj hack in
+  // GL1.draw compensates by injecting a default perspective matrix when
+  // the projection is identity (which it stays since gluPerspective's
+  // glMultMatrixf call is a no-op). Adding real _glMultMatrixf here would
+  // make gluPerspective set the real projection, causing the hack to not
+  // fire — but the real perspective doesn't render correctly with this
+  // WASM+shim pairing (terrain disappears). The shim and WASM are a
+  // matched pair; both must be changed together (recompile WASM + fix
+  // shim). See PATCHES.md §5.
   Object.keys(gl1Overrides).forEach(function(k) {
     gl1Stubs[k] = gl1Overrides[k];
     gl1Stubs[k.substring(1)] = gl1Overrides[k];

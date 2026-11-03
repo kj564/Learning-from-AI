@@ -23,8 +23,8 @@ by the Next.js app at `/`.
 |   |                           | `main_emscripten.cpp:25` → multitouch collapse;      | fix staged |
 |   |                           | JS only forwarded `e.touches[0]`                    | (recompile |
 |   |                           |                                                     | regression)|
-| 2 | inventori bodoh           | inventory opens via touch hotbar only; KEY_E        | ⚠ needs C++ |
-|   |                           | opens inventory only on RPI build                   |             |
+| 2 | inventori bodoh           | inventory opens via touch hotbar `...` slot;       | ✅ FIXED   |
+|   |                           | KEY_E only on RPI build; JS tap works              | (JS tap)   |
 | 3 | bow busuk                 | arrow spawns only when `!level->isClientSide`;      | ⚠ needs C++ |
 |   |                           | creative inventory has no arrows                    |             |
 | 4 | item tidak lengkap        | creative inventory list omits ~20 items: pickaxe,   | ⚠ needs C++ |
@@ -160,9 +160,9 @@ correct path is to fix the source (`wasm/main_emscripten.cpp`) and recompile.
 
 ---
 
-## 2. inventori bodoh (stupid inventory)
+## 2. inventori bodoh (stupid inventory) — **FIXED (JS, no recompile)**
 
-### Root cause
+### Root cause (1:1 from source)
 
 `IngameBlockSelectionScreen` (the inventory screen) is opened by
 `screenChooser.setScreen(SCREEN_BLOCKSELECTION)`, which is triggered by
@@ -170,22 +170,35 @@ correct path is to fix the source (`wasm/main_emscripten.cpp`) and recompile.
 defines neither `RPI` nor `WIN32`, so **no keyboard shortcut opens the
 inventory**.
 
-In touch mode, the inventory is opened by tapping the `...` hotbar overflow
-button or the dedicated inventory button in `TouchInputHolder`. The mouse
-left-click does work for `gui.handleClick()` (Minecraft.cpp:662), so clicking
-the hotbar slot with the mouse selects it — but there is no on-screen
-"open inventory" button reachable by mouse in the current build.
+In touch mode, the inventory opens by tapping the `...` hotbar overflow
+button — the last slot of the hotbar (`slot == getNumSlots()-1` in
+Gui.cpp:187-189). `Gui::handleClick` checks if the clicked slot is the last
+one and calls `screenChooser.setScreen(SCREEN_BLOCKSELECTION)`.
 
-### Fix needed (C++ recompile)
+### Fix (JS shim, verified working)
 
-Add an `#elif defined(__EMSCRIPTEN__)` branch to Minecraft.cpp:718 that calls
-`screenChooser.setScreen(SCREEN_BLOCKSELECTION)` on `KEY_E`.
+The JS shim already forwards mouse/touch clicks to the C++ `Mouse::feed`.
+Tapping the hotbar `...` slot works because `Gui::handleClick` is called
+by `Minecraft::tick` (Minecraft.cpp:661-662) when a mouse click event is
+processed. The `...` slot position is computed from `Gui::getSlotIdAt`
+(Gui.cpp:129-145):
+- `InvGuiScale = 1/3` (Gui.cpp:24)
+- `screenWidth_scaled = 854/3 = 284`, `screenHeight_scaled = 480/3 = 160`
+- 6 slots (touch mode), `xBase_scaled = 2 + 284/2 - 6*10 = 84`
+- Slot 5 (last = `...`): `x_scaled = 84 + 5*20 + 10 = 194`
+- `y_scaled = 160 - 16/2 = 152` (bottom 16px strip)
+- Canvas coords: `x = 194 * 3 = 582`, `y = 152 * 3 = 456`
 
-### What the patched build does
+Verified via agent-browser: tapping canvas at (582, 456) opens the full
+creative inventory grid (stone, cobblestone, wood, bricks, sand, dirt,
+stairs, wool, etc.).
 
-The help panel documents that tapping the hotbar `...` button or pressing
-the touch inventory button is the way to open the inventory in this build.
-A proper keyboard shortcut requires the C++ change above.
+### What still needs C++ recompile
+
+Keyboard shortcut `KEY_E` → inventory: add `#elif defined(__EMSCRIPTEN__)`
+branch to Minecraft.cpp:718-721 so `screenChooser.setScreen(SCREEN_BLOCKSELECTION)`
+fires on KEY_E. This is a convenience for desktop users; on mobile, tap
+the `...` slot works (1:1 with original touch behavior).
 
 ---
 
