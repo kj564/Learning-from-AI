@@ -6105,14 +6105,6 @@ var _mouse_feed,
 function assignWasmExports(wasmExports) {
   _mouse_feed = Module['_mouse_feed'] = wasmExports['mouse_feed'];
   _keyboard_feed = Module['_keyboard_feed'] = wasmExports['keyboard_feed'];
-  // §PATCHED: Register multitouch_feed export (added via binary patch to
-  // /home/z/my-project/public/mcpe-wasm/mcpe_emscripten_full.wasm). The export
-  // points to the internal Multitouch::feed function (func index 78) so JS
-  // can send per-finger touch events with distinct pointerId values.
-  if (wasmExports['multitouch_feed']) {
-    _multitouch_feed = Module['_multitouch_feed'] = wasmExports['multitouch_feed'];
-    console.log('[PATCH] _multitouch_feed registered (binary-patched export)');
-  }
   _get_block = Module['_get_block'] = wasmExports['get_block'];
   _get_brightness = Module['_get_brightness'] = wasmExports['get_brightness'];
   _get_tile_ptr = Module['_get_tile_ptr'] = wasmExports['get_tile_ptr'];
