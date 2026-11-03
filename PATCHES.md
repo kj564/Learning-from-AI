@@ -19,9 +19,10 @@ by the Next.js app at `/`.
 
 | # | Bug (as reported)         | Root cause                                          | Fix status  |
 |---|---------------------------|-----------------------------------------------------|-------------|
-| 1 | kontrol ngawur            | `Multitouch::feed` hardcoded `pointerId=0` in        | ✅ **FIXED**  |
-|   |                           | `main_emscripten.cpp:25` → multitouch collapse;      | (binary     |
-|   |                           | JS only forwarded `e.touches[0]`                    | patch)      |
+| 1 | kontrol ngawur            | `Multitouch::feed` hardcoded `pointerId=0` in        | ⚠ source   |
+|   |                           | `main_emscripten.cpp:25` → multitouch collapse;      | fix staged |
+|   |                           | JS only forwarded `e.touches[0]`                    | (recompile |
+|   |                           |                                                     | regression)|
 | 2 | inventori bodoh           | inventory opens via touch hotbar only; KEY_E        | ⚠ needs C++ |
 |   |                           | opens inventory only on RPI build                   |             |
 | 3 | bow busuk                 | arrow spawns only when `!level->isClientSide`;      | ⚠ needs C++ |
@@ -36,12 +37,17 @@ by the Next.js app at `/`.
 |   |                           | `Options::save/load` commented out; `viewDistance`  |             |
 |   |                           | hardcoded to 2                                      |             |
 
+**Rule Zero compliance:** All fixes target `wasm/` (browser adaptation
+layer) or `minecraft-wasm.html` (JS shim). `rujukan/` source tree is
+immutable. No binary patching of the compiled WASM. See §1 for why the
+multitouch recompile produces a rendering regression with modern emsdk.
+
 
 ---
 
-## 1. kontrol ngawur (chaotic controls) — **FIXED via binary patch**
+## 1. kontrol ngawur (chaotic controls) — **needs emsdk version match**
 
-### The REAL root cause (mobile-first analysis)
+### Root cause (1:1 from source)
 
 MCPE 2013 is a **mobile game**. The control scheme is:
 - Bottom-left D-pad (5 buttons: up/down/left/right/jump-in-center)
@@ -55,7 +61,7 @@ and `_wasPressed`/`_wasReleased` flags. The D-pad and turn-area logic iterate
 `Multitouch::getActivePointerIdsThisUpdate()` (TouchscreenInput.cpp:222,
 TouchTurnInput.h:29-42) and check each pointer's position independently.
 
-**The critical bug** was in the WASM bridge at `wasm/main_emscripten.cpp:20-26`:
+**The critical bug** is in the WASM bridge at `wasm/main_emscripten.cpp:20-26`:
 
 ```cpp
 extern "C" EMSCRIPTEN_KEEPALIVE void mouse_feed(
@@ -67,74 +73,90 @@ extern "C" EMSCRIPTEN_KEEPALIVE void mouse_feed(
 
 `Multitouch::feed` accepts a `pointerId` arg (Multitouch.h:121) and uses it to
 select which of the 12 `TouchPointer` slots to write to. But the export
-hardcoded `0`, so **every touch — regardless of finger — wrote to pointer
-slot 0**. A second finger didn't create a second pointer; it overwrote
-pointer 0's position. You could **either** move **or** look — never both.
+hardcodes `0`, so **every touch — regardless of finger — writes to pointer
+slot 0**. A second finger doesn't create a second pointer; it overwrites
+pointer 0's position. You can **either** move **or** look — never both.
 
-### The fix — binary patch (no recompile needed)
+### The fix (Rule Zero compliant — source change, not binary hack)
 
-Recompiling with `emsdk 3.1.74` produced a WASM with a **rendering regression**
-(sky-only display, even though chunk loading works). To avoid the regression,
-we patch the **original** WASM binary directly to add a new export
-`multitouch_feed` that points to the internal `Multitouch::feed` function.
+**Step 1** — add a new export in `wasm/main_emscripten.cpp` (browser
+adaptation layer; `rujukan/` source tree is immutable per Rule Zero):
 
-**Patch script:** `/home/z/patch_wasm.py`
-
-The script parses the WASM binary's Export Section (section id 7) and adds a
-new export entry:
-- name: `"multitouch_feed"` (UTF-8 bytes)
-- kind: `0` (function)
-- function index: `78` — the index of `Multitouch::feed` in the original
-  binary (76 imported functions + 2 defined functions = func def #2 = index 78,
-  verified by parsing the Import and Function sections)
-
-The patched WASM is byte-identical to the original except for the new Export
-Section entry. All rendering code is untouched, so terrain/grass/trees render
-exactly as in the upstream build.
-
-**JS glue patch:** `mcpe_emscripten_full.js` line ~6112 — register the new
-export after `assignWasmExports`:
-
-```js
-if (wasmExports['multitouch_feed']) {
-  _multitouch_feed = Module['_multitouch_feed'] = wasmExports['multitouch_feed'];
-  console.log('[PATCH] _multitouch_feed registered (binary-patched export)');
+```cpp
+extern "C" EMSCRIPTEN_KEEPALIVE void multitouch_feed(
+    char action, char data, short x, short y, char pointerId) {
+    Multitouch::feed(action, data, x, y, pointerId);
 }
 ```
 
-**HTML patch:** `minecraft-wasm.html` — touch handlers now call both
-`_mouse_feed` (for GUI clicks) AND `_multitouch_feed` per finger, passing
-`e.touch.identifier % 12` as the pointerId:
+This calls the original `Multitouch::feed` API (Multitouch.h:121) exactly as
+the original Android bridge would have, but with a per-finger pointerId
+instead of hardcoded 0.
 
-```js
-function feedTouch(action, data, c, identifier) {
-  if (typeof _mouse_feed === 'function') _mouse_feed(action, data, c.x, c.y, dx, dy);
-  if (typeof _multitouch_feed === 'function') _multitouch_feed(action, data, c.x, c.y, identifier % 12);
-}
-```
+**Step 2** — add `_multitouch_feed` to `EXPORTED_FUNCTIONS` in `wasm/build.sh`.
 
-### Verified working (agent-browser)
+**Step 3** — recompile with `./wasm/build.sh`.
 
-After reloading with the patched binary:
+**Step 4** — update `minecraft-wasm.html` touch handlers to call
+`_multitouch_feed` per finger with `e.touch.identifier % 12` as pointerId.
 
-- ✅ `[PATCH] _multitouch_feed registered (binary-patched export)` appears in console
-- ✅ Terrain renders normally (grass, trees, water, sand — same as upstream build)
-- ✅ Player position changes from `(128, 65, 128)` to `(129, 65, 138)` while a
-  second finger drags in the turn area — **forward movement + look simultaneously**
-- ✅ Chunks generate (`18-21 chunk updates`) during multitouch, confirming the
-  player is genuinely moving while the camera responds to the second finger
-- ✅ With the original (unpatched) binary, the second finger would overwrite
-  pointer 0, stopping forward movement — that behavior is gone
+### Status: recompile produces rendering regression
 
-### Why binary patching instead of recompile
+Steps 1, 2, and 4 are done. Step 3 (recompile) was attempted with emsdk
+3.1.30, 3.1.45, 3.1.56, and 3.1.74 — all 4 versions compiled the 350 C++
+source files successfully and produced a working WASM with `_multitouch_feed`
+exported, BUT all 4 produced a **rendering regression**: only sky renders,
+no terrain/grass/blocks (verified via agent-browser screenshots). The player
+position updates correctly (movement works), but the 3D world geometry is
+not drawn.
 
-A clean recompile (`./wasm/build.sh` with emsdk 3.1.74) succeeded — 341/341
-files compiled, `_multitouch_feed` exported — but produced a WASM with a
-**rendering regression**: only sky was visible, no terrain. The cause is a
-subtle difference in codegen between emsdk 3.1.74 (clang 20) and whatever
-emsdk version the upstream build used. Rather than bisect emsdk versions
-(each install is ~1 GB and takes 3-5 minutes), the binary patch avoids the
-regression entirely by preserving the original rendering code byte-for-byte.
+The upstream build (committed at `public/mcpe-wasm/mcpe_emscripten_full.wasm`,
+md5 `ab9d82ac...`) renders terrain correctly. It was built with an emsdk
+version whose codegen differs from all 4 modern emsdk versions tested. The
+upstream emsdk version is not recorded in the repo (no `emsdk-version` pin
+in `.github/workflows/` or `wasm/build.sh`).
+
+**Current state:** the project uses the upstream WASM (renders correctly)
+without the multitouch fix. The `wasm/main_emscripten.cpp` and
+`wasm/build.sh` changes are staged in `/home/z/voxelcraft-build/` ready for
+a recompile once the correct emsdk version is identified.
+
+### What's needed to complete this fix
+
+1. Identify the emsdk version used for the upstream build. Clues:
+   - The upstream WASM exports `__cxa_get_exception_ptr` (old exception
+     handling API); modern emsdk exports `__cxa_free_exception` +
+     `__cxa_is_pointer_type` instead. This suggests emsdk ≤ 3.1.20 or
+     earlier (pre-exception-handling refactor).
+   - The upstream WASM is 7,735,358 bytes; emsdk 3.1.30 produced
+     7,617,279 bytes; 3.1.45 produced 7,619,618; 3.1.56 produced 7,619,124.
+     The upstream binary is ~120KB larger, consistent with older codegen.
+2. Install that emsdk version (e.g. `emsdk install 3.1.20` or earlier).
+3. Run `./wasm/build.sh` with the staged `main_emscripten.cpp` +
+   `build.sh` changes.
+4. Verify terrain renders + `_multitouch_feed` works via agent-browser.
+5. Copy the new `mcpe_emscripten_full.{js,wasm}` to
+   `public/mcpe-wasm/`.
+
+### Why binary patching was rejected
+
+An earlier attempt patched the upstream WASM binary directly (via a Python
+script that parsed the Export Section and added a `multitouch_feed` export
+pointing to the internal `Multitouch::feed` function at index 78). This
+worked (terrain rendered + multitouch worked) but was rejected per Rule Zero:
+"1:1 dengan source code, gaboleh menebak, hack." Binary patching is a hack
+that modifies the compiled output without going through the source. The
+correct path is to fix the source (`wasm/main_emscripten.cpp`) and recompile.
+
+### Verified working (with upstream WASM, no multitouch fix)
+
+- ✅ Terrain renders (grass, dirt, sand, stone, torch, water)
+- ✅ Single-finger touch drag → look around (position-based, via Mouse feed)
+- ✅ Touch dx/dy computed per finger (JS shim fix, not C++ change)
+- ✅ Right-click (mouse) place/use item (JS shim, action=2)
+- ✅ Keyboard fallback (WASD, 1-9, Esc) for desktop testing
+- ✅ Touch-debug overlay (press T) shows finger positions
+- ❌ Move + look simultaneously — needs C++ recompile (see above)
 
 ---
 
