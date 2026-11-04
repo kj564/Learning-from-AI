@@ -68,6 +68,7 @@ canvas { position: fixed; inset: 0; width: 100%; height: 100%; display: block; i
   <div class="ok">✓ Right-click (mouse) place/use + keyboard fallback</div>
   <div class="ok">✓ Inventory: tap slot "..." di hotbar</div>
   <div class="ok">✓ Save: MEMFS + localStorage persistence (recompiled, -DNO_STORAGE removed)</div>
+  <div class="ok">✓ Creative items: tools, weapons, arrows, food, materials injected</div>
   <div class="warn">⚠ Options text (butuh recompile C++ tambahan)</div>
   <div style="margin-top:4px;"><b>H</b> = bantuan · <b>F1</b> = toggle HUD · <b>T</b> = toggle touch-debug</div>
 </div>
@@ -757,6 +758,23 @@ function startWasm() {
       }
 
       setTimeout(function() { loadingEl.classList.add('hidden'); }, 2000);
+
+      // §Inject creative items after world loads. Poll for is_screen_null=1
+      // (game is in-game, not paused) then call _inject_creative_items once.
+      // This adds tools, arrows, food, materials missing from setupDefault.
+      // See wasm/creative_items.cpp (Rule Zero compliant browser adaptation).
+      var injected = false;
+      var injectTimer = setInterval(function() {
+        if (injected) { clearInterval(injectTimer); return; }
+        if (typeof _is_screen_null === 'function' && _is_screen_null() === 1) {
+          if (typeof _inject_creative_items === 'function') {
+            var r = _inject_creative_items();
+            console.log('[CREATIVE] inject_creative_items returned: ' + r);
+            injected = true;
+            clearInterval(injectTimer);
+          }
+        }
+      }, 1000);
     },
     noInitialRun: false,
   });

@@ -26,12 +26,12 @@ by the Next.js app at `/`.
 |   |                           | KEY_E only on RPI build; JS tap works              | (JS tap)   |
 | 3 | bow busuk                 | arrow spawns only when `!level->isClientSide`;      | ⚠ needs C++ |
 |   |                           | creative inventory has no arrows                    |             |
-| 4 | item tidak lengkap        | creative inventory list omits ~20 items: pickaxe,   | ⚠ needs C++ |
-|   |                           | shovel, axe, armor, food, arrows, dyes, bucket…     |             |
+| 4 | item tidak lengkap        | creative inventory list omits ~20 items: pickaxe,   | ✅ FIXED   |
+|   |                           | shovel, axe, armor, food, arrows, dyes, bucket…     | (inject)   |
 | 5 | graphical glitch         | GLES1→WebGL2 layer hack-injects a perspective       | ⚠ needs JS  |
 |   |                           | matrix when `isIdentityProj && count>50`            | shim rewrite|
-| 6 | tidak bisa save           | `AppPlatform_emscripten::saveFile` returns         | ⚠ needs C++ |
-|   |                           | `false`; `-DNO_STORAGE` compile flag               |             |
+| 6 | tidak bisa save           | `AppPlatform_emscripten::saveFile` returns         | ✅ FIXED   |
+|   |                           | `false`; `-DNO_STORAGE` compile flag               | (MEMFS+LS) |
 | 7 | options bug              | `Options::getMessage` returns "Not implemented";    | ⚠ needs C++ |
 |   |                           | `Options::save/load` commented out; `viewDistance`  |             |
 |   |                           | hardcoded to 2                                      |             |
