@@ -38,16 +38,23 @@ by the Next.js app at `/`.
 
 **Rule Zero compliance:** All fixes target `wasm/` (browser adaptation
 layer) or `minecraft-wasm.html` (JS shim). `rujukan/` source tree is
-immutable. No binary patching of the compiled WASM.
+immutable and **1:1 with https://github.com/SSMG64/PocketEdition/tree/main/handheld**
+(1063 cpp/h files, verified identical except 1 line in Minecraft.cpp:291
+which has an `#if defined(STANDALONE_SERVER) || defined(__EMSCRIPTEN__)`
+guard for browser adaptation — the only deviation from upstream).
 
 **Build:** Recompiled with emsdk 2.0.34 (the version that produces correct
 rendering codegen). Key changes in `wasm/`:
 - `main_emscripten.cpp` — added `multitouch_feed` export
 - `build.sh` — added `_multitouch_feed` to `EXPORTED_FUNCTIONS`; added
   `-DanGenBuffers=anGenBuffers_gles_impl` compile flag for gles.cpp only
-  (to avoid duplicate symbol with the override in platform_stubs.cpp)
+  (to avoid duplicate symbol with the override in platform_stubs.cpp);
+  removed `-DNO_STORAGE` so ExternalFileLevelStorageSource is used
 - `platform_stubs.cpp` — restored `anGenBuffers` override (calls real
   `glGenBuffers` instead of the fake counter in gles.cpp:49-53)
+- `AppPlatform_emscripten.cpp` — implemented `saveFile`/`loadFile` using
+  Emscripten MEMFS (`FS.writeFile`/`FS.readFile` + `FS.mkdirTree`); the JS
+  shim syncs `/data` to localStorage for persistence across page reloads
 
 
 ---

@@ -1332,41 +1332,41 @@ var tempI64;
 // === Body ===
 
 var ASM_CONSTS = {
-  6392192: function() {if (typeof GL !== 'undefined' && GL.createContext) { var canvas = document.getElementById('canvas'); var ctx = GL.createContext(canvas, {alpha: false, depth: true, stencil: false, antialias: false}); GL.makeContextCurrent(ctx); console.log('[MCPE_WASM] GL context OK'); }},  
- 6392468: function($0, $1, $2, $3) {if (typeof window.__gl1VertexPointer === "function") window.__gl1VertexPointer($0, $1, $2, $3);},  
- 6392568: function($0, $1, $2, $3) {if (typeof window.__gl1ColorPointer === "function") window.__gl1ColorPointer($0, $1, $2, $3);},  
- 6392666: function($0, $1, $2, $3) {if (typeof window.__gl1TexCoordPointer === "function") window.__gl1TexCoordPointer($0, $1, $2, $3);},  
- 6392770: function($0) {if (typeof window.__gl1EnableClientState === "function") window.__gl1EnableClientState($0);},  
- 6392866: function($0) {if (typeof window.__gl1DisableClientState === "function") window.__gl1DisableClientState($0);},  
- 6392964: function($0, $1, $2) {if (typeof window.__gl1Draw === "function") window.__gl1Draw($0, $1, $2);},  
- 6393042: function($0, $1, $2, $3) {if (typeof _glColor4f === "function") _glColor4f($0, $1, $2, $3);},  
- 6393112: function($0, $1, $2, $3) {if (typeof _glColor4ub === "function") _glColor4ub($0, $1, $2, $3);},  
- 6393184: function($0) {if (typeof window.__gl1MatrixMode === "function") window.__gl1MatrixMode($0);},  
- 6393266: function() {if (typeof window.__gl1LoadIdentity === "function") window.__gl1LoadIdentity();},  
- 6393350: function() {if (typeof window.__gl1PushMatrix === "function") window.__gl1PushMatrix();},  
- 6393430: function() {if (typeof window.__gl1PopMatrix === "function") window.__gl1PopMatrix();},  
- 6393508: function($0, $1, $2) {if (typeof window.__gl1Translatef === "function") window.__gl1Translatef($0, $1, $2);},  
- 6393598: function($0, $1, $2, $3) {if (typeof window.__gl1Rotatef === "function") window.__gl1Rotatef($0, $1, $2, $3);},  
- 6393686: function($0, $1, $2) {if (typeof window.__gl1Scalef === "function") window.__gl1Scalef($0, $1, $2);},  
- 6393768: function($0) {if (typeof window.__gl1MultMatrixf !== 'function') return; var mf = new Float32Array(16); for (var i = 0; i < 16; i++) mf[i] = HEAPF32[($0>>2)+i]; window.__gl1MultMatrixf(mf);},  
- 6393948: function($0, $1, $2, $3, $4, $5) {if (typeof window.__gl1Orthof === "function") window.__gl1Orthof($0, $1, $2, $3, $4, $5);},  
- 6394042: function($0, $1, $2, $3, $4, $5) {if (typeof window.__gl1Orthof === "function") window.__gl1Orthof($0, $1, $2, $3, $4, $5);},  
- 6394136: function($0, $1, $2, $3, $4, $5) {if (typeof window.__gl1Frustum === "function") window.__gl1Frustum($0, $1, $2, $3, $4, $5);},  
- 6394232: function($0, $1) {if (typeof _glAlphaFunc === "function") _glAlphaFunc($0, $1);},  
- 6394298: function($0, $1) {if (typeof window.__gl1Fogf === "function") window.__gl1Fogf($0, $1);},  
- 6394372: function($0, $1) {if (typeof window.__gl1Fogfv === "function") window.__gl1Fogfv($0, $1);},  
- 6394448: function($0) {var gl = (GL.currentContext && GL.currentContext.GLctx); if (gl) gl.clearDepth($0);},  
- 6394536: function($0) {var gl = (GL.currentContext && GL.currentContext.GLctx); if (gl) gl.depthMask($0);},  
- 6394623: function($0, $1, $2, $3) {var gl = (GL.currentContext && GL.currentContext.GLctx); if (gl) gl.colorMask($0, $1, $2, $3);},  
- 6394722: function($0, $1) {if (!window.__gl1GetMatrix) return; var m = window.__gl1GetMatrix($0 == 0xBA7 ? 1 : 0); if (m) { for (var i = 0; i < 16; i++) HEAPF32[($1>>2)+i] = m[i]; }},  
- 6394881: function() {if (typeof GL1 !== 'undefined') GL1.tex2dEn = 1;},  
- 6394934: function() {if (typeof GL1 !== 'undefined') GL1.alphaTestEn = 1;},  
- 6394991: function() {if (typeof GL1 !== 'undefined') GL1.fogEn = 1;},  
- 6395042: function($0) {var gl = (GL.currentContext && GL.currentContext.GLctx); if (gl) gl.enable($0);},  
- 6395126: function() {if (typeof GL1 !== 'undefined') GL1.tex2dEn = 0;},  
- 6395179: function() {if (typeof GL1 !== 'undefined') GL1.alphaTestEn = 0;},  
- 6395236: function() {if (typeof GL1 !== 'undefined') GL1.fogEn = 0;},  
- 6395287: function($0) {var gl = (GL.currentContext && GL.currentContext.GLctx); if (gl) gl.disable($0);}
+  6393360: function() {if (typeof GL !== 'undefined' && GL.createContext) { var canvas = document.getElementById('canvas'); var ctx = GL.createContext(canvas, {alpha: false, depth: true, stencil: false, antialias: false}); GL.makeContextCurrent(ctx); console.log('[MCPE_WASM] GL context OK'); }},  
+ 6393636: function($0, $1, $2, $3) {if (typeof window.__gl1VertexPointer === "function") window.__gl1VertexPointer($0, $1, $2, $3);},  
+ 6393736: function($0, $1, $2, $3) {if (typeof window.__gl1ColorPointer === "function") window.__gl1ColorPointer($0, $1, $2, $3);},  
+ 6393834: function($0, $1, $2, $3) {if (typeof window.__gl1TexCoordPointer === "function") window.__gl1TexCoordPointer($0, $1, $2, $3);},  
+ 6393938: function($0) {if (typeof window.__gl1EnableClientState === "function") window.__gl1EnableClientState($0);},  
+ 6394034: function($0) {if (typeof window.__gl1DisableClientState === "function") window.__gl1DisableClientState($0);},  
+ 6394132: function($0, $1, $2) {if (typeof window.__gl1Draw === "function") window.__gl1Draw($0, $1, $2);},  
+ 6394210: function($0, $1, $2, $3) {if (typeof _glColor4f === "function") _glColor4f($0, $1, $2, $3);},  
+ 6394280: function($0, $1, $2, $3) {if (typeof _glColor4ub === "function") _glColor4ub($0, $1, $2, $3);},  
+ 6394352: function($0) {if (typeof window.__gl1MatrixMode === "function") window.__gl1MatrixMode($0);},  
+ 6394434: function() {if (typeof window.__gl1LoadIdentity === "function") window.__gl1LoadIdentity();},  
+ 6394518: function() {if (typeof window.__gl1PushMatrix === "function") window.__gl1PushMatrix();},  
+ 6394598: function() {if (typeof window.__gl1PopMatrix === "function") window.__gl1PopMatrix();},  
+ 6394676: function($0, $1, $2) {if (typeof window.__gl1Translatef === "function") window.__gl1Translatef($0, $1, $2);},  
+ 6394766: function($0, $1, $2, $3) {if (typeof window.__gl1Rotatef === "function") window.__gl1Rotatef($0, $1, $2, $3);},  
+ 6394854: function($0, $1, $2) {if (typeof window.__gl1Scalef === "function") window.__gl1Scalef($0, $1, $2);},  
+ 6394936: function($0) {if (typeof window.__gl1MultMatrixf !== 'function') return; var mf = new Float32Array(16); for (var i = 0; i < 16; i++) mf[i] = HEAPF32[($0>>2)+i]; window.__gl1MultMatrixf(mf);},  
+ 6395116: function($0, $1, $2, $3, $4, $5) {if (typeof window.__gl1Orthof === "function") window.__gl1Orthof($0, $1, $2, $3, $4, $5);},  
+ 6395210: function($0, $1, $2, $3, $4, $5) {if (typeof window.__gl1Orthof === "function") window.__gl1Orthof($0, $1, $2, $3, $4, $5);},  
+ 6395304: function($0, $1, $2, $3, $4, $5) {if (typeof window.__gl1Frustum === "function") window.__gl1Frustum($0, $1, $2, $3, $4, $5);},  
+ 6395400: function($0, $1) {if (typeof _glAlphaFunc === "function") _glAlphaFunc($0, $1);},  
+ 6395466: function($0, $1) {if (typeof window.__gl1Fogf === "function") window.__gl1Fogf($0, $1);},  
+ 6395540: function($0, $1) {if (typeof window.__gl1Fogfv === "function") window.__gl1Fogfv($0, $1);},  
+ 6395616: function($0) {var gl = (GL.currentContext && GL.currentContext.GLctx); if (gl) gl.clearDepth($0);},  
+ 6395704: function($0) {var gl = (GL.currentContext && GL.currentContext.GLctx); if (gl) gl.depthMask($0);},  
+ 6395791: function($0, $1, $2, $3) {var gl = (GL.currentContext && GL.currentContext.GLctx); if (gl) gl.colorMask($0, $1, $2, $3);},  
+ 6395890: function($0, $1) {if (!window.__gl1GetMatrix) return; var m = window.__gl1GetMatrix($0 == 0xBA7 ? 1 : 0); if (m) { for (var i = 0; i < 16; i++) HEAPF32[($1>>2)+i] = m[i]; }},  
+ 6396049: function() {if (typeof GL1 !== 'undefined') GL1.tex2dEn = 1;},  
+ 6396102: function() {if (typeof GL1 !== 'undefined') GL1.alphaTestEn = 1;},  
+ 6396159: function() {if (typeof GL1 !== 'undefined') GL1.fogEn = 1;},  
+ 6396210: function($0) {var gl = (GL.currentContext && GL.currentContext.GLctx); if (gl) gl.enable($0);},  
+ 6396294: function() {if (typeof GL1 !== 'undefined') GL1.tex2dEn = 0;},  
+ 6396347: function() {if (typeof GL1 !== 'undefined') GL1.alphaTestEn = 0;},  
+ 6396404: function() {if (typeof GL1 !== 'undefined') GL1.fogEn = 0;},  
+ 6396455: function($0) {var gl = (GL.currentContext && GL.currentContext.GLctx); if (gl) gl.disable($0);}
 };
 function gl1_init_shader(){ if (window.__gl1Shader) return; var gl = (GL.currentContext && GL.currentContext.GLctx); if (!gl) return; var vs = gl.createShader(gl.VERTEX_SHADER); gl.shaderSource(vs, 'attribute vec3 aPos; attribute vec4 aColor; attribute vec2 aTexCoord; uniform mat4 uProj; uniform mat4 uMV; varying vec4 vColor; varying vec2 vTexCoord; void main() { vColor = aColor; vTexCoord = aTexCoord; gl_Position = uProj * uMV * vec4(aPos, 1.0); }'); gl.compileShader(vs); var fs = gl.createShader(gl.FRAGMENT_SHADER); gl.shaderSource(fs, 'precision mediump float; varying vec4 vColor; varying vec2 vTexCoord; uniform sampler2D uTex; uniform bool uHasTex; void main() { if (uHasTex) { vec4 t = texture2D(uTex, vTexCoord); gl_FragColor = vec4(t.rgb * vColor.rgb, t.a * vColor.a); } else { gl_FragColor = vColor; } }'); gl.compileShader(fs); var prog = gl.createProgram(); gl.attachShader(prog, vs); gl.attachShader(prog, fs); gl.linkProgram(prog); window.__gl1Shader = prog; window.__gl1Attribs = { pos: gl.getAttribLocation(prog, 'aPos'), color: gl.getAttribLocation(prog, 'aColor'), texCoord: gl.getAttribLocation(prog, 'aTexCoord') }; window.__gl1Uniforms = { proj: gl.getUniformLocation(prog, 'uProj'), mv: gl.getUniformLocation(prog, 'uMV'), tex: gl.getUniformLocation(prog, 'uTex'), hasTex: gl.getUniformLocation(prog, 'uHasTex') }; console.log('[GL1] Shader OK: pos=' + window.__gl1Attribs.pos + ' color=' + window.__gl1Attribs.color + ' tex=' + window.__gl1Attribs.texCoord); }
 function js_copyUserName(ptr){ var s = window.__mcpeUserName || ''; for (var i = 0; i < s.length; i++) { HEAP8[ptr + i] = s.charCodeAt(i); } HEAP8[ptr + s.length] = 0; }
@@ -4785,6 +4785,16 @@ function js_getUserSeedLen(){ return window.__mcpeUserSeed ? window.__mcpeUserSe
   }
   }
 
+  function ___syscall_access(path, amode) {try {
+  
+      path = SYSCALLS.getStr(path);
+      return SYSCALLS.doAccess(path, amode);
+    } catch (e) {
+    if (typeof FS === 'undefined' || !(e instanceof FS.ErrnoError)) abort(e);
+    return -e.errno;
+  }
+  }
+
   function ___syscall_fcntl64(fd, cmd, varargs) {SYSCALLS.varargs = varargs;
   try {
   
@@ -4836,6 +4846,55 @@ function js_getUserSeedLen(){ return window.__mcpeUserSeed ? window.__mcpeUserSe
           return -28;
         }
       }
+    } catch (e) {
+    if (typeof FS === 'undefined' || !(e instanceof FS.ErrnoError)) abort(e);
+    return -e.errno;
+  }
+  }
+
+  function ___syscall_getdents64(fd, dirp, count) {try {
+  
+      var stream = SYSCALLS.getStreamFromFD(fd)
+      if (!stream.getdents) {
+        stream.getdents = FS.readdir(stream.path);
+      }
+  
+      var struct_size = 280;
+      var pos = 0;
+      var off = FS.llseek(stream, 0, 1);
+  
+      var idx = Math.floor(off / struct_size);
+  
+      while (idx < stream.getdents.length && pos + struct_size <= count) {
+        var id;
+        var type;
+        var name = stream.getdents[idx];
+        if (name === '.') {
+          id = stream.id;
+          type = 4; // DT_DIR
+        }
+        else if (name === '..') {
+          id = FS.lookupPath(stream.path, { parent: true }).id;
+          type = 4; // DT_DIR
+        }
+        else {
+          var child = FS.lookupNode(stream, name);
+          id = child.id;
+          type = FS.isChrdev(child.mode) ? 2 :  // DT_CHR, character device.
+                 FS.isDir(child.mode) ? 4 :     // DT_DIR, directory.
+                 FS.isLink(child.mode) ? 10 :   // DT_LNK, symbolic link.
+                 8;                             // DT_REG, regular file.
+        }
+        (tempI64 = [id>>>0,(tempDouble=id,(+(Math.abs(tempDouble))) >= 1.0 ? (tempDouble > 0.0 ? ((Math.min((+(Math.floor((tempDouble)/4294967296.0))), 4294967295.0))|0)>>>0 : (~~((+(Math.ceil((tempDouble - +(((~~(tempDouble)))>>>0))/4294967296.0)))))>>>0) : 0)],HEAP32[((dirp + pos)>>2)] = tempI64[0],HEAP32[(((dirp + pos)+(4))>>2)] = tempI64[1]);
+        (tempI64 = [(idx + 1) * struct_size>>>0,(tempDouble=(idx + 1) * struct_size,(+(Math.abs(tempDouble))) >= 1.0 ? (tempDouble > 0.0 ? ((Math.min((+(Math.floor((tempDouble)/4294967296.0))), 4294967295.0))|0)>>>0 : (~~((+(Math.ceil((tempDouble - +(((~~(tempDouble)))>>>0))/4294967296.0)))))>>>0) : 0)],HEAP32[(((dirp + pos)+(8))>>2)] = tempI64[0],HEAP32[(((dirp + pos)+(12))>>2)] = tempI64[1]);
+        HEAP16[(((dirp + pos)+(16))>>1)] = 280;
+        HEAP8[(((dirp + pos)+(18))>>0)] = type;
+        stringToUTF8(name, dirp + pos + 19, 256);
+        pos += struct_size;
+        idx += 1;
+      }
+      FS.llseek(stream, idx * struct_size, 0);
+      return pos;
     } catch (e) {
     if (typeof FS === 'undefined' || !(e instanceof FS.ErrnoError)) abort(e);
     return -e.errno;
@@ -4896,6 +4955,16 @@ function js_getUserSeedLen(){ return window.__mcpeUserSeed ? window.__mcpeUserSe
   }
   }
 
+  function ___syscall_mkdir(path, mode) {try {
+  
+      path = SYSCALLS.getStr(path);
+      return SYSCALLS.doMkdir(path, mode);
+    } catch (e) {
+    if (typeof FS === 'undefined' || !(e instanceof FS.ErrnoError)) abort(e);
+    return -e.errno;
+  }
+  }
+
   function ___syscall_open(path, flags, varargs) {SYSCALLS.varargs = varargs;
   try {
   
@@ -4919,6 +4988,29 @@ function js_getUserSeedLen(){ return window.__mcpeUserSeed ? window.__mcpeUserSe
       }
       HEAPU8.set(msg.buffer, buf);
       return msg.buffer.byteLength;
+    } catch (e) {
+    if (typeof FS === 'undefined' || !(e instanceof FS.ErrnoError)) abort(e);
+    return -e.errno;
+  }
+  }
+
+  function ___syscall_rename(old_path, new_path) {try {
+  
+      old_path = SYSCALLS.getStr(old_path);
+      new_path = SYSCALLS.getStr(new_path);
+      FS.rename(old_path, new_path);
+      return 0;
+    } catch (e) {
+    if (typeof FS === 'undefined' || !(e instanceof FS.ErrnoError)) abort(e);
+    return -e.errno;
+  }
+  }
+
+  function ___syscall_rmdir(path) {try {
+  
+      path = SYSCALLS.getStr(path);
+      FS.rmdir(path);
+      return 0;
     } catch (e) {
     if (typeof FS === 'undefined' || !(e instanceof FS.ErrnoError)) abort(e);
     return -e.errno;
@@ -5075,6 +5167,17 @@ function js_getUserSeedLen(){ return window.__mcpeUserSeed ? window.__mcpeUserSe
         // sendto an address
         return sock.sock_ops.sendmsg(sock, HEAP8,message, length, dest.addr, dest.port);
       }
+    } catch (e) {
+    if (typeof FS === 'undefined' || !(e instanceof FS.ErrnoError)) abort(e);
+    return -e.errno;
+  }
+  }
+
+  function ___syscall_unlink(path) {try {
+  
+      path = SYSCALLS.getStr(path);
+      FS.unlink(path);
+      return 0;
     } catch (e) {
     if (typeof FS === 'undefined' || !(e instanceof FS.ErrnoError)) abort(e);
     return -e.errno;
@@ -7036,11 +7139,17 @@ var asmLibraryArg = {
   "__cxa_uncaught_exceptions": ___cxa_uncaught_exceptions,
   "__resumeException": ___resumeException,
   "__syscall_accept4": ___syscall_accept4,
+  "__syscall_access": ___syscall_access,
   "__syscall_fcntl64": ___syscall_fcntl64,
+  "__syscall_getdents64": ___syscall_getdents64,
   "__syscall_ioctl": ___syscall_ioctl,
+  "__syscall_mkdir": ___syscall_mkdir,
   "__syscall_open": ___syscall_open,
   "__syscall_recvfrom": ___syscall_recvfrom,
+  "__syscall_rename": ___syscall_rename,
+  "__syscall_rmdir": ___syscall_rmdir,
   "__syscall_sendto": ___syscall_sendto,
+  "__syscall_unlink": ___syscall_unlink,
   "abort": _abort,
   "emscripten_asm_const_int": _emscripten_asm_const_int,
   "emscripten_get_now": _emscripten_get_now,
