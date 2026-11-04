@@ -7305,6 +7305,11 @@ var _ntohs = Module["_ntohs"] = function() {
 };
 
 /** @type {function(...*):?} */
+var _select_item_by_id = Module["_select_item_by_id"] = function() {
+  return (_select_item_by_id = Module["_select_item_by_id"] = Module["asm"]["select_item_by_id"]).apply(null, arguments);
+};
+
+/** @type {function(...*):?} */
 var _emscripten_main_thread_process_queued_calls = Module["_emscripten_main_thread_process_queued_calls"] = function() {
   return (_emscripten_main_thread_process_queued_calls = Module["_emscripten_main_thread_process_queued_calls"] = Module["asm"]["emscripten_main_thread_process_queued_calls"]).apply(null, arguments);
 };
