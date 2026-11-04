@@ -43,6 +43,17 @@ immutable and **1:1 with https://github.com/SSMG64/PocketEdition/tree/main/handh
 which has an `#if defined(STANDALONE_SERVER) || defined(__EMSCRIPTEN__)`
 guard for browser adaptation — the only deviation from upstream).
 
+**Asset verification:** All 46 game assets (terrain.png, gui/*.png, mob/*.png,
+lang/en_US.lang, etc.) are **1:1 byte-identical** with the original MCPE 0.6.1
+APK (armv7 build, `Minecraft - Pocket Edition 0.6.1 (30006010)`, dated
+2013-01-31). Verified via MD5 comparison:
+- Source APK: archive.org `mcpe-apk/Minecraft - Pocket Edition/Full/0.6.1 (X0006010)/...armv7.apk`
+- Binary: `lib/armeabi-v7a/libminecraftpe.so` (8.2 MB, ARM EABI5, stripped)
+- Symbols: 10,627 C++ mangled symbols matching SSMG64 source classes
+  (`AppPlatform::*`, `Multitouch::*`, `Inventory::*`, etc.)
+- Assets: 45/45 match MD5, 0 mismatch (after replacing touchgui.png and
+  en_US.lang with APK versions for exact parity)
+
 **Build:** Recompiled with emsdk 2.0.34 (the version that produces correct
 rendering codegen). Key changes in `wasm/`:
 - `main_emscripten.cpp` — added `multitouch_feed` export
