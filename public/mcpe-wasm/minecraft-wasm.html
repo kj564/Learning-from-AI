@@ -732,7 +732,14 @@ function startWasm() {
         if (heldKeys[k]) { e.preventDefault(); return; }
         heldKeys[k] = true;
         if (typeof _keyboard_feed === 'function') _keyboard_feed(k, 1);
-        // §Keyboard → synthetic D-pad touch (desktop fallback, since multitouch is broken)
+        // §Keyboard → D-pad simulation via _multitouch_feed (pointer 2).
+        // The game is always in touch mode (init order bug in original source:
+        // options.initDefaultValues runs before _supportsNonTouchscreen is set,
+        // so useTouchScreen stays true). TouchscreenInput::setKey is #ifdef WIN32
+        // — keyboard WASD does nothing in touch mode. We simulate D-pad touches
+        // via _multitouch_feed with pointerId=2 so TouchscreenInput processes them.
+        // This is needed on ALL devices (desktop + mobile) since the game is
+        // always in touch mode (1:1 with APK behavior).
         driveDpadForMovement(k, true);
         if (k >= 49 && k <= 57) { try { selectHotbar(k - 49); } catch(_) {} }
         // §Browser adaptation: keyboard shortcuts via C++ exports (matching
