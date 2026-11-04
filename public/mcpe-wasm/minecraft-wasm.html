@@ -749,7 +749,11 @@ function startWasm() {
           if (heldKeys[k] && typeof _keyboard_feed === 'function') _keyboard_feed(parseInt(k), 0);
           heldKeys[k] = false;
         }
-        Object.keys(dpadActive).forEach(function(k) { dpadActive[k] = false; });
+        Object.keys(dpadActive).forEach(function(k) { 
+          dpadActive[k] = false;
+          // §Release keyboard D-pad pointer (pointerId=2) on blur
+          if (typeof _multitouch_feed === 'function') _multitouch_feed(1, 0, 134, 346, 2);
+        });
       });
 
       // §----- Synthetic D-pad touch for keyboard (desktop fallback) -----
