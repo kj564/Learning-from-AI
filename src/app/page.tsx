@@ -1,145 +1,162 @@
 'use client'
 
 /**
- * VoxelCraft 0.7.1 — TypeScript + WebGPU rebuild
+ * VoxelCraft 0.7.1 — Faithful TS translation of the 0.6.1 source (Tile tree)
  *
- * Replaces the previous mcpe-wasm iframe approach with a native TS engine.
- * Renderer: WebGPU (Vulkan-backed on Linux/Android desktop Chrome,
- * Metal on macOS, D3D12 on Windows — adapter.backend logged on init).
+ * This page is the proof-of-translation for iteration 2 of the rebuild.
+ * Iteration 1 used fabricated constants and guessed tile IDs; iteration 2
+ * replaces every one of those with a line-by-line translation of the
+ * actual C++ source from rujukan/pocket-edition-2013.
  *
- * Controls (MVP):
- *   Click canvas      → lock pointer
- *   WASD / Arrows     → move
- *   Mouse             → look
- *   Space             → up (fly) or jump (ground)
- *   Shift             → down (fly)
- *   F                 → toggle fly mode
- *   1..9              → select hotbar slot
- *   Wheel             → cycle hotbar
- *   Left click        → break block
- *   Right click        → place selected block
- *   Esc               → unlock pointer
+ * The page boots the engine modules in order (Material → Tile registry →
+ * AABB/Vec3/Facing) and displays the resulting registry as evidence: the
+ * IDs and descriptionIds below are the literal Tile::initTiles() output
+ * from the C++ source, not invented values.
  *
- * This is iteration 1 of the 0.7.1 rebuild. See MODLOG.md for the
- * reverse-engineering journal the rebuild is grounded in.
+ * Iteration 3 will re-wire the renderer + main loop back onto this registry
+ * so the world uses the actual Material + Tile::isSolidRender +
+ * Tile::getTexture system instead of the fabricated BlockColor table.
  */
 
-import { useEffect, useRef, useState } from 'react'
-import { Engine } from '@/engine/engine'
-import { HOTBAR_SLOTS, DEFAULT_HOTBAR, BlockId, BlockColor } from '@/engine/core/types'
+import { useEffect, useState } from 'react'
+import { initMaterials, Material } from '@/engine/world/level/material/Material'
+import { initTiles } from '@/engine/world/level/tile/tile-registry'
+import { Tiles } from '@/engine/world/level/tile/Tiles'
+import { tiles, solid, lightBlock, lightEmission, translucent } from '@/engine/world/level/tile/Tile'
+
+interface TileRow {
+  id: number
+  field: keyof typeof Tiles
+  desc: string
+  destroySpeed: number
+  category: number
+  isSolid: boolean
+  lightBlock: number
+  lightEmission: number
+}
 
 export default function Home() {
-  const canvasRef = useRef<HTMLCanvasElement>(null)
-  const engineRef = useRef<Engine | null>(null)
-  const [ready, setReady] = useState(false)
-  const [backend, setBackend] = useState<string>('—')
-  const [slot, setSlot] = useState(0)
-  const [fly, setFly] = useState(true)
-  const [err, setErr] = useState<string | null>(null)
+  const [rows, setRows] = useState<TileRow[]>([])
+  const [count, setCount] = useState(0)
 
   useEffect(() => {
-    if (!canvasRef.current) return
-    const engine = new Engine(canvasRef.current, {
-      onReady: (b) => { setReady(true); setBackend(b) },
-      onSlot: setSlot,
-      onFlyChange: setFly,
-    })
-    engineRef.current = engine
-    ;(window as any).voxelcraft = engine // expose for debugging
-    engine.start().then((ok) => {
-      if (!ok) setErr('WebGPU init failed. Try a recent Chrome/Edge on desktop.')
-    }).catch((e) => setErr(String(e)))
-    return () => { engine.stop(); engineRef.current = null }
+    // Run the faithful init sequence.
+    initMaterials()
+    initTiles()
+
+    // Collect every registered tile from the Tiles singleton.
+    const collected: TileRow[] = []
+    for (const key of Object.keys(Tiles) as (keyof typeof Tiles)[]) {
+      const t = Tiles[key]
+      if (!t) continue
+      collected.push({
+        id: t.id,
+        field: key,
+        desc: t.getDescriptionId(),
+        destroySpeed: (t as any).destroySpeed,
+        category: t.category,
+        isSolid: solid[t.id],
+        lightBlock: lightBlock[t.id],
+        lightEmission: lightEmission[t.id],
+      })
+    }
+    collected.sort((a, b) => a.id - b.id)
+    setRows(collected)
+    setCount(tiles.filter(Boolean).length)
   }, [])
 
   return (
-    <main className="fixed inset-0 bg-black text-white overflow-hidden select-none">
-      <canvas
-        ref={canvasRef}
-        className="h-screen w-screen block touch-none"
-        style={{ outline: 'none' }}
-      />
+    <main className="min-h-screen bg-zinc-950 text-zinc-100 overflow-auto">
+      <div className="max-w-5xl mx-auto p-6">
+        <header className="mb-6">
+          <h1 className="text-2xl font-mono font-bold">
+            VoxelCraft 0.7.1 · Faithful TS translation
+          </h1>
+          <p className="text-sm text-zinc-400 mt-2 font-mono">
+            Iteration 2 — line-by-line translation of Tile.cpp::initTiles() +
+            Material.cpp::initMaterials() + Tile.h + AABB.h + Vec3.h + Facing.h.
+            No more fabricated constants.
+          </p>
+        </header>
 
-      {/* Status badge — top-left */}
-      <div className="pointer-events-none fixed top-2 left-2 z-10 font-mono text-xs space-y-1">
-        <div className="bg-black/60 px-2 py-1 rounded inline-block">
-          VoxelCraft 0.7.1 · {ready ? 'ready' : 'init…'} · GPU: {backend}
-        </div>
-        {err && (
-          <div className="bg-red-900/80 px-2 py-1 rounded inline-block max-w-sm">
-            {err}
+        <section className="mb-6 grid grid-cols-2 sm:grid-cols-4 gap-3 font-mono text-xs">
+          <Stat label="Materials" value={countMaterials()} />
+          <Stat label="Tiles registered" value={`${count} / 256`} />
+          <Stat label="Solid blocks" value={solid.filter(Boolean).length} />
+          <Stat label="Light emitters" value={lightEmission.filter((v) => v > 0).length} />
+        </section>
+
+        <section className="bg-zinc-900 rounded-lg overflow-hidden border border-zinc-800">
+          <div className="px-4 py-3 border-b border-zinc-800 bg-zinc-900/80 font-mono text-xs uppercase tracking-wider text-zinc-500">
+            Tile registry · {rows.length} entries · from Tile::initTiles() in rujukan source
           </div>
-        )}
-        {!ready && !err && (
-          <div className="bg-black/60 px-2 py-1 rounded inline-block">
-            Booting WebGPU… (Vulkan/Metal/D3D12 backend)
+          <div className="max-h-[60vh] overflow-y-auto">
+            <table className="w-full text-xs font-mono">
+              <thead className="sticky top-0 bg-zinc-900/90 backdrop-blur">
+                <tr className="text-zinc-400 text-left">
+                  <th className="px-3 py-2">id</th>
+                  <th className="px-3 py-2">field</th>
+                  <th className="px-3 py-2">descriptionId</th>
+                  <th className="px-3 py-2 text-right">destroyTime</th>
+                  <th className="px-3 py-2 text-right">category</th>
+                  <th className="px-3 py-2 text-center">solid</th>
+                  <th className="px-3 py-2 text-right">lightBlk</th>
+                  <th className="px-3 py-2 text-right">lightEm</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((r) => (
+                  <tr key={r.id} className="border-b border-zinc-900 hover:bg-zinc-800/50">
+                    <td className="px-3 py-1.5 text-zinc-400">{r.id}</td>
+                    <td className="px-3 py-1.5 text-emerald-300">{r.field}</td>
+                    <td className="px-3 py-1.5 text-zinc-300">{r.desc}</td>
+                    <td className="px-3 py-1.5 text-right text-zinc-400">{r.destroySpeed.toFixed(1)}</td>
+                    <td className="px-3 py-1.5 text-right text-zinc-400">{r.category}</td>
+                    <td className="px-3 py-1.5 text-center">
+                      <span className={r.isSolid ? 'text-emerald-400' : 'text-zinc-600'}>
+                        {r.isSolid ? '■' : '·'}
+                      </span>
+                    </td>
+                    <td className="px-3 py-1.5 text-right text-zinc-400">{r.lightBlock}</td>
+                    <td className="px-3 py-1.5 text-right text-zinc-400">{r.lightEmission}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
-        )}
-      </div>
+        </section>
 
-      {/* Crosshair center */}
-      <div className="pointer-events-none fixed inset-0 flex items-center justify-center z-10">
-        <div className="w-5 h-5 relative opacity-70">
-          <div className="absolute left-1/2 top-0 -translate-x-1/2 w-0.5 h-5 bg-white" />
-          <div className="absolute top-1/2 left-0 -translate-y-1/2 h-0.5 w-5 bg-white" />
-        </div>
-      </div>
-
-      {/* Hotbar — bottom center */}
-      <div className="pointer-events-none fixed bottom-3 left-1/2 -translate-x-1/2 z-10">
-        <div className="flex gap-0.5 bg-black/40 p-1 rounded">
-          {Array.from({ length: HOTBAR_SLOTS }).map((_, i) => {
-            const block = DEFAULT_HOTBAR[i]
-            const col = BlockColor[block] ?? [1, 0.2, 0.8]
-            return (
-              <div
-                key={i}
-                className={`w-10 h-10 rounded-sm border-2 flex items-center justify-center text-[10px] font-mono ${
-                  i === slot ? 'border-white bg-white/10' : 'border-gray-600 bg-black/30'
-                }`}
-                style={{
-                  backgroundColor: `rgb(${col[0] * 255 | 0}, ${col[1] * 255 | 0}, ${col[2] * 255 | 0})`,
-                }}
-                title={blockName(block)}
-              >
-                {i + 1}
-              </div>
-            )
-          })}
-        </div>
-        <div className="text-center mt-1 text-[10px] font-mono opacity-70">
-          {fly ? 'fly' : 'walk'} · {blockName(DEFAULT_HOTBAR[slot])}
-        </div>
-      </div>
-
-      {/* Controls hint — top-right */}
-      <div className="pointer-events-none fixed top-2 right-2 z-10 font-mono text-[11px] bg-black/50 px-2 py-1 rounded text-right space-y-0.5 max-w-xs">
-        <div><b>Click</b> lock pointer · <b>WASD</b> move · <b>Mouse</b> look</div>
-        <div><b>Space</b> jump/up · <b>Shift</b> down(fly) · <b>F</b> toggle fly</div>
-        <div><b>1-9</b>/<b>wheel</b> hotbar · <b>L</b> break · <b>R</b> place</div>
+        <footer className="mt-6 text-xs font-mono text-zinc-500">
+          <p>
+            Source:{' '}
+            <code className="text-zinc-400">
+              rujukan/pocket-edition-2013/mcpe-source/handheld/src/world/level/tile/Tile.cpp
+            </code>
+            . Every row above is a real Tile subclass instantiated by that file's
+            initTiles() function, transcribed line-by-line in
+            <code className="text-zinc-400"> src/engine/world/level/tile/tile-registry.ts</code>.
+          </p>
+          <p className="mt-2">
+            Renderer + world + player will be re-wired onto this registry in iteration 3.
+          </p>
+        </footer>
       </div>
     </main>
   )
 }
 
-function blockName(id: number): string {
-  const names: Record<number, string> = {
-    [BlockId.AIR]: 'Air',
-    [BlockId.STONE]: 'Stone',
-    [BlockId.GRASS]: 'Grass',
-    [BlockId.DIRT]: 'Dirt',
-    [BlockId.COBBLESTONE]: 'Cobblestone',
-    [BlockId.PLANKS]: 'Planks',
-    [BlockId.BEDROCK]: 'Bedrock',
-    [BlockId.WATER]: 'Water',
-    [BlockId.LAVA]: 'Lava',
-    [BlockId.SAND]: 'Sand',
-    [BlockId.GRAVEL]: 'Gravel',
-    [BlockId.LOG]: 'Log',
-    [BlockId.LEAVES]: 'Leaves',
-    [BlockId.GLASS]: 'Glass',
-    [BlockId.CAKE]: 'Cake (0.7.x)',
-    [BlockId.DIAMOND_ORE]: 'Diamond Ore',
-  }
-  return names[id] ?? `#${id}`
+function Stat({ label, value }: { label: string; value: string | number }) {
+  return (
+    <div className="bg-zinc-900 border border-zinc-800 rounded px-3 py-2">
+      <div className="text-zinc-500 uppercase tracking-wider text-[10px]">{label}</div>
+      <div className="text-zinc-200 text-base mt-1">{value}</div>
+    </div>
+  )
 }
+
+function countMaterials(): number {
+  // Count non-null fields on the Material namespace.
+  return Object.values(Material as Record<string, unknown>).filter((v) => v !== undefined && v !== null).length
+}
+
+void translucent
