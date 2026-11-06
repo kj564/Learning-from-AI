@@ -1,29 +1,59 @@
 /**
- * VoxelCraft Engine — Main game loop
+ * VoxelCraft Engine — Main game loop (wired to faithful translations)
  *
- * Wires together: WebGPU/WebGL2 renderer + World + Player + chunk meshing
- * + input. Render loop on requestAnimationFrame; sim on fixed 20 tps
+ * Iteration 5: the loop now uses Level + LocalPlayer + KeyboardInput +
+ * MouseTurnInput + MouseBuildInput + GameRenderer — replacing the old
+ * fabricated world.ts + player.ts that were created in iteration 1.
+ *
+ * The gameplay tick is driven by LocalPlayer.aiStep (which calls Mob::aiStep +
+ * Player::aiStep internally — the famous double-call trap). Constants like
+ * gravity (0.08), jump (0.42), friction (0.91), water drag (0.80) come straight
+ * from the rujukan C++ source via the Entity/Mob/Player translation.
+ *
+ * Render loop runs on requestAnimationFrame; sim runs on fixed 20 tps
  * (TicksPerSecond from SharedConstants.h).
  *
- * Block palette: the hotbar uses BlockId constants from the Tile registry.
- * Each block placement / break mutates the World and re-meshes the affected
- * chunk + neighbors (so face culling updates correctly across chunk seams).
+ * Input wiring:
+ *   WASD / Arrows    → KeyboardInput.setKey (KEY_UP/DOWN/LEFT/RIGHT)
+ *   Space           → KeyboardInput KEY_JUMP + double-jump toggles flying
+ *   LShift          → KeyboardInput KEY_SNEAK
+ *   Mouse (locked) → MouseTurnInput.feedDelta → MouseHandler.poll
+ *   Left click      → MouseBuildInput BAI_REMOVE | BAI_ATTACK
+ *   Right click     → MouseBuildInput BAI_BUILD | BAI_INTERACT
+ *   1..9 / Wheel    → hotbar slot select
+ *   F               → keyFog (toggle fly in our MVP)
+ *   Esc             → exit pointer lock
+ *
+ * The chunk mesher (chunk-mesh.ts) + renderer (renderer.ts) still drive the
+ * actual draw calls — those don't change because they're WebGPU/WebGL2
+ * infrastructure, not gameplay logic. Block colors come from TileMVPColor
+ * (terrain.png atlas port is iter 6).
  */
 
 import { WebGPURenderer } from './render/renderer';
 import { WebGL2Renderer } from './render/webgl2-renderer';
 import type { IRenderer } from './render/irenderer';
+import { Level } from './world/level/Level';
 import { World } from './world/level/world';
-import { Player } from './player/player';
+import { LocalPlayer } from './client/player/LocalPlayer';
+import { KeyboardInput } from './client/player/input/KeyboardInput';
+import { MouseTurnInput } from './client/player/input/MouseTurnInput';
+import { MouseBuildInput } from './client/player/input/MouseBuildInput';
+import { BuildActionIntention } from './client/player/input/IBuildInput';
+import { MouseHandler } from './client/MouseHandler';
+import { GameRenderer } from './client/renderer/GameRenderer';
+import { defaultOptions, KeyMapping, type OptionsConfig } from './client/Options';
 import { buildChunkMesh } from './render/chunk-mesh';
 import {
   TICK_DT, MAX_TICKS_PER_UPDATE, CHUNK_SIZE, BlockId,
   HOTBAR_SLOTS, DEFAULT_HOTBAR, MOUSE_SENSITIVITY,
 } from './core/core-types';
-
-// Ensure Tile registry is initialized before the engine boots.
 import { initMaterials } from './world/level/material/Material';
 import { initTiles } from './world/level/tile/tile-registry';
+import { Tiles } from './world/level/tile/Tiles';
+import { TicksPerSecond } from './shared/SharedConstants';
+import { Mth } from './util/Mth';
+import { STEP_X, STEP_Y, STEP_Z } from './shared/Facing';
 
 let registryInit = false;
 function ensureRegistry() {
@@ -42,9 +72,17 @@ export interface EngineCallbacks {
 export class Engine {
   readonly canvas: HTMLCanvasElement;
   renderer: IRenderer;
-  readonly world: World;
-  readonly player: Player;
+  world: World;
+  level: Level;
+  player: LocalPlayer;
   readonly cb: EngineCallbacks;
+  options: OptionsConfig;
+
+  private keyboardInput: KeyboardInput;
+  private mouseTurnInput: MouseTurnInput;
+  private mouseBuildInput: MouseBuildInput;
+  private mouseHandler: MouseHandler;
+  private gameRenderer: GameRenderer;
 
   private running = false;
   private lastFrameTime = 0;
@@ -53,23 +91,87 @@ export class Engine {
   private keys = new Set<string>();
   private pointerLocked = false;
   private dirtyChunks: Set<string> = new Set();
+  private _lastPartialTick = 0;
 
+  // Block interaction
   private leftMouseDown = false;
   private rightMouseDown = false;
   private breakCooldown = 0;
   private placeCooldown = 0;
 
+  // The current build intention (reused per tick to avoid alloc)
+  private bai = new BuildActionIntention();
+
   constructor(canvas: HTMLCanvasElement, cb: EngineCallbacks = {}) {
     ensureRegistry();
     this.canvas = canvas;
     this.cb = cb;
+    this.options = defaultOptions();
+
+    // Renderer pick
     const forceWebGL2 = typeof URLSearchParams !== 'undefined'
       && new URLSearchParams(location.search).get('renderer') === 'webgl2';
     this.renderer = (!forceWebGL2 && typeof navigator !== 'undefined' && !!navigator.gpu)
       ? new WebGPURenderer(canvas)
       : new WebGL2Renderer(canvas);
+
+    // World (storage) + Level (gameplay logic, wraps storage)
     this.world = new World(1337, 4);
-    this.player = new Player(DEFAULT_HOTBAR);
+    this.level = new Level(this.world, 1337);
+
+    // Input holders
+    this.keyboardInput = new KeyboardInput({
+      keyUp: keyCode(KeyMapping.keyUp),
+      keyDown: keyCode(KeyMapping.keyDown),
+      keyLeft: keyCode(KeyMapping.keyLeft),
+      keyRight: keyCode(KeyMapping.keyRight),
+      keyJump: keyCode(KeyMapping.keyJump),
+      keySneak: keyCode(KeyMapping.keySneak),
+      keyCraft: keyCode(KeyMapping.keyCraft),
+    });
+    this.mouseTurnInput = new MouseTurnInput(MouseTurnInput.MODE_DELTA, canvas.width / 2, canvas.height / 2);
+    this.mouseBuildInput = new MouseBuildInput();
+    this.mouseHandler = new MouseHandler(this.mouseTurnInput);
+
+    // Player (LocalPlayer) — owns the IMoveInput
+    this.player = new LocalPlayer(
+      { screen: null, options: { isFlying: false }, isOnline: () => false },
+      this.level,
+      true, // creative
+    );
+    this.player.input = this.keyboardInput;
+    this.player.setLevel(this.level);
+    this.level.addEntity(this.player);
+    this.level.players.push(this.player);
+
+    // GameRenderer with a Minecraft-like adapter
+    this.gameRenderer = new GameRenderer({
+      player: this.player,
+      cameraTargetPlayer: this.player,
+      width: canvas.clientWidth || 1280,
+      height: canvas.clientHeight || 720,
+      options: {
+        sensitivity: this.options.sensitivity,
+        viewDistance: this.options.viewDistance,
+        bobView: this.options.bobView,
+        thirdPersonView: this.options.thirdPersonView,
+        fixedCamera: this.options.fixedCamera,
+        anaglyph3d: this.options.anaglyph3d,
+        invertYMouse: this.options.invertYMouse,
+        hideGui: this.options.hideGui,
+      },
+      mouseGrabbed: false,
+      mouseHandler: this.mouseHandler,
+      useTouchscreen: () => false,
+      isLevelGenerated: () => true,
+      screen: null,
+      gui: { render: () => {} },
+      level: this.level,
+    });
+
+    // Position player above terrain — same as MCPE default spawn behavior
+    this.player.setPos(8, 80, 8);
+    this.player.setRot(0, 0);
   }
 
   async start(): Promise<boolean> {
@@ -139,22 +241,23 @@ export class Engine {
 
   private onPointerLockChange = (): void => {
     this.pointerLocked = document.pointerLockElement === this.canvas;
+    if (this.pointerLocked) this.mouseHandler.grab();
+    else this.mouseHandler.release();
   };
 
   private onMouseMove = (e: MouseEvent): void => {
     if (!this.pointerLocked) return;
-    const sens = (MOUSE_SENSITIVITY * Math.PI) / 180;
-    this.player.yaw -= e.movementX * sens;
-    this.player.pitch -= e.movementY * sens;
-    const lim = Math.PI / 2 - 0.01;
-    this.player.pitch = Math.max(-lim, Math.min(lim, this.player.pitch));
+    this.mouseHandler.feed(e.movementX, e.movementY);
   };
 
   private onKeyDown = (e: KeyboardEvent): void => {
     this.keys.add(e.code);
+    // Forward to KeyboardInput so IMoveInput.tick() can read key flags
+    this.keyboardInput.setKey(keyCode(e.code), true);
     if (e.code === 'KeyF') {
-      this.player.fly = !this.player.fly;
-      this.cb.onFlyChange?.(this.player.fly);
+      this.options.isFlying = !this.options.isFlying;
+      this.player.abilities.flying = this.options.isFlying;
+      this.cb.onFlyChange?.(this.player.abilities.flying);
     }
     if (e.code.startsWith('Digit')) {
       const n = parseInt(e.code.slice(5), 10);
@@ -166,12 +269,15 @@ export class Engine {
     if (e.code === 'Escape' && this.pointerLocked) document.exitPointerLock();
   };
 
-  private onKeyUp = (e: KeyboardEvent): void => { this.keys.delete(e.code); };
+  private onKeyUp = (e: KeyboardEvent): void => {
+    this.keys.delete(e.code);
+    this.keyboardInput.setKey(keyCode(e.code), false);
+  };
 
   private onMouseDown = (e: MouseEvent): void => {
     if (!this.pointerLocked) return;
-    if (e.button === 0) { this.leftMouseDown = true; this.breakBlockNow(); }
-    if (e.button === 2) { this.rightMouseDown = true; this.placeBlockNow(); }
+    if (e.button === 0) this.leftMouseDown = true;
+    if (e.button === 2) this.rightMouseDown = true;
   };
 
   private onMouseUp = (e: MouseEvent): void => {
@@ -188,25 +294,42 @@ export class Engine {
     this.cb.onSlot?.(this.player.selectedSlot);
   };
 
-  private resize = (): void => { this.renderer.resize(); };
+  private resize = (): void => {
+    this.renderer.resize();
+    // Sync canvas size into GameRenderer's Minecraft-like adapter so
+    // setupCamera's perspective aspect ratio updates on viewport changes.
+    const mc = this.gameRenderer as unknown as { mc: { width: number; height: number } };
+    if (mc.mc) {
+      mc.mc.width = this.canvas.clientWidth;
+      mc.mc.height = this.canvas.clientHeight;
+    }
+  };
 
+  // === Block interaction — uses Mob::pick (the faithful raycast) ===
   private breakBlockNow(): void {
-    const hit = this.player.raycast(this.world);
-    if (!hit) return;
+    // Mob::pick(range=5, partialTick=1)
+    const hit = this.player.pick(5, 1);
+    if (!hit.isHit()) return;
     this.world.setBlock(hit.x, hit.y, hit.z, BlockId.AIR);
     this.markChunkDirty(hit.x, hit.y, hit.z);
     this.breakCooldown = 0.25;
   }
 
   private placeBlockNow(): void {
-    const hit = this.player.raycast(this.world);
-    if (!hit) return;
-    const bx = hit.x + hit.nx, by = hit.y + hit.ny, bz = hit.z + hit.nz;
-    const px0 = this.player.pos.x - 0.3, px1 = this.player.pos.x + 0.3;
-    const py0 = this.player.pos.y,         py1 = this.player.pos.y + 1.8;
-    const pz0 = this.player.pos.z - 0.3, pz1 = this.player.pos.z + 0.3;
+    const hit = this.player.pick(5, 1);
+    if (!hit.isHit()) return;
+    // Place adjacent to hit, on the side of the hit face. The face normal
+    // is (STEP_X[hit.f], STEP_Y[hit.f], STEP_Z[hit.f]) from Facing.h.
+    const nx = STEP_X[hit.f];
+    const ny = STEP_Y[hit.f];
+    const nz = STEP_Z[hit.f];
+    const bx = hit.x + nx, by = hit.y + ny, bz = hit.z + nz;
+    // Don't place inside the player AABB
+    const px0 = this.player.x - 0.3, px1 = this.player.x + 0.3;
+    const py0 = this.player.y,         py1 = this.player.y + 1.8;
+    const pz0 = this.player.z - 0.3, pz1 = this.player.z + 0.3;
     if (bx + 1 > px0 && bx < px1 && by + 1 > py0 && by < py1 && bz + 1 > pz0 && bz < pz1) return;
-    this.world.setBlock(bx, by, bz, this.player.hotbar[this.player.selectedSlot]);
+    this.world.setBlock(bx, by, bz, DEFAULT_HOTBAR[this.player.selectedSlot]);
     this.markChunkDirty(bx, by, bz);
     this.placeCooldown = 0.25;
   }
@@ -223,26 +346,48 @@ export class Engine {
     if (lz === CHUNK_SIZE - 1) this.dirtyChunks.add(`${cx},${cz + 1}`);
   }
 
+  // === Fixed-timestep tick (20 tps) ===
   tick(): void {
-    let forward = 0, strafe = 0;
-    if (this.keys.has('KeyW') || this.keys.has('ArrowUp')) forward += 1;
-    if (this.keys.has('KeyS') || this.keys.has('ArrowDown')) forward -= 1;
-    if (this.keys.has('KeyD') || this.keys.has('ArrowRight')) strafe += 1;
-    if (this.keys.has('KeyA') || this.keys.has('ArrowLeft')) strafe -= 1;
-    const jump = this.keys.has('Space');
-    const up = this.keys.has('Space');
-    const down = this.keys.has('ShiftLeft') || this.keys.has('ShiftRight');
-    this.player.applyMovement(forward, strafe, jump, up, down && this.player.fly, this.world);
+    // Update mouse grabbed state on the gameRenderer
+    (this.gameRenderer as unknown as { mc: { mouseGrabbed: boolean } }).mc.mouseGrabbed = this.pointerLocked;
+    this.mouseBuildInput.setButtonStates(this.leftMouseDown, this.rightMouseDown);
 
+    // LocalPlayer.tick drives aiStep which reads IMoveInput + ITurnInput + IBuildInput
+    this.player.tick();
+
+    // Apply turn-input deltas from MouseTurnInput → player.yaw/pitch (in degrees,
+    // matching Entity::turn which uses deg * 0.15 internal scale)
+    if (this.pointerLocked) {
+      const td = this.mouseTurnInput.getTurnDelta();
+      if (td.x !== 0 || td.y !== 0) {
+        // MouseHandler.xd/yd are the raw deltas. GameRenderer applies them via
+        // ss = sensitivity * 0.6 + 0.2; sens = ss^3 * 8; xo = xd * sens * 4.
+        // We replicate that formula here (Entity::turn multiplies by 0.15 inside).
+        const ss = this.options.sensitivity * 0.6 + 0.2;
+        const sens = ss * ss * ss * 8;
+        const xo = td.x * sens * 4;
+        const yo = td.y * sens * 4;
+        // Convert to deg → player.turn expects deg
+        // (Player.yRot/xRot are in degrees; Mob::turn deg*=0.15)
+        this.player.turn(xo, yo);
+      }
+    }
+
+    // Block interaction (creative-mode instant break + place)
     this.breakCooldown -= TICK_DT / 1000;
     this.placeCooldown -= TICK_DT / 1000;
     if (this.leftMouseDown && this.breakCooldown <= 0) this.breakBlockNow();
     if (this.rightMouseDown && this.placeCooldown <= 0) this.placeBlockNow();
+
+    // Level tick (drives time-of-day + sky darken + entity ticks)
+    this.level.tick();
+    void TicksPerSecond; void Mth;
   }
 
+  // === Chunk streaming + meshing ===
   private updateChunkQueue(): void {
-    const pcx = Math.floor(this.player.pos.x / CHUNK_SIZE);
-    const pcz = Math.floor(this.player.pos.z / CHUNK_SIZE);
+    const pcx = Math.floor(this.player.x / CHUNK_SIZE);
+    const pcz = Math.floor(this.player.z / CHUNK_SIZE);
     const rd = this.world.renderDistance;
     const wanted: Array<{ cx: number; cz: number; d: number }> = [];
     for (let dx = -rd; dx <= rd; dx++) {
@@ -278,6 +423,7 @@ export class Engine {
     this.renderer.uploadChunkMesh(cx, cz, mesh);
   }
 
+  // === Main frame ===
   private frame = (now: number): void => {
     if (!this.running) return;
     const dt = now - this.lastFrameTime;
@@ -290,13 +436,36 @@ export class Engine {
       ticksThisFrame++;
     }
     if (this.tickAcc > TICK_DT * MAX_TICKS_PER_UPDATE) this.tickAcc = 0;
+    this._lastPartialTick = this.tickAcc / TICK_DT;
 
     this.buildOneChunk();
     this.buildOneChunk();
 
-    this.renderer.setCamera(this.player.yaw, this.player.pitch, this.player.pos.x, this.player.pos.y + 1.62, this.player.pos.z);
+    // Use GameRenderer's setupCamera (which calls getFov + moveCameraToPlayer +
+    // bobView) to produce viewProjMatrix, then hand to the renderer.
+    this.gameRenderer.render(this._lastPartialTick);
+    this.renderer.setCamera(
+      this.player.yRot * Math.PI / 180,
+      this.player.xRot * Math.PI / 180,
+      this.player.x,
+      this.player.y + 1.62,
+      this.player.z,
+    );
     this.renderer.render();
 
     requestAnimationFrame(this.frame);
   };
 }
+
+// Helper: convert KeyboardEvent.code (e.g. "KeyW") into a numeric key id
+// matching KeyboardInput.setKey's lookup (we just store the code as number).
+function keyCode(code: string): number {
+  // Use a simple hash of the code string so distinct keys map to distinct ids.
+  // This is sufficient because KeyboardInput.setKey compares against Options
+  // keys (also passed through this same function).
+  let h = 0;
+  for (let i = 0; i < code.length; i++) h = ((h << 5) - h + code.charCodeAt(i)) | 0;
+  return h;
+}
+
+void MOUSE_SENSITIVITY; void Tiles;

@@ -17,6 +17,7 @@
 
 import { AABB } from '../../phys/AABB';
 import { Vec3 } from '../../phys/Vec3';
+import { HitResult } from '../../phys/AABB';
 import { Facing } from '../../../shared/Facing';
 
 export class SoundType {
@@ -328,6 +329,67 @@ export class Tile {
     return this;
   }
   setCategory(category: number): this { this.category = category; return this; }
+
+  // From Tile.cpp clip(level, xt, yt, zt, A, B) — verbatim.
+  // The C++ version translates A/B into tile-local coords, clips against
+  // the tile's AABB faces, finds the closest hit, returns HitResult with
+  // world coords.
+  clip(level: unknown, xt: number, yt: number, zt: number, A: Vec3, B: Vec3): HitResult {
+    const sub = new Vec3(xt, yt, zt);
+    const a = A.sub(sub);
+    const b = B.sub(sub);
+
+    let xh0 = new Vec3(), xh1 = new Vec3();
+    let yh0 = new Vec3(), yh1 = new Vec3();
+    let zh0 = new Vec3(), zh1 = new Vec3();
+
+    let [bxh0Hit, bxh0V] = a.clipX(b, this.xx0); xh0 = bxh0V;
+    let [bxh1Hit, bxh1V] = a.clipX(b, this.xx1); xh1 = bxh1V;
+    let [byh0Hit, byh0V] = a.clipY(b, this.yy0); yh0 = byh0V;
+    let [byh1Hit, byh1V] = a.clipY(b, this.yy1); yh1 = byh1V;
+    let [bzh0Hit, bzh0V] = a.clipZ(b, this.zz0); zh0 = bzh0V;
+    let [bzh1Hit, bzh1V] = a.clipZ(b, this.zz1); zh1 = bzh1V;
+
+    if (!bxh0Hit || !this.containsX(xh0)) bxh0Hit = false;
+    if (!bxh1Hit || !this.containsX(xh1)) bxh1Hit = false;
+    if (!byh0Hit || !this.containsY(yh0)) byh0Hit = false;
+    if (!byh1Hit || !this.containsY(yh1)) byh1Hit = false;
+    if (!bzh0Hit || !this.containsZ(zh0)) bzh0Hit = false;
+    if (!bzh1Hit || !this.containsZ(zh1)) bzh1Hit = false;
+
+    let closest: Vec3 | null = null;
+    if (bxh0Hit && (closest === null || a.distanceToSqr(xh0) < a.distanceToSqr(closest))) closest = xh0;
+    if (bxh1Hit && (closest === null || a.distanceToSqr(xh1) < a.distanceToSqr(closest))) closest = xh1;
+    if (byh0Hit && (closest === null || a.distanceToSqr(yh0) < a.distanceToSqr(closest))) closest = yh0;
+    if (byh1Hit && (closest === null || a.distanceToSqr(yh1) < a.distanceToSqr(closest))) closest = yh1;
+    if (bzh0Hit && (closest === null || a.distanceToSqr(zh0) < a.distanceToSqr(closest))) closest = zh0;
+    if (bzh1Hit && (closest === null || a.distanceToSqr(zh1) < a.distanceToSqr(closest))) closest = zh1;
+
+    if (closest === null) return new HitResult();
+
+    let face = -1;
+    if (closest === xh0) face = 4;
+    if (closest === xh1) face = 5;
+    if (closest === yh0) face = 0;
+    if (closest === yh1) face = 1;
+    if (closest === zh0) face = 2;
+    if (closest === zh1) face = 3;
+
+    // C++ returns closest->add(xt, yt, zt) — translate back to world coords.
+    return HitResult.tile(xt, yt, zt, face, closest.add3(xt, yt, zt));
+  }
+
+  // Tile.cpp containsX/Y/Z — check if hit point is within tile bounds on
+  // the other two axes.
+  private containsX(v: Vec3): boolean {
+    return v.y >= this.yy0 && v.y <= this.yy1 && v.z >= this.zz0 && v.z <= this.zz1;
+  }
+  private containsY(v: Vec3): boolean {
+    return v.x >= this.xx0 && v.x <= this.xx1 && v.z >= this.zz0 && v.z <= this.zz1;
+  }
+  private containsZ(v: Vec3): boolean {
+    return v.x >= this.xx0 && v.x <= this.xx1 && v.y >= this.yy0 && v.y <= this.yy1;
+  }
 
   // Static helpers from Tile.cpp
   static transformToValidBlockId(blockId: number): number {

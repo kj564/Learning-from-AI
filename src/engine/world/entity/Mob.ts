@@ -33,6 +33,7 @@ import { Entity, type EntityLevel } from './Entity';
 import { Mth } from '../../util/Mth';
 import { Random } from '../../util/Random';
 import { Vec3 } from '../phys/Vec3';
+import { HitResult } from '../phys/AABB';
 import { TicksPerSecond } from '../../shared/SharedConstants';
 import { tiles as Tile_tiles } from '../level/tile/Tile';
 
@@ -378,9 +379,43 @@ export class Mob extends Entity {
   getArmorValue(): number { return 0; }
 
   getAttackAnim(a: number): number { return this.oAttackAnim + (this.attackAnim - this.oAttackAnim) * a; }
-  getPos(a: number): Vec3 { return new Vec3(this.xo + (this.x - this.xo) * a, this.yo + (this.y - this.yo) * a, this.zo + (this.z - this.zo) * a); }
-  getLookAngle(): Vec3 { return new Vec3(0, 0, 0); }
-  getViewVector(_a: number): Vec3 { return new Vec3(0, 0, 0); }
+  getPos(a: number): Vec3 {
+    // Mob.cpp getPos — verbatim
+    if (a === 1) return new Vec3(this.x, this.y, this.z);
+    return new Vec3(
+      this.xo + (this.x - this.xo) * a,
+      this.yo + (this.y - this.yo) * a,
+      this.zo + (this.z - this.zo) * a,
+    );
+  }
+  getViewVector(a: number): Vec3 {
+    // Mob.cpp getViewVector — verbatim
+    if (a === 1) {
+      const yCos = Math.cos(-this.yRot * Mth.DEGRAD - Mth.PI);
+      const ySin = Math.sin(-this.yRot * Mth.DEGRAD - Mth.PI);
+      const xCos = -Math.cos(-this.xRot * Mth.DEGRAD);
+      const xSin = Math.sin(-this.xRot * Mth.DEGRAD);
+      return new Vec3(ySin * xCos, xSin, yCos * xCos);
+    }
+    const xRot = this.xRotO + (this.xRot - this.xRotO) * a;
+    const yRot = this.yRotO + (this.yRot - this.yRotO) * a;
+    const yCos = Math.cos(-yRot * Mth.DEGRAD - Mth.PI);
+    const ySin = Math.sin(-yRot * Mth.DEGRAD - Mth.PI);
+    const xCos = -Math.cos(-xRot * Mth.DEGRAD);
+    const xSin = Math.sin(-xRot * Mth.DEGRAD);
+    return new Vec3(ySin * xCos, xSin, yCos * xCos);
+  }
+  getLookAngle(): Vec3 { return this.getViewVector(1); }
+  // Mob::pick(range, a) — calls level->clip(from, from + viewVector * range)
+  // (HitResult Mob::pick in Mob.cpp)
+  pick(range: number, a: number): HitResult {
+    if (!this.level) return new HitResult();
+    const from = this.getPos(a);
+    const view = this.getViewVector(a);
+    const to = new Vec3(from.x + view.x * range, from.y + view.y * range, from.z + view.z * range);
+    // Call Level.clip (already translated in Level.ts)
+    return (this.level as unknown as { clip(a: Vec3, b: Vec3): HitResult }).clip(from, to);
+  }
   getMaxSpawnClusterSize(): number { return 3; }
   isMob(): boolean { return true; }
   isBaby(): boolean { return false; }

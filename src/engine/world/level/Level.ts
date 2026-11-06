@@ -607,42 +607,82 @@ export class Level implements World.LevelLike {
   tileEvent(_x: number, _y: number, _z: number, _b0: number, _b1: number): void {}
   broadcastEntityEvent(_e: Entity, _eventId: number): void {}
 
-  // === Level::clip (Level.cpp:849) — verbatim raycast against world tiles ===
+  // === Level::clip (Level.cpp:849) — verbatim DDA from C++ source ===
   clip(A: Vec3, b: Vec3, liquid = false, solidOnly = false): HitResult {
     if (A.x !== A.x || A.y !== A.y || A.z !== A.z) return new HitResult();
     if (b.x !== b.x || b.y !== b.y || b.z !== b.z) return new HitResult();
-    let a = new Vec3(A.x, A.y, A.z);
-    const xTile0 = Mth.floor(a.x);
-    const yTile0 = Mth.floor(a.y);
-    const zTile0 = Mth.floor(a.z);
-    const xTile1 = Mth.floor(b.x);
-    const yTile1 = Mth.floor(b.y);
-    const zTile1 = Mth.floor(b.z);
+
+    const a = new Vec3(A.x, A.y, A.z);
+
+    let xTile1 = Mth.floor(b.x);
+    let yTile1 = Mth.floor(b.y);
+    let zTile1 = Mth.floor(b.z);
+
+    let xTile0 = Mth.floor(a.x);
+    let yTile0 = Mth.floor(a.y);
+    let zTile0 = Mth.floor(a.z);
 
     let maxIterations = 200;
     while (maxIterations-- >= 0) {
       if (a.x !== a.x || a.y !== a.y || a.z !== a.z) return new HitResult();
-      const tile = Tile_tiles[this.getTile(Mth.floor(a.x), Mth.floor(a.y), Mth.floor(a.z))];
-      if (tile) {
-        const isLiquid = tile.material.isLiquid();
-        const shouldHit = liquid ? isLiquid : (!isLiquid || solidOnly);
-        if (shouldHit) {
-          const tileAABB = tile.getTileAABB(this as never, Mth.floor(a.x), Mth.floor(a.y), Mth.floor(a.z));
-          const hit = tileAABB.clip(a, b);
-          if (hit.isHit()) {
-            return HitResult.tile(Mth.floor(a.x), Mth.floor(a.y), Mth.floor(a.z), hit.f, hit.pos);
-          }
+      if (xTile0 === xTile1 && yTile0 === yTile1 && zTile0 === zTile1) return new HitResult();
+
+      let xClip = 999, yClip = 999, zClip = 999;
+      if (xTile1 > xTile0) xClip = xTile0 + 1.0;
+      if (xTile1 < xTile0) xClip = xTile0 + 0.0;
+      if (yTile1 > yTile0) yClip = yTile0 + 1.0;
+      if (yTile1 < yTile0) yClip = yTile0 + 0.0;
+      if (zTile1 > zTile0) zClip = zTile0 + 1.0;
+      if (zTile1 < zTile0) zClip = zTile0 + 0.0;
+
+      let xDist = 999, yDist = 999, zDist = 999;
+      const xd = b.x - a.x;
+      const yd = b.y - a.y;
+      const zd = b.z - a.z;
+      if (xClip !== 999) xDist = (xClip - a.x) / xd;
+      if (yClip !== 999) yDist = (yClip - a.y) / yd;
+      if (zClip !== 999) zDist = (zClip - a.z) / zd;
+
+      let face = 0;
+      if (xDist < yDist && xDist < zDist) {
+        face = xTile1 > xTile0 ? 4 : 5;
+        a.x = xClip;
+        a.y += yd * xDist;
+        a.z += zd * xDist;
+      } else if (yDist < zDist) {
+        face = yTile1 > yTile0 ? 0 : 1;
+        a.x += xd * yDist;
+        a.y = yClip;
+        a.z += zd * yDist;
+      } else {
+        face = zTile1 > zTile0 ? 2 : 3;
+        a.x += xd * zDist;
+        a.y += yd * zDist;
+        a.z = zClip;
+      }
+
+      const tPos = new Vec3(a.x, a.y, a.z);
+      xTile0 = Mth.floor(tPos.x = a.x);
+      if (face === 5) { xTile0--; tPos.x++; }
+      yTile0 = Mth.floor(tPos.y = a.y);
+      if (face === 1) { yTile0--; tPos.y++; }
+      zTile0 = Mth.floor(tPos.z = a.z);
+      if (face === 3) { zTile0--; tPos.z++; }
+
+      const t = this.getTile(xTile0, yTile0, zTile0);
+      const data = this.getData(xTile0, yTile0, zTile0);
+      const tile = Tile_tiles[t];
+
+      if (solidOnly && tile && tile.getAABB(this as never, xTile0, yTile0, zTile0) === null) {
+        // No collision — skip
+      } else if (t > 0 && tile && tile.mayPickWithData(data, liquid)) {
+        if (xTile0 >= 0 && zTile0 >= 0 && xTile0 < 256 && zTile0 < 256) {
+          const r = (tile as unknown as {
+            clip: (lvl: Level, x: number, y: number, z: number, a: Vec3, b: Vec3) => HitResult;
+          }).clip(this as never, xTile0, yTile0, zTile0, a, b);
+          if (r.isHit()) return r;
         }
       }
-      if (a.x === b.x && a.y === b.y && a.z === b.z) return new HitResult();
-      // Step DDA toward b
-      const step = new Vec3(b.x - a.x, b.y - a.y, b.z - a.z);
-      const tX = step.x !== 0 ? (Math.sign(step.x) > 0 ? (Math.floor(a.x) + 1 - a.x) / step.x : (a.x - Math.floor(a.x)) / -step.x) : Infinity;
-      const tY = step.y !== 0 ? (Math.sign(step.y) > 0 ? (Math.floor(a.y) + 1 - a.y) / step.y : (a.y - Math.floor(a.y)) / -step.y) : Infinity;
-      const tZ = step.z !== 0 ? (Math.sign(step.z) > 0 ? (Math.floor(a.z) + 1 - a.z) / step.z : (a.z - Math.floor(a.z)) / -step.z) : Infinity;
-      let tMin = Math.min(tX, tY, tZ);
-      if (tMin === Infinity) return new HitResult();
-      a = new Vec3(a.x + step.x * tMin, a.y + step.y * tMin, a.z + step.z * tMin);
     }
     return new HitResult();
   }
