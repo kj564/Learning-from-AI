@@ -1,8 +1,13 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
-// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
-// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+// ============================================================
+// LibreChat-style AI Workspace — Prisma schema (SQLite)
+// ============================================================
+//
+// Persists: assistants, knowledge docs, projects + documents,
+// conversations + messages.
+//
+// Note: SQLite has no native list/array type, so JSON-encoded
+// strings are used for tool whitelists, tags, etc. (per project rule).
+// ============================================================
 
 generator client {
   provider = "prisma-client-js"
@@ -13,20 +18,81 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-model User {
-  id        String   @id @default(cuid())
-  email     String   @unique
-  name      String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+// === Assistants (Onyx-style) ===
+model Assistant {
+  id           String   @id @default(cuid())
+  name         String
+  description  String   @default("")
+  systemPrompt String   @default("")
+  model        String   @default("default")
+  tools        String   @default("[]") // JSON array of tool names
+  knowledgeIds String   @default("[]") // JSON array of KnowledgeDoc ids
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 }
 
-model Post {
+// === Knowledge base (Onyx-style RAG-lite) ===
+model KnowledgeDoc {
   id        String   @id @default(cuid())
   title     String
-  content   String?
-  published Boolean  @default(false)
-  authorId  String
+  source    String
+  content   String
+  tags      String   @default("[]") // JSON array of strings
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  @@index([title])
+}
+
+// === Projects + Documents ===
+model Project {
+  id           String   @id @default(cuid())
+  name         String
+  description  String   @default("")
+  instructions String   @default("")
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  documents Document[]
+}
+
+model Document {
+  id        String   @id @default(cuid())
+  projectId String
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  name      String
+  type      String   @default("text") // code | text | instruction | config
+  content   String   @default("")
+  language  String?
+  updatedAt DateTime @updatedAt
+
+  @@index([projectId])
+}
+
+// === Conversations + Messages (server-side chat persistence) ===
+model Conversation {
+  id          String   @id @default(cuid())
+  title       String   @default("New Chat")
+  model       String   @default("default")
+  assistantId String?
+  projectId   String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  messages Message[]
+
+  @@index([updatedAt])
+}
+
+model Message {
+  id             String   @id @default(cuid())
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  role           String // user | assistant | system
+  content        String   @default("")
+  toolExecutions String   @default("[]") // JSON array
+  sessionId      String? // server-side /api/chat session id (for tool history)
+  createdAt      DateTime @default(now())
+
+  @@index([conversationId])
 }
