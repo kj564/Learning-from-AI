@@ -5,6 +5,9 @@
 import { Tile, SHAPE_ROWS } from './Tile';
 import { Material } from '../material/Material';
 import { Tiles } from './Tiles';
+import { Item } from '../../item/Item';
+import { ItemEntity } from '../../entity/item/ItemEntity';
+import { ItemInstance } from '../../item/ItemInstance';
 
 export class CropTile extends Tile {
   constructor(id: number, tex: number) {
@@ -89,7 +92,7 @@ export class CropTile extends Tile {
 
   getRenderShape(): number { return SHAPE_ROWS; }
 
-  // CropTile.cpp:113 — spawnResources — verbatim (mod Item::seeds_wheat)
+  // CropTile.cpp:113 — spawnResources — verbatim (now with Item::seeds_wheat wired)
   spawnResources(level: {
     isClientSide: boolean;
     random: { nextInt(n: number): number; nextFloat(): number };
@@ -105,17 +108,16 @@ export class CropTile extends Tile {
       const yo = level.random.nextFloat() * s + (1 - s) * 0.5;
       const zo = level.random.nextFloat() * s + (1 - s) * 0.5;
       // C++: new ItemEntity(level, x+xo, y+yo, z+zo, ItemInstance(Item::seeds_wheat))
-      // Item::seeds_wheat deferred. Without Item port we can't spawn the seed entity.
-      void xo; void yo; void zo;
+      const item = new ItemEntity(level as never, x + xo, y + yo, z + zo, new ItemInstance(Item.seeds_wheat!, 1, 0));
+      item.throwTime = 10;
+      level.addEntity(item);
     }
   }
 
-  // CropTile.cpp:132 — getResource
+  // CropTile.cpp:132 — getResource — now wired
   getResource(data: number, _random: unknown): number {
     if (data === 7) {
-      // C++: return Item::wheat->id;
-      // Item::wheat deferred.
-      return -1;
+      return Item.wheat!.id;
     }
     return -1;
   }

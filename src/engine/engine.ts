@@ -53,6 +53,7 @@ import {
 } from './core/core-types';
 import { initMaterials } from './world/level/material/Material';
 import { initTiles } from './world/level/tile/tile-registry';
+import { Item } from './world/item/Item';
 import { Tiles } from './world/level/tile/Tiles';
 import { TicksPerSecond } from './shared/SharedConstants';
 import { Mth } from './util/Mth';
@@ -63,6 +64,7 @@ function ensureRegistry() {
   if (registryInit) return;
   initMaterials();
   initTiles();
+  Item.initItems();
   registryInit = true;
 }
 

@@ -6,6 +6,8 @@ import { Tile, SHAPE_CROSS_TEXTURE, RENDERLAYER_ALPHATEST } from './Tile';
 import { Material } from '../material/Material';
 import { Tiles } from './Tiles';
 import { ItemInstance } from '../../item/ItemInstance';
+import { Item } from '../../item/Item';
+import { AABB } from '../../phys/AABB';
 
 export class ReedTile extends Tile {
   constructor(id: number, tex: number) {
@@ -80,10 +82,9 @@ export class ReedTile extends Tile {
     return null;
   }
 
-  // ReedTile.h:61 — getResource → Item::reeds->id (deferred)
+  // ReedTile.h:61 — getResource → Item::reeds->id (now wired)
   getResource(_data: number, _random: unknown): number {
-    // C++: return Item::reeds->id; (Item port deferred)
-    return -1;
+    return Item.reeds!.id;
   }
 
   blocksLight(): boolean { return false; }
@@ -92,7 +93,7 @@ export class ReedTile extends Tile {
   getRenderShape(): number { return SHAPE_CROSS_TEXTURE; }
   getRenderLayer(): number { return RENDERLAYER_ALPHATEST; }
 
-  // ReedTile.h:79 — checkAlive — verbatim
+  // ReedTile.h:79 — checkAlive — verbatim (now with Item::reeds wired)
   private checkAlive(level: {
     getTile(x: number, y: number, z: number): number;
     getMaterial(x: number, y: number, z: number): Material;
@@ -100,13 +101,8 @@ export class ReedTile extends Tile {
     popResource(level: unknown, x: number, y: number, z: number, itemInstance: unknown): void;
   }, x: number, y: number, z: number): void {
     if (!this.canSurvive(level as never, x, y, z)) {
-      // C++: popResource(level, x, y, z, ItemInstance(Item::reeds))
-      // Item::reeds deferred. Without Item port we can't pop a Reed item.
-      // This is a documented gap.
-      void ItemInstance;
+      this.popResource(level as never, x, y, z, new ItemInstance(Item.reeds!, 1, 0));
       level.setTile(x, y, z, 0);
     }
   }
 }
-
-import { AABB } from '../../phys/AABB';
