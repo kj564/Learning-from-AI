@@ -196,5 +196,3 @@ export class GameRenderer {
   updateAllChunks(): void {}
   pick(_a: number): void {}
 }
-
-void Mth; void Vec3;

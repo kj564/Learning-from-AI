@@ -295,5 +295,3 @@ export class Player extends Mob {
   canDestroy(tile: { destroySpeed: number }): boolean { return tile.destroySpeed >= 0; }
   getDestroySpeed(_tile: unknown): number { return 1; }
 }
-
-void Mth;

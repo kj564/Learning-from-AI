@@ -42,6 +42,9 @@ import { MouseBuildInput } from './client/player/input/MouseBuildInput';
 import { BuildActionIntention } from './client/player/input/IBuildInput';
 import { MouseHandler } from './client/MouseHandler';
 import { GameRenderer } from './client/renderer/GameRenderer';
+import { LevelRenderer } from './client/renderer/LevelRenderer';
+import { Minecraft } from './client/Minecraft';
+import { CreativeMode } from './client/gamemode/CreativeMode';
 import { defaultOptions, KeyMapping, type OptionsConfig } from './client/Options';
 import { buildChunkMesh } from './render/chunk-mesh';
 import {
@@ -83,6 +86,9 @@ export class Engine {
   private mouseBuildInput: MouseBuildInput;
   private mouseHandler: MouseHandler;
   private gameRenderer: GameRenderer;
+  private levelRenderer: LevelRenderer | null = null;
+  private minecraft: Minecraft | null = null;
+  private gameMode: CreativeMode | null = null;
 
   private running = false;
   private lastFrameTime = 0;
@@ -172,6 +178,50 @@ export class Engine {
     // Position player above terrain — same as MCPE default spawn behavior
     this.player.setPos(8, 80, 8);
     this.player.setRot(0, 0);
+
+    // === Wire up Minecraft orchestrator + LevelRenderer + CreativeMode ===
+    // (The Minecraft class dispatches tick + tickInput + handleBuildAction;
+    //  LevelRenderer tracks the dirty-chunk queue; CreativeMode owns block
+    //  break/place policy.)
+    this.gameMode = new CreativeMode({
+      level: this.level,
+      player: this.player,
+      cameraTargetPlayer: this.player,
+      gameRenderer: this.gameRenderer,
+      inputHolder: { getMoveInput: () => this.keyboardInput, getTurnInput: () => this.mouseTurnInput, getBuildInput: () => this.mouseBuildInput },
+      mouseHandler: this.mouseHandler,
+      options: this.options,
+      gui: {
+        tick: () => {},
+        isInside: () => false,
+        handleClick: () => {},
+        handleKeyPressed: () => {},
+        getNumSlots: () => HOTBAR_SLOTS + 1,
+        render: () => {},
+      },
+    } as never);
+
+    this.minecraft = new Minecraft({
+      level: this.level,
+      player: this.player,
+      cameraTargetPlayer: this.player,
+      gameRenderer: this.gameRenderer,
+      inputHolder: { getMoveInput: () => this.keyboardInput, getTurnInput: () => this.mouseTurnInput, getBuildInput: () => this.mouseBuildInput },
+      mouseHandler: this.mouseHandler,
+      options: this.options,
+      gui: {
+        tick: () => {},
+        isInside: () => false,
+        handleClick: () => {},
+        handleKeyPressed: () => {},
+        getNumSlots: () => HOTBAR_SLOTS + 1,
+        render: () => {},
+      },
+      gameMode: this.gameMode,
+    });
+
+    this.levelRenderer = new LevelRenderer({ options: this.options, cameraTargetPlayer: this.player });
+    this.levelRenderer.setLevel(this.level, this.world, this.renderer);
   }
 
   async start(): Promise<boolean> {
@@ -346,41 +396,52 @@ export class Engine {
     if (lz === CHUNK_SIZE - 1) this.dirtyChunks.add(`${cx},${cz + 1}`);
   }
 
-  // === Fixed-timestep tick (20 tps) ===
+  // === Fixed-timestep tick (20 tps) — delegates to Minecraft::tick + LocalPlayer.tick ===
   tick(): void {
-    // Update mouse grabbed state on the gameRenderer
-    (this.gameRenderer as unknown as { mc: { mouseGrabbed: boolean } }).mc.mouseGrabbed = this.pointerLocked;
+    if (this.minecraft) {
+      // Sync mouse grabbed state into Minecraft
+      this.minecraft.mouseGrabbed = this.pointerLocked;
+    }
     this.mouseBuildInput.setButtonStates(this.leftMouseDown, this.rightMouseDown);
 
-    // LocalPlayer.tick drives aiStep which reads IMoveInput + ITurnInput + IBuildInput
+    // Update hitResult via Mob::pick(5, 1) every tick the player is interacting.
+    if (this.leftMouseDown || this.rightMouseDown) {
+      const hit = this.player.pick(5, 1);
+      if (this.minecraft) this.minecraft.setHitResult(hit);
+    }
+
+    // Build-action dispatch via Minecraft.handleBuildAction (drives the
+    // creative-mode destroy-block path that's translated from CreativeMode.cpp).
+    if (this.minecraft && (this.leftMouseDown || this.rightMouseDown)) {
+      const has = this.mouseBuildInput.tickBuild(this.player, this.bai);
+      if (has) this.minecraft.handleBuildAction(this.bai);
+    }
+
+    // Player tick — drives LocalPlayer.tick → Mob::tick → aiStep → travel
     this.player.tick();
 
-    // Apply turn-input deltas from MouseTurnInput → player.yaw/pitch (in degrees,
-    // matching Entity::turn which uses deg * 0.15 internal scale)
+    // Apply mouse-turn input → player.turn (in degrees; Mob::turn multiplies by 0.15).
     if (this.pointerLocked) {
       const td = this.mouseTurnInput.getTurnDelta();
       if (td.x !== 0 || td.y !== 0) {
-        // MouseHandler.xd/yd are the raw deltas. GameRenderer applies them via
-        // ss = sensitivity * 0.6 + 0.2; sens = ss^3 * 8; xo = xd * sens * 4.
-        // We replicate that formula here (Entity::turn multiplies by 0.15 inside).
         const ss = this.options.sensitivity * 0.6 + 0.2;
         const sens = ss * ss * ss * 8;
         const xo = td.x * sens * 4;
         const yo = td.y * sens * 4;
-        // Convert to deg → player.turn expects deg
-        // (Player.yRot/xRot are in degrees; Mob::turn deg*=0.15)
         this.player.turn(xo, yo);
       }
     }
 
-    // Block interaction (creative-mode instant break + place)
-    this.breakCooldown -= TICK_DT / 1000;
-    this.placeCooldown -= TICK_DT / 1000;
-    if (this.leftMouseDown && this.breakCooldown <= 0) this.breakBlockNow();
-    if (this.rightMouseDown && this.placeCooldown <= 0) this.placeBlockNow();
-
     // Level tick (drives time-of-day + sky darken + entity ticks)
     this.level.tick();
+
+    // LevelRenderer.tick (frame counter) + rebuild dirty chunks via updateDirtyChunks.
+    if (this.levelRenderer) {
+      this.levelRenderer.tick();
+      if (this.levelRenderer.isDirty()) {
+        this.levelRenderer.updateDirtyChunks(this.player, false);
+      }
+    }
     void TicksPerSecond; void Mth;
   }
 
