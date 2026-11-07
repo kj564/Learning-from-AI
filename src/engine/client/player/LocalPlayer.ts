@@ -121,22 +121,18 @@ export class LocalPlayer extends Player {
     if (this.interpolateOnly()) this.updateAi();
   }
 
-  // Hoisted Mob::aiStep body — Mob's aiStep drives input/travel/push.
-  // Since Player::aiStep overrides but doesn't chain super (only adds player-specific
-  // bookkeeping), LocalPlayer must call Mob's aiStep separately, then Player's.
-  // We replicate Mob::aiStep's body here because TS has no clean "call this class's
-  // grandparent method" syntax.
+  // LocalPlayer.cpp aiStep calls Mob::aiStep then Player::aiStep (super::aiStep).
+  // In TS, Player.aiStep overrides Mob.aiStep — so we need to call BOTH.
+  // We do this by calling the parent (Player) which has the player-specific logic,
+  // and manually invoking the Mob portion via direct method reference.
+  // The C++ source does: Mob::aiStep(); super::aiStep(); — we mirror that
+  // by extracting the Mob::aiStep body into a separate callable.
   private mobAiStep(): void {
-    const Mob = Object.getPrototypeOf(Object.getPrototypeOf(this)) as unknown as { aiStep: () => void };
-    // Find Mob's aiStep via prototype traversal (skip Player's).
-    // Walk up the chain until we hit a class whose aiStep !== this class's.
-    let proto = Object.getPrototypeOf(this);
-    while (proto && proto.constructor.name === 'LocalPlayer') proto = Object.getPrototypeOf(proto);
-    while (proto && proto.constructor.name === 'Player') proto = Object.getPrototypeOf(proto);
-    if (proto && typeof (proto as { aiStep?: () => void }).aiStep === 'function') {
-      (proto as { aiStep: () => void }).aiStep.call(this);
+    // Get the Mob prototype's aiStep and call it with `this` as context
+    const MobProto = Object.getPrototypeOf(Object.getPrototypeOf(Object.getPrototypeOf(this)));
+    if (MobProto && typeof MobProto.aiStep === 'function') {
+      MobProto.aiStep.call(this);
     }
-    void Mob;
   }
 
   // === LocalPlayer::tick — partial (network + inventory bits stubbed) ===

@@ -636,12 +636,69 @@ export abstract class Entity {
     }
   }
 
-  // NBT save/load stubs — defer until CompoundTag port
-  save(_tag: unknown): boolean { return false; }
-  saveWithoutId(_tag: unknown): void {}
-  load(_tag: unknown): boolean { return false; }
-  protected abstract readAdditionalSaveData(_tag: unknown): void;
-  protected abstract addAdditonalSaveData(_tag: unknown): void;
+  // Entity.cpp save — verbatim
+  save(entityTag: CompoundTag): boolean {
+    const id = this.getEntityTypeId();
+    if (this.removed || id === 0) return false;
+    entityTag.putInt('id', id);
+    this.saveWithoutId(entityTag);
+    return true;
+  }
+  // Entity.cpp saveWithoutId — verbatim
+  saveWithoutId(entityTag: CompoundTag): void {
+    const pos = new ListTag();
+    pos.add(new FloatTag('', this.x));
+    pos.add(new FloatTag('', this.y));
+    pos.add(new FloatTag('', this.z));
+    entityTag.putCompound('Pos', pos);
+    const motion = new ListTag();
+    motion.add(new FloatTag('', this.xd));
+    motion.add(new FloatTag('', this.yd));
+    motion.add(new FloatTag('', this.zd));
+    entityTag.putCompound('Motion', motion);
+    const rotation = new ListTag();
+    rotation.add(new FloatTag('', this.yRot));
+    rotation.add(new FloatTag('', this.xRot));
+    entityTag.putCompound('Rotation', rotation);
+    entityTag.putFloat('FallDistance', this.fallDistance);
+    entityTag.putShort('Fire', this.onFire);
+    entityTag.putShort('Air', this.airSupply);
+    entityTag.putBoolean('OnGround', this.onGround);
+    this.addAdditonalSaveData(entityTag);
+  }
+  // Entity.cpp load — verbatim
+  load(tag: CompoundTag): boolean {
+    const pos = tag.getList('Pos');
+    const motion = tag.getList('Motion');
+    const rotation = tag.getList('Rotation');
+    this.setPos(0, 0, 0);
+    this.xd = pos.getFloat(0);
+    this.yd = pos.getFloat(1);
+    this.zd = pos.getFloat(2);
+    if (Math.abs(this.xd) > 10.0) this.xd = 0;
+    if (Math.abs(this.yd) > 10.0) this.yd = 0;
+    if (Math.abs(this.zd) > 10.0) this.zd = 0;
+    let xx = pos.getFloat(0);
+    let yy = pos.getFloat(1);
+    let zz = pos.getFloat(2);
+    const padding = this.bbWidth * 0.5 + 0.001;
+    xx = Mth.clamp(xx, padding, 256 - padding);
+    zz = Mth.clamp(zz, padding, 256 - padding);
+    this.xo = this.xOld = this.x = xx;
+    this.yo = this.yOld = this.y = yy;
+    this.zo = this.zOld = this.z = zz;
+    this.yRotO = this.yRot = rotation.getFloat(0) % 360.0;
+    this.xRotO = this.xRot = rotation.getFloat(1) % 360.0;
+    this.fallDistance = tag.getFloat('FallDistance');
+    this.onFire = tag.getShort('Fire');
+    this.airSupply = tag.getShort('Air');
+    this.onGround = tag.getBoolean('OnGround');
+    this.setPos(this.x, this.y, this.z);
+    this.readAdditionalSaveData(tag);
+    return (tag.errorState === 0);
+  }
+  protected abstract readAdditionalSaveData(_tag: CompoundTag): void;
+  protected abstract addAdditonalSaveData(_tag: CompoundTag): void;
 
   getEntityData(): unknown { return null; }
   isEntityType(type: number): boolean { return this.getEntityTypeId() === type; }

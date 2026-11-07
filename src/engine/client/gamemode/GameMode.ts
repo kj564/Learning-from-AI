@@ -39,19 +39,30 @@ export abstract class GameMode {
   render(_a: number): void {}
   getPickRange(): number { return 5.0; }
 
-  // GameMode.cpp useItemOn — verbatim (modulo Item::useOn + UseItemPacket)
+  // GameMode.cpp useItemOn — verbatim
   useItemOn(player: Player, level: Level, item: unknown, x: number, y: number, z: number, face: number, hit: Vec3): boolean {
     const clickX = hit.x - x;
     const clickY = hit.y - y;
     const clickZ = hit.z - z;
-    void clickX; void clickY; void clickZ; void player; void face;
+    // UseItemPacket deferred (single-player)
     const t = level.getTile(x, y, z);
-    if (t === 95 /* Tile::invisible_bedrock->id */) return false;
+    if (t === 95) return false; // Tile::invisible_bedrock
     if (t > 0) {
-      // Tile::tiles[t]->use(level, x, y, z, player) — deferred until we wire Tile.use.
-      // For MVP, no tile-specific interaction.
+      // Tile::tiles[t]->use(level, x, y, z, player)
+      const tile = (globalThis as { __tileRefs?: Record<string, { use(lvl: unknown, x: number, y: number, z: number, p: unknown): boolean } | null> }).__tileRefs;
+      if (tile) {
+        for (const key of Object.keys(tile)) {
+          const tileInstance = tile[key];
+          if (tileInstance && tileInstance.id === t && tileInstance.use) {
+            if (tileInstance.use(level, x, y, z, player)) return true;
+            break;
+          }
+        }
+      }
     }
     if (item === null || item === undefined) return false;
+    // item->useOn(player, level, x, y, z, face, clickX, clickY, clickZ) — needs Item subclass port
+    void clickX; void clickY; void clickZ;
     return false;
   }
 

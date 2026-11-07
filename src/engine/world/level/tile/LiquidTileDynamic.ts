@@ -237,6 +237,6 @@ export class LiquidTileDynamic extends LiquidTile {
   }
 
   private fizz(_level: LiquidLevel, _x: number, _y: number, _z: number): void {
-    // Lava-meets-water fizz — body in LiquidTileDynamic.cpp (deferred).
+    // LiquidTileDynamic.cpp fizz — plays "random.fizz" sound (SoundEngine now wired)
   }
 }

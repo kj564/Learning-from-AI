@@ -34,6 +34,9 @@ import { Mth } from '../../util/Mth';
 import { Random } from '../../util/Random';
 import { Vec3 } from '../phys/Vec3';
 import { HitResult } from '../phys/AABB';
+import { MoveControl, JumpControl } from './ai/control/MoveControl';
+import { Sensing } from './ai/control/MoveControl';
+import { GoalSelector } from './ai/goal/GoalSelector';
 import { TicksPerSecond } from '../../shared/SharedConstants';
 import { tiles as Tile_tiles } from '../level/tile/Tile';
 
@@ -68,6 +71,11 @@ export class Mob extends Entity {
   removeArrowTime = 0;
   random: Random;
   bypassArmor = false;
+  moveControl: MoveControl;
+  jumpControl: JumpControl;
+  sensing: Sensing;
+  goalSelector: GoalSelector;
+  targetSelector: GoalSelector;
 
   // === Protected fields ===
   protected entityData: unknown = null;
@@ -110,6 +118,11 @@ export class Mob extends Entity {
   constructor(level: EntityLevel | null) {
     super(level);
     this.random = new Random();
+    this.moveControl = new MoveControl(this);
+    this.jumpControl = new JumpControl(this);
+    this.sensing = new Sensing(this);
+    this.goalSelector = new GoalSelector();
+    this.targetSelector = new GoalSelector();
     this._init();
   }
 
@@ -436,7 +449,12 @@ export class Mob extends Entity {
   protected dropDeathLoot(): void {}
   protected isImmobile(): boolean { return this.health <= 0; }
   protected updateAi(): void {}
-  protected newServerAiStep(): void {}
+  protected newServerAiStep(): void {
+    // Mob.cpp newServerAiStep — ticks GoalSelectors
+    this.goalSelector.tick();
+    this.targetSelector.tick();
+    this.sensing.tick();
+  }
   protected setSize(w: number, h: number): void { super.setSize(w, h); }
   protected getMaxHeadXRot(): number { return 40; }
   protected getSoundVolume(): number { return 1; }
@@ -456,7 +474,15 @@ export class Mob extends Entity {
   setSharedFlag(_flag: number, _value: boolean): void {}
   checkDespawn(_nearestBlocking?: Mob): void {}
   updateAttackAnim(): void {}
-  updateWalkAnim(): void {}
+  updateWalkAnim(): void {
+    // Mob.cpp updateWalkAnim — animStep interpolation
+    this.walkAnimSpeedO = this.walkAnimSpeed;
+    const xd = this.x - this.xo;
+    const zd = this.z - this.zo;
+    const dist = Math.sqrt(xd * xd + zd * zd);
+    this.walkAnimSpeed += (dist - this.walkAnimSpeed) * 0.4;
+    this.walkAnimPos += this.walkAnimSpeed;
+  }
   lookAt(_e: Entity, _yMax: number, _xMax: number): void {}
   isLookingAtAnEntity(): boolean { return false; }
 
