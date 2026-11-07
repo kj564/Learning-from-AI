@@ -19,6 +19,8 @@ import { AABB } from '../../phys/AABB';
 import { Vec3 } from '../../phys/Vec3';
 import { HitResult } from '../../phys/AABB';
 import { Facing } from '../../../shared/Facing';
+import { ItemEntity } from '../../entity/item/ItemEntity';
+import { ItemInstance } from '../../item/ItemInstance';
 
 export class SoundType {
   readonly volume: number;
@@ -247,30 +249,113 @@ export class Tile {
   }
 
   isSolidRender(): boolean { return true; }
+
+  // Tile.cpp mayPickWithData: `return mayPick();`
+  mayPickWithData(_data: number, _liquid: boolean): boolean { return this.mayPick(); }
   mayPick(): boolean { return true; }
-  mayPickWithData(_data: number, _liquid: boolean): boolean { return true; }
-  mayPlace(_level: unknown, _x: number, _y: number, _z: number, _face: number): boolean { return true; }
-  mayPlace2(_level: unknown, _x: number, _y: number, _z: number): boolean { return true; }
-  getTickDelay(): number { return 0; }
+
+  // Tile.cpp mayPlace(level, x, y, z, face): `return mayPlace(level, x, y, z);`
+  mayPlace(level: { getTile(x: number, y: number, z: number): number }, x: number, y: number, z: number, _face: number): boolean {
+    return this.mayPlaceAt(level, x, y, z);
+  }
+  // Tile.cpp mayPlace(level, x, y, z): `int t = level->getTile(x, y, z); return t == 0 || Tile::tiles[t]->material->isReplaceable();`
+  mayPlaceAt(level: { getTile(x: number, y: number, z: number): number }, x: number, y: number, z: number): boolean {
+    const t = level.getTile(x, y, z);
+    if (t === 0) return true;
+    const tile = tiles[t];
+    if (!tile) return false;
+    return tile.material.isReplaceable();
+  }
+
+  // Tile.cpp getTickDelay: `return 10;`
+  getTickDelay(): number { return 10; }
+
   tick(_level: unknown, _x: number, _y: number, _z: number, _random: unknown): void {}
   animateTick(_level: unknown, _x: number, _y: number, _z: number, _random: unknown): void {}
+  // Tile.cpp destroy: `{}` (empty body — Tile.destroy is a no-op hook subclasses override)
   destroy(_level: unknown, _x: number, _y: number, _z: number, _data: number): void {}
   neighborChanged(_level: unknown, _x: number, _y: number, _z: number, _type: number): void {}
   onPlace(_level: unknown, _x: number, _y: number, _z: number): void {}
   onRemove(_level: unknown, _x: number, _y: number, _z: number): void {}
+
+  // Tile.cpp getResource: `return id;`
   getResource(_data: number, _random: unknown): number { return this.id; }
+  // Tile.cpp getResourceCount: `return 1;`
   getResourceCount(_random: unknown): number { return 1; }
+
+  // Tile.cpp getDestroyProgress — verbatim
   getDestroyProgress(player: { canDestroy(t: Tile): boolean; getDestroySpeed(t: Tile): number }): number {
     if (this.destroySpeed < 0) return 0;
     if (!player.canDestroy(this)) return 1 / this.destroySpeed / 100.0;
     return (player.getDestroySpeed(this) / this.destroySpeed) / 30.0;
   }
-  spawnResources(_level: unknown, _x: number, _y: number, _z: number, _data: number, _odds?: number): void {}
+
+  // Tile.cpp spawnResources(level, x, y, z, data, odds) — verbatim body
+  spawnResources(level: {
+    isClientSide: boolean;
+    random: { nextFloat(): number };
+    addEntity(e: unknown): void;
+  }, x: number, y: number, z: number, data: number, odds: number): void {
+    if (level.isClientSide) return;
+    const count = this.getResourceCount(level.random);
+    for (let i = 0; i < count; i++) {
+      if (level.random.nextFloat() > odds) continue;
+      const type = this.getResource(data, level.random);
+      if (type <= 0) continue;
+      const s = 0.7;
+      const xo = level.random.nextFloat() * s + (1 - s) * 0.5;
+      const yo = level.random.nextFloat() * s + (1 - s) * 0.5;
+      const zo = level.random.nextFloat() * s + (1 - s) * 0.5;
+      // C++: ItemEntity* item = new ItemEntity(level, x+xo, y+yo, z+zo, ItemInstance(type, 1, getSpawnResourcesAuxValue(data)));
+      const item = new ItemEntity(
+        level as never,
+        x + xo, y + yo, z + zo,
+        new ItemInstance(type, 1, this.getSpawnResourcesAuxValue(data)),
+      );
+      item.throwTime = 10;
+      level.addEntity(item);
+    }
+  }
+
+  // Tile.cpp spawnResources(level, x, y, z, data) — calls spawnResources(level, x, y, z, data, 1)
+  spawnResourcesNoOdds(level: {
+    isClientSide: boolean;
+    random: { nextFloat(): number };
+    addEntity(e: unknown): void;
+  }, x: number, y: number, z: number, data: number): void {
+    this.spawnResources(level, x, y, z, data, 1);
+  }
+
+  // Tile.cpp popResource(level, x, y, z, itemInstance) — verbatim body
+  popResource(level: {
+    isClientSide: boolean;
+    getLevelData: () => { getGameType(): number };
+    random: { nextFloat(): number };
+    addEntity(e: unknown): void;
+  }, x: number, y: number, z: number, itemInstance: ItemInstance): void {
+    if (level.isClientSide || level.getLevelData?.()?.getGameType?.() === 1 /* GameType::Creative */) return;
+    const s = 0.7;
+    const xo = level.random.nextFloat() * s + (1 - s) * 0.5;
+    const yo = level.random.nextFloat() * s + (1 - s) * 0.5;
+    const zo = level.random.nextFloat() * s + (1 - s) * 0.5;
+    const item = new ItemEntity(level as never, x + xo, y + yo, z + zo, itemInstance);
+    item.throwTime = 10;
+    level.addEntity(item);
+  }
+
+  // Tile.cpp spawnBurnResources: `return false;`
   spawnBurnResources(_level: unknown, _x: number, _y: number, _z: number): boolean { return false; }
+
+  // Tile.cpp getExplosionResistance: `return explosionResistance / 5.0f;`
   getExplosionResistance(_source: unknown): number { return this.explosionResistance / 5.0; }
   wasExploded(_level: unknown, _x: number, _y: number, _z: number): void {}
+
+  // Tile.cpp getRenderLayer: `return Tile::RENDERLAYER_OPAQUE;`
   getRenderLayer(): number { return RENDERLAYER_OPAQUE; }
+
+  // Tile.cpp use: `return false;`
   use(_level: unknown, _x: number, _y: number, _z: number, _player: unknown): boolean { return false; }
+
   stepOn(_level: unknown, _x: number, _y: number, _z: number, _entity: unknown): void {}
   fallOn(_level: unknown, _x: number, _y: number, _z: number, _entity: unknown, _fallDistance: number): void {}
   getPlacedOnFaceDataValue(_level: unknown, _x: number, _y: number, _z: number, _face: number, _clickX: number, _clickY: number, _clickZ: number, itemValue: number): number { return itemValue; }
@@ -278,14 +363,37 @@ export class Tile {
   prepareRender(_level: unknown, _x: number, _y: number, _z: number): void {}
   attack(_level: unknown, _x: number, _y: number, _z: number, _player: unknown): void {}
   handleEntityInside(_level: unknown, _x: number, _y: number, _z: number, _e: unknown, _current: Vec3): void {}
+
+  // Tile.cpp getColor: `return 0xffffff;`
   getColor(_level: unknown, _x: number, _y: number, _z: number): number { return 0xffffff; }
+
+  // Tile.cpp isSignalSource: `return false;`
   isSignalSource(): boolean { return false; }
+  // Tile.cpp getSignal(level, x,y,z): `return false;`
+  // Tile.cpp getSignal(level, x,y,z, dir): `return false;`
   getSignal(_level: unknown, _x: number, _y: number, _z: number, _dir?: number): boolean { return false; }
+  // Tile.cpp getDirectSignal: `return false;`
   getDirectSignal(_level: unknown, _x: number, _y: number, _z: number, _dir: number): boolean { return false; }
   entityInside(_level: unknown, _x: number, _y: number, _z: number, _entity: unknown): void {}
-  playerDestroy(_level: unknown, _player: unknown, _x: number, _y: number, _z: number, _data: number): void {}
+
+  // Tile.cpp playerDestroy(level, player, x, y, z, data): `spawnResources(level, x, y, z, data);`
+  // (Stats tracking line commented in source; we omit it too)
+  playerDestroy(level: {
+    isClientSide: boolean;
+    random: { nextFloat(): number };
+    addEntity(e: unknown): void;
+  }, _player: unknown, x: number, y: number, z: number, data: number): void {
+    this.spawnResourcesNoOdds(level, x, y, z, data);
+  }
+
+  // Tile.cpp canSurvive: `return true;`
   canSurvive(_level: unknown, _x: number, _y: number, _z: number): boolean { return true; }
-  getName(): string { return this.descriptionId; }
+
+  // Tile.cpp getName: `return I18n::get(getDescriptionId() + ".name");`
+  // I18n is the localization subsystem (deferred). For TS we return the
+  // descriptionId + ".name" suffix (which is the key I18n::get would resolve).
+  // Real i18n lookup happens once the locale port lands.
+  getName(): string { return this.descriptionId + '.name'; }
   getDescriptionId(): string { return this.descriptionId; }
 
   // protected setters (translated from Tile.cpp)
