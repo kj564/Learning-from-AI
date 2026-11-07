@@ -1,0 +1,1500 @@
+=== GrassTile.cpp (54 LoC) ===
+#include "GrassTile.h"
+#include "../material/Material.h"
+#include "../../entity/item/ItemEntity.h"
+
+GrassTile::GrassTile(int id)
+:	super(id, Material::dirt)
+{
+	tex = 3;
+	setTicking(true);
+}
+
+int GrassTile::getTexture( LevelSource* level, int x, int y, int z, int face ) {
+	if (face == 1) return 0;
+	if (face == 0) return 2;
+	const Material* above = level->getMaterial(x, y + 1, z);
+	if (above == Material::topSnow || above == Material::snow) return 4 * 16 + 4;
+	else return 3;
+}
+
+int GrassTile::getTexture( int face, int data ) {
+	if (face == 1) return 0;
+	if (face == 0) return 2;
+	return 3;
+}
+
+int GrassTile::getColor( LevelSource* level, int x, int y, int z ) {
+	//level.getBiomeSource().getBiomeBlock(x, z, 1, 1);
+	//float temp = level.getBiomeSource().temperatures[0];
+	//float rain = level.getBiomeSource().downfalls[0];
+
+	return 0x339933;//GrassColor.get(temp, rain);
+}
+
+void GrassTile::tick( Level* level, int x, int y, int z, Random* random ) {
+	if (level->isClientSide) return;
+
+	if (level->getRawBrightness(x, y + 1, z) < MIN_BRIGHTNESS && level->getMaterial(x, y + 1, z)->blocksLight()) {
+		if (random->nextInt(4) != 0) return;
+		level->setTile(x, y, z, Tile::dirt->id);
+	} else {
+		if (level->getRawBrightness(x, y + 1, z) >= level->MAX_BRIGHTNESS - 6) {
+			int xt = x + random->nextInt(3) - 1;
+			int yt = y + random->nextInt(5) - 3;
+			int zt = z + random->nextInt(3) - 1;
+			if (level->getTile(xt, yt, zt) == Tile::dirt->id && level->getRawBrightness(xt, yt + 1, zt) >= MIN_BRIGHTNESS && !level->getMaterial(xt, yt + 1, zt)->blocksLight()) {
+				level->setTile(xt, yt, zt, Tile::grass->id);
+			}
+		}
+	}
+}
+
+int GrassTile::getResource( int data, Random* random ) {
+	return Tile::dirt->getResource(0, random);
+}
+
+=== HeavyTile.cpp (72 LoC) ===
+#include "HeavyTile.h"
+#include "../Level.h"
+#include "../material/Material.h"
+#include "../../entity/item/FallingTile.h"
+
+bool HeavyTile::instaFall = false;
+
+HeavyTile::HeavyTile( int id, int tex )
+:   super(id, tex, Material::sand)
+{
+}
+
+HeavyTile::HeavyTile( int id, int tex, const Material* material )
+:   super(id, tex, material)
+{
+}
+
+void HeavyTile::onPlace( Level* level, int x, int y, int z ) {
+    level->addToTickNextTick(x, y, z, id, getTickDelay(level));
+}
+
+void HeavyTile::neighborChanged( Level* level, int x, int y, int z, int type ) {
+    level->addToTickNextTick(x, y, z, id, getTickDelay(level));
+}
+
+void HeavyTile::tick( Level* level, int x, int y, int z, Random* random ) {
+    if (!level->isClientSide) {
+        checkSlide(level, x, y, z);
+    }
+}
+
+int HeavyTile::getTickDelay( Level* level ) {
+    return 2;
+}
+
+bool HeavyTile::isFree( Level* level, int x, int y, int z ) {
+    int t = level->getTile(x, y, z);
+    if (t == 0) return true;
+    if (t == ((Tile*)Tile::fire)->id) return true;
+    const Material* material = Tile::tiles[t]->material;
+    if (material == Material::water) return true;
+    if (material == Material::lava) return true;
+    return false;
+}
+
+void HeavyTile::checkSlide( Level* level, int x, int y, int z ) {
+    int x2 = x;
+    int y2 = y;
+    int z2 = z;
+    if (isFree(level, x2, y2 - 1, z2) && y2 >= 0) {
+        int r = 32;
+        if (instaFall || !level->hasChunksAt(x - r, y - r, z - r, x + r, y + r, z + r)) {
+            level->setTile(x, y, z, 0);
+            while (isFree(level, x, y - 1, z) && y > 0)
+                y--;
+            if (y > 0) {
+                level->setTile(x, y, z, id);
+                //level->setTileAndUpdate(x, y, z, id);
+            }
+        } else if (!level->isClientSide) {
+            FallingTile* e = new FallingTile(level, x + 0.5f, y + 0.5f, z + 0.5f, id, level->getData(x, y, z));
+            falling(e);
+            level->addEntity(e);
+        }
+    }
+}
+
+void HeavyTile::falling( FallingTile* entity ) {
+}
+
+void HeavyTile::onLand( Level* level, int xt, int yt, int zt, int data ) {
+}
+
+=== Mushroom.cpp (56 LoC) ===
+#include "Mushroom.h"
+
+Mushroom::Mushroom(int id, int tex)
+:   super(id, tex)
+{
+	float ss = 0.2f;
+	this->setShape(0.5f - ss, 0, 0.5f - ss, 0.5f + ss, ss * 2, 0.5f + ss);
+	this->setTicking(true);
+}
+
+void Mushroom::tick( Level* level, int x, int y, int z, Random* random ) {
+	if(random->nextInt(25) == 0) {
+		int r = 4;
+		int max = 5;
+		for (int xx = x - r; xx <= x + r; xx++)
+		for (int zz = z - r; zz <= z + r; zz++)
+		for (int yy = y - 1; yy <= y + 1; yy++) {
+			if (level->getTile(xx, yy, zz) == id && --max <= 0) return;
+		}
+
+		int x2 = x + random->nextInt(3) - 1;
+		int y2 = y + random->nextInt(2) - random->nextInt(2);
+		int z2 = z + random->nextInt(3) - 1;
+		for (int i = 0; i < 4; i++) {
+			if (level->isEmptyTile(x2, y2, z2) && canSurvive(level, x2, y2, z2)) {
+				x = x2;
+				y = y2;
+				z = z2;
+			}
+			x2 = x + random->nextInt(3) - 1;
+			y2 = y + random->nextInt(2) - random->nextInt(2);
+			z2 = z + random->nextInt(3) - 1;
+		}
+
+		if (level->isEmptyTile(x2, y2, z2) && canSurvive(level, x2, y2, z2)) {
+			level->setTile(x2, y2, z2, id);
+		}
+	}
+}
+
+bool Mushroom::mayPlace( Level* level, int x, int y, int z, unsigned char face ) {
+	return super::mayPlace(level, x, y, z, face) && canSurvive(level, x, y, z);
+}
+
+bool Mushroom::mayPlaceOn( int tile ) {
+	return Tile::solid[tile];
+}
+
+bool Mushroom::canSurvive( Level* level, int x, int y, int z ) {
+	if (y < 0 || y >= LEVEL_HEIGHT/*Level::maxBuildHeight*/)
+        return false;
+
+	int below = level->getTile(x, y - 1, z);
+	return (level->getRawBrightness(x, y, z) < 13 && mayPlaceOn(below));
+}
+
+
+=== BedTile.cpp (213 LoC) ===
+#include "BedTile.h"
+#include "../Level.h"
+#include "../dimension/Dimension.h"
+#include "../../entity/player/Player.h"
+#include "../../Facing.h"
+#include "../../Direction.h"
+
+const int BedTile::HEAD_DIRECTION_OFFSETS[4][2] = {
+	{  0,  1 },
+	{ -1,  0 },
+	{  0, -1 },
+	{  1,  0 }
+};
+
+BedTile::BedTile( int id ) : super(id, 6 + 8 * 16, Material::cloth) {
+	setShape();
+}
+
+bool BedTile::use(Level* level, int x, int y, int z, Player* player) {
+	if(player->isSleeping()) {
+		int dimensionsMatch =  player->bedPosition.x == x  ? 1 : 0;
+		dimensionsMatch += player->bedPosition.y == y ? 1 : 0;
+		dimensionsMatch += player->bedPosition.z == z ? 1 : 0;
+		int maxDistance = Mth::abs(player->bedPosition.x - x);
+		maxDistance = Mth::Max(maxDistance, Mth::abs(player->bedPosition.y - y));
+		maxDistance = Mth::Max(maxDistance, Mth::abs(player->bedPosition.z - z));
+		if(dimensionsMatch >= 2 && maxDistance < 3) {
+			player->stopSleepInBed(false, true, true);
+			return true;
+		}
+	}
+	if(level->isClientSide) return true;
+	int data = level->getData(x, y, z);
+
+	if(!isHeadPiece(data)) {
+		int direction = DirectionalTile::getDirection(data);
+		x += HEAD_DIRECTION_OFFSETS[direction][0];
+		z += HEAD_DIRECTION_OFFSETS[direction][1];
+		if(level->getTile(x, y, z) != id) {
+			return true;
+		}
+		data = level->getData(x, y, z);
+	}
+	if(!level->dimension->mayRespawn()) {
+		float xc = x + 0.5f;
+		float yc = y + 0.5f;
+		float zc = z + 0.5f;
+		level->setTile(x, y, z, 0);
+		int direction = DirectionalTile::getDirection(data);
+		x += HEAD_DIRECTION_OFFSETS[direction][0];
+		y += HEAD_DIRECTION_OFFSETS[direction][1];
+		if(level->getTile(x, y, z) == id) {
+			level->setTile(x, y, z, 0);
+			xc = (xc + x + 0.5f) / 2;
+			yc = (yc + y + 0.5f) / 2;
+			zc = (zc + z + 0.5f) / 2;
+		}
+		level->explode(NULL, x + 0.5f, y + 0.5f, z + 0.5f, 5, true);
+		return true;
+	}
+	if(isOccupied(data)) {
+		Player* sleepingPlayer = NULL;
+		for(PlayerList::iterator i = level->players.begin(); i != level->players.end(); ++i) {
+			if((*i)->isSleeping()) {
+				Pos pos = (*i)->bedPosition;
+				if(pos.x == x && pos.y == y && pos.z == z) {
+					sleepingPlayer = (*i);
+					break;
+				}
+			}
+		}
+		if(sleepingPlayer == NULL) {
+			BedTile::setOccupied(level, x, y, z, false);
+		}
+		else {
+			sleepingPlayer->displayClientMessage("This bed is occupied"/*"tile.bed.occupied"*/);
+			return true;
+		}
+	}
+	int result = player->startSleepInBed(x, y, z);
+	if(result == BedSleepingResult::OK) {
+		BedTile::setOccupied(level, x, y, z, true);
+		return true;
+	}
+	if(result == BedSleepingResult::NOT_POSSIBLE_NOW) {
+		player->displayClientMessage("You can only sleep at night" /*tile.bed.noSleep"*/);
+	} else if(result == BedSleepingResult::NOT_SAFE) {
+		player->displayClientMessage("You may not rest now, there are monsters nearby"/*"tile.bed.notSafe"*/);
+	}
+	return true;
+}
+
+void BedTile::setOccupied( Level* level, int x, int y, int z, bool occupied ) {
+	int data = level->getData(x, y, z);
+	if(occupied) {
+		data |= OCCUPIED_DATA;
+	} else {
+		data &= ~OCCUPIED_DATA;
+	}
+	level->setData(x, y, z, data);
+}
+
+int BedTile::getTexture( int face, int data ) {
+	if(face == Facing::DOWN) {
+		return Tile::wood->tex;
+	}
+	int direction = getDirection(data);
+	int tileFacing = Direction::RELATIVE_DIRECTION_FACING[direction][face];
+	if (isHeadPiece(data)) {
+		if (tileFacing == Facing::NORTH) {
+			return tex + 2 + 16;
+		}
+		if (tileFacing == Facing::EAST || tileFacing == Facing::WEST) {
+			return tex + 1 + 16;
+		}
+		return tex + 1;
+	} else {
+		if (tileFacing == Facing::SOUTH) {
+			return tex - 1 + 16;
+		}
+		if (tileFacing == Facing::EAST || tileFacing == Facing::WEST) {
+			return tex + 16;
+		}
+		return tex;
+	}
+}
+
+int BedTile::getRenderShape() {
+	return Tile::SHAPE_BED;
+}
+
+bool BedTile::isCubeShaped() {
+	return false;
+}
+
+bool BedTile::isSolidRender() {
+	return false;
+}
+
+void BedTile::neighborChanged( Level* level, int x, int y, int z, int type ) {
+	int data = level->getData(x, y, z);
+	int direction = getDirection(data);
+	if(isHeadPiece(data)) {
+		if(level->getTile(x - HEAD_DIRECTION_OFFSETS[direction][0], y, z - HEAD_DIRECTION_OFFSETS[direction][1]) != id) {
+			level->setTile(x, y, z, 0);
+		}
+	} else {
+		if(level->getTile(x + HEAD_DIRECTION_OFFSETS[direction][0], y, z + HEAD_DIRECTION_OFFSETS[direction][1]) != id) {
+			level->setTile(x, y, z, 0);
+			if(!level->isClientSide) {
+				//spawnResources(level, x, y, z, data, 1);
+				popResource(level, x, y, z, ItemInstance(Item::bed));
+			}
+		}
+	}
+}
+
+int BedTile::getResource( int data, Random* random ) {
+	if(isHeadPiece(data)) {
+		return 0;
+	}
+	return Item::bed->id;
+}
+
+bool BedTile::findStandUpPosition( Level* level, int x, int y, int z, int skipCount, Pos& position) {
+	int data = level->getData(x, y, z);
+	int direction = DirectionalTile::getDirection(data);
+	for(int step = 0; step <= 1; ++step) {
+		int startX = x - BedTile::HEAD_DIRECTION_OFFSETS[direction][0] * step - 1;
+		int startZ = z - BedTile::HEAD_DIRECTION_OFFSETS[direction][1] * step - 1;
+		int endX = startX + 2;
+		int endZ = startZ + 2;
+		for(int standX = startX; standX <= endX; ++standX) {
+			for (int standZ = startZ; standZ <= endZ; ++standZ) {
+				if (level->isSolidBlockingTile(standX, y - 1, standZ) && level->isEmptyTile(standX, y, standZ) && level->isEmptyTile(standX, y + 1, standZ)) {
+					if (skipCount > 0) {
+						skipCount--;
+						continue;
+					}
+					position = Pos(standX, y, standZ);
+					return true;
+				}
+			}
+		}
+	}
+	return false;
+}
+
+void BedTile::spawnResources( Level* level, int x, int y, int z, int data, float odds ) {
+	if(!isHeadPiece(data)) {
+		//super::spawnResources(level, x, y, z, data, odds);
+		popResource(level, x, y, z, ItemInstance(Item::bed));
+	}
+}
+
+void BedTile::updateShape( LevelSource* level, int x, int y, int z ) {
+	setShape();
+}
+
+int BedTile::getRenderLayer() {
+	return Tile::RENDERLAYER_ALPHATEST;
+}
+void BedTile::setShape() {
+	super::setShape(0, 0, 0, 1, 9.0f / 16.0f, 1);
+}
+
+bool BedTile::isHeadPiece( int data ) {
+		return (data & HEAD_PIECE_DATA) != 0;
+}
+
+bool BedTile::isOccupied( int data ) {
+	return (data & OCCUPIED_DATA) != 0;
+}
+
+=== TallGrass.cpp (55 LoC) ===
+#include "TallGrass.h"
+#include "../FoliageColor.h"
+#include "../../entity/player/Player.h"
+#include "../../item/Item.h"
+#include "../../item/ShearsItem.h"
+
+TallGrass::TallGrass( int id, int tex ) : super(id, tex, Material::replaceable_plant) {
+	float ss = 0.4f;
+	setShape(0.5f - ss, 0, 0.5f - ss, 0.5f + ss, 0.8f, 0.5f + ss);
+}
+
+int TallGrass::getTexture( int face, int data ) {
+	if(data == TALL_GRASS) return tex;
+	if(data == FERN) return tex + 16 + 1;
+	if(data == DEAD_SHRUB) return tex + 16;
+	return tex;
+}
+
+int TallGrass::getColor() {
+	/*double temp = 0.5;
+	double rain = 1.0;
+	return GrassColor.get(temp, rain);*/
+	return 0x339933;
+}
+
+int TallGrass::getColor( int auxData ) {
+	if(auxData == DEAD_SHRUB) return 0xffffffff;
+	return FoliageColor::getDefaultColor();
+}
+
+int TallGrass::getColor( LevelSource* level, int x, int y, int z ) {
+	int d = level->getData(x, y, z);
+	if (d == DEAD_SHRUB) return 0xffffff;
+
+	return 0x339933;//level->getBiome(x, z)->getGrassColor();
+}
+
+int TallGrass::getResource( int data, Random* random ) {
+	if (random->nextInt(8) == 0) {
+		return Item::seeds_wheat->id;
+	}
+	return -1;
+}
+
+void TallGrass::playerDestroy( Level* level, Player* player, int x, int y, int z, int data ) {
+	if (!level->isClientSide && player->getSelectedItem() != NULL && player->getSelectedItem()->id == Item::shears->id) {
+		//player->awardStat(Stats.blockMined[id], 1);
+
+		// drop leaf block instead of sapling
+		ItemInstance itemInstance(Tile::tallgrass, 1, data);
+		popResource(level, x, y, z, itemInstance);
+	} else {
+		super::playerDestroy(level, player, x, y, z, data);
+	}
+}
+
+=== StoneSlabTile.cpp (155 LoC) ===
+#include "StoneSlabTile.h"
+#include "../../../util/Random.h"
+#include "../material/Material.h"
+#include "../Level.h"
+#include "../../Facing.h"
+
+const std::string StoneSlabTile::SLAB_NAMES[] = {
+	"stone", "sand", "wood", "cobble", "brick", "smoothStoneBrick"
+};
+const int StoneSlabTile::SLAB_NAMES_COUNT = sizeof(SLAB_NAMES) / sizeof(std::string);
+
+StoneSlabTile::StoneSlabTile(int id, bool fullSize)
+:	Tile(id, 6, Material::stone)
+{
+    this->fullSize = fullSize;
+
+    if (!fullSize) {
+        setShape(0, 0, 0, 1, 0.5f, 1);
+    }
+    setLightBlock(255);
+}
+
+void StoneSlabTile::updateShape(LevelSource* level, int x, int y, int z)
+{
+	if (fullSize) {
+		setShape(0, 0, 0, 1, 1, 1);
+	} else {
+		bool upper = (level->getData(x, y, z) & TOP_SLOT_BIT) != 0;
+		if (upper) {
+			setShape(0, 0.5f, 0, 1, 1, 1);
+		} else {
+			setShape(0, 0, 0, 1, 0.5f, 1);
+		}
+	}
+}
+
+void StoneSlabTile::updateDefaultShape()
+{
+	if (fullSize) {
+		setShape(0, 0, 0, 1, 1, 1);
+	} else {
+		setShape(0, 0, 0, 1, 0.5f, 1);
+	}
+}
+
+int StoneSlabTile::getTexture(int face, int data) {
+	data = data & TYPE_MASK;
+    if (data == STONE_SLAB) {
+        if (face <= 1) return 6;
+        return 5;
+    } else if (data == SAND_SLAB) {
+        if (face == Facing::DOWN) return 13 * 16;
+        if (face == Facing::UP) return 11 * 16;
+        return 12 * 16;
+    } else if (data == WOOD_SLAB) {
+        return 4;
+    } else if (data == COBBLESTONE_SLAB) {
+        return 16;
+	} else if (data == BRICK_SLAB) {
+		return Tile::redBrick->tex;
+	} else if (data == SMOOTHBRICK_SLAB) {
+		return Tile::stoneBrickSmooth->tex;
+	}
+    return 6;
+}
+
+int StoneSlabTile::getTexture(int face) {
+    return getTexture(face, 0);
+}
+
+bool StoneSlabTile::isSolidRender() {
+    return fullSize;
+}
+
+int StoneSlabTile::getPlacedOnFaceDataValue(Level* level, int x, int y, int z, int face, float clickX, float clickY, float clickZ, int itemValue)
+{
+	if (fullSize) return itemValue;
+
+	if (face == Facing::DOWN || (face != Facing::UP && clickY > 0.5)) {
+		return itemValue | TOP_SLOT_BIT;
+	}
+	return itemValue;
+}
+
+/*
+void StoneSlabTile::onPlace(Level* level, int x, int y, int z) {
+    if (this != Tile::stoneSlabHalf) Tile::onPlace(level, x, y, z);
+    int below = level->getTile(x, y - 1, z);
+
+    int myData = level->getData(x, y, z);
+    int belowData = level->getData(x, y - 1, z);
+
+    if (myData != belowData) {
+        return;
+    }
+
+    if (below == Tile::stoneSlabHalf->id) {
+        level->setTile(x, y, z, 0);
+        level->setTileAndData(x, y - 1, z, Tile::stoneSlab->id, myData);
+    }
+}
+*/
+
+int StoneSlabTile::getResource(int data, Random* random) {
+    return Tile::stoneSlabHalf->id;
+}
+
+int StoneSlabTile::getResourceCount(Random* random) {
+    if (fullSize) {
+        return 2;
+    }
+    return 1;
+}
+
+bool StoneSlabTile::isCubeShaped() {
+    return fullSize;
+}
+
+void StoneSlabTile::addAABBs( Level* level, int x, int y, int z, const AABB* box, std::vector<AABB>& boxes ) {
+	updateShape(level, x, y, z);
+	super::addAABBs(level, x, y, z, box, boxes);
+}
+
+static bool isHalfSlab(int tileId) {
+	return tileId == Tile::stoneSlabHalf->id;// || tileId == Tile::woodSlabHalf->id;
+}
+
+bool StoneSlabTile::shouldRenderFace(LevelSource* level, int x, int y, int z, int face) {
+
+	if (fullSize) return super::shouldRenderFace(level, x, y, z, face);
+
+	if (face != Facing::UP && face != Facing::DOWN && !super::shouldRenderFace(level, x, y, z, face)) {
+		return false;
+	}
+
+	int ox = x, oy = y, oz = z;
+	ox += Facing::STEP_X[Facing::OPPOSITE_FACING[face]];
+	oy += Facing::STEP_Y[Facing::OPPOSITE_FACING[face]];
+	oz += Facing::STEP_Z[Facing::OPPOSITE_FACING[face]];
+
+	bool isUpper = (level->getData(ox, oy, oz) & TOP_SLOT_BIT) != 0;
+	if (isUpper) {
+		if (face == Facing::DOWN) return true;
+		if (face == Facing::UP && super::shouldRenderFace(level, x, y, z, face)) return true;
+		return !(isHalfSlab(level->getTile(x, y, z)) && (level->getData(x, y, z) & TOP_SLOT_BIT) != 0);
+	} else {
+		if (face == Facing::UP) return true;
+		if (face == Facing::DOWN && super::shouldRenderFace(level, x, y, z, face)) return true;
+		return !(isHalfSlab(level->getTile(x, y, z)) && (level->getData(x, y, z) & TOP_SLOT_BIT) == 0);
+	}
+}
+
+int StoneSlabTile::getSpawnResourcesAuxValue(int data) {
+    return data & TYPE_MASK;
+}
+
+=== StairTile.cpp (237 LoC) ===
+#include "../Level.h"
+#include "../../phys/HitResult.h"
+#include "../../phys/Vec3.h"
+#include "../../Facing.h"
+#include "StairTile.h"
+
+const int StairTile::DEAD_SPACES[8][2] = {
+	{2, 6}, {3, 7}, {2, 3}, {6, 7},
+	{0, 4}, {1, 5}, {0, 1}, {4, 5}
+};
+
+int StairTile::getPlacedOnFaceDataValue(Level* level, int x, int y, int z, int face, float clickX, float clickY, float clickZ, int itemValue) {
+	if (face == Facing::DOWN || (face != Facing::UP && clickY > 0.5)) {
+		return itemValue | UPSIDEDOWN_BIT;
+	}
+	return itemValue;
+}
+
+
+bool StairTile::setStepShape(LevelSource* level, int x, int y, int z) {
+    int data = level->getData(x, y, z);
+    int dir = data & 0x3;
+
+    float bottom = 0.5f;
+    float top = 1.0f;
+
+    if ((data & UPSIDEDOWN_BIT) != 0) {
+        bottom = 0;
+        top = .5f;
+    }
+
+    float west = 0;
+    float east = 1;
+    float north = 0;
+    float south = .5f;
+
+    bool checkInnerPiece = true;
+
+    if (dir == DIR_EAST) {
+        west = .5f;
+        south = 1;
+
+        int backTile = level->getTile(x + 1, y, z);
+        int backData = level->getData(x + 1, y, z);
+        if (isStairs(backTile) && ((data & UPSIDEDOWN_BIT) == (backData & UPSIDEDOWN_BIT))) {
+            int backDir = backData & 0x3;
+            if (backDir == DIR_NORTH && !isLockAttached(level, x, y, z + 1, data)) {
+                south = .5f;
+                checkInnerPiece = false;
+            } else if (backDir == DIR_SOUTH && !isLockAttached(level, x, y, z - 1, data)) {
+                north = .5f;
+                checkInnerPiece = false;
+            }
+        }
+    } else if (dir == DIR_WEST) {
+        east = .5f;
+        south = 1;
+
+        int backTile = level->getTile(x - 1, y, z);
+        int backData = level->getData(x - 1, y, z);
+        if (isStairs(backTile) && ((data & UPSIDEDOWN_BIT) == (backData & UPSIDEDOWN_BIT))) {
+            int backDir = backData & 0x3;
+            if (backDir == DIR_NORTH && !isLockAttached(level, x, y, z + 1, data)) {
+                south = .5f;
+                checkInnerPiece = false;
+            } else if (backDir == DIR_SOUTH && !isLockAttached(level, x, y, z - 1, data)) {
+                north = .5f;
+                checkInnerPiece = false;
+            }
+        }
+    } else if (dir == DIR_SOUTH) {
+        north = .5f;
+        south = 1;
+
+        int backTile = level->getTile(x, y, z + 1);
+        int backData = level->getData(x, y, z + 1);
+        if (isStairs(backTile) && ((data & UPSIDEDOWN_BIT) == (backData & UPSIDEDOWN_BIT))) {
+            int backDir = backData & 0x3;
+            if (backDir == DIR_WEST && !isLockAttached(level, x + 1, y, z, data)) {
+                east = .5f;
+                checkInnerPiece = false;
+            } else if (backDir == DIR_EAST && !isLockAttached(level, x - 1, y, z, data)) {
+                west = .5f;
+                checkInnerPiece = false;
+            }
+        }
+    } else if (dir == DIR_NORTH) {
+        int backTile = level->getTile(x, y, z - 1);
+        int backData = level->getData(x, y, z - 1);
+        if (isStairs(backTile) && ((data & UPSIDEDOWN_BIT) == (backData & UPSIDEDOWN_BIT))) {
+            int backDir = backData & 0x3;
+            if (backDir == DIR_WEST && !isLockAttached(level, x + 1, y, z, data)) {
+                east = .5f;
+                checkInnerPiece = false;
+            } else if (backDir == DIR_EAST && !isLockAttached(level, x - 1, y, z, data)) {
+                west = .5f;
+                checkInnerPiece = false;
+            }
+        }
+    }
+
+    setShape(west, bottom, north, east, top, south);
+    return checkInnerPiece;
+}
+
+/*
+    * This method adds an extra 1/8 block if the stairs can attach as an
+    * "inner corner."
+    */
+bool StairTile::setInnerPieceShape(LevelSource* level, int x, int y, int z) {
+    int data = level->getData(x, y, z);
+    int dir = data & 0x3;
+
+    float bottom = 0.5f;
+    float top = 1.0f;
+
+    if ((data & UPSIDEDOWN_BIT) != 0) {
+        bottom = 0;
+        top = .5f;
+    }
+
+    float west = 0;
+    float east = .5f;
+    float north = .5f;
+    float south = 1.0f;
+
+    bool hasInnerPiece = false;
+
+    if (dir == DIR_EAST) {
+        int frontTile = level->getTile(x - 1, y, z);
+        int frontData = level->getData(x - 1, y, z);
+        if (isStairs(frontTile) && ((data & UPSIDEDOWN_BIT) == (frontData & UPSIDEDOWN_BIT))) {
+            int frontDir = frontData & 0x3;
+            if (frontDir == DIR_NORTH && !isLockAttached(level, x, y, z - 1, data)) {
+                north = 0;
+                south = .5f;
+                hasInnerPiece = true;
+            } else if (frontDir == DIR_SOUTH && !isLockAttached(level, x, y, z + 1, data)) {
+                north = .5f;
+                south = 1;
+                hasInnerPiece = true;
+            }
+        }
+    } else if (dir == DIR_WEST) {
+        int frontTile = level->getTile(x + 1, y, z);
+        int frontData = level->getData(x + 1, y, z);
+        if (isStairs(frontTile) && ((data & UPSIDEDOWN_BIT) == (frontData & UPSIDEDOWN_BIT))) {
+            west = .5f;
+            east = 1.0f;
+            int frontDir = frontData & 0x3;
+            if (frontDir == DIR_NORTH && !isLockAttached(level, x, y, z - 1, data)) {
+                north = 0;
+                south = .5f;
+                hasInnerPiece = true;
+            } else if (frontDir == DIR_SOUTH && !isLockAttached(level, x, y, z + 1, data)) {
+                north = .5f;
+                south = 1;
+                hasInnerPiece = true;
+            }
+        }
+    } else if (dir == DIR_SOUTH) {
+        int frontTile = level->getTile(x, y, z - 1);
+        int frontData = level->getData(x, y, z - 1);
+        if (isStairs(frontTile) && ((data & UPSIDEDOWN_BIT) == (frontData & UPSIDEDOWN_BIT))) {
+            north = 0;
+            south = .5f;
+
+            int frontDir = frontData & 0x3;
+            if (frontDir == DIR_WEST && !isLockAttached(level, x - 1, y, z, data)) {
+                hasInnerPiece = true;
+            } else if (frontDir == DIR_EAST && !isLockAttached(level, x + 1, y, z, data)) {
+                west = .5f;
+                east = 1.0f;
+                hasInnerPiece = true;
+            }
+        }
+    } else if (dir == DIR_NORTH) {
+        int frontTile = level->getTile(x, y, z + 1);
+        int frontData = level->getData(x, y, z + 1);
+        if (isStairs(frontTile) && ((data & UPSIDEDOWN_BIT) == (frontData & UPSIDEDOWN_BIT))) {
+            int frontDir = frontData & 0x3;
+            if (frontDir == DIR_WEST && !isLockAttached(level, x - 1, y, z, data)) {
+                hasInnerPiece = true;
+            } else if (frontDir == DIR_EAST && !isLockAttached(level, x + 1, y, z, data)) {
+                west = .5f;
+                east = 1.0f;
+                hasInnerPiece = true;
+            }
+        }
+    }
+
+    if (hasInnerPiece) {
+        setShape(west, bottom, north, east, top, south);
+    }
+    return hasInnerPiece;
+}
+
+HitResult StairTile::clip(Level* level, int xt, int yt, int zt, const Vec3& a, const Vec3& b)
+{
+	HitResult results[8];
+
+	int data = level->getData(xt, yt, zt);
+	int dir = data & 0x3;
+	bool upsideDown = (data & UPSIDEDOWN_BIT) == UPSIDEDOWN_BIT;
+	const int* deadSpaces = (const int*)&DEAD_SPACES[dir + (upsideDown ? 4 : 0)];
+
+	isClipping = true;
+	for (int i = 0; i < 8; i++) {
+		clipStep = i;
+		results[i] = super::clip(level, xt, yt, zt, a, b);
+	}
+	isClipping = false;
+
+	results[deadSpaces[0]] = HitResult();
+	results[deadSpaces[1]] = HitResult();
+
+	HitResult* closest = NULL;
+	double closestDist = 0;
+
+	for (int r = 0; r < 8; r++) {
+		HitResult& result = results[r];
+		if (result.isHit()) {
+			double dist = result.pos.distanceToSqr(b);
+
+			if (dist > closestDist) {
+				closest = &result;
+				closestDist = dist;
+			}
+		}
+	}
+	if (closest == NULL)
+	{
+		return HitResult();
+	}
+
+	return *closest;
+}
+
+=== ChestTile.cpp (321 LoC) ===
+#include "ChestTile.h"
+#include "entity/ChestTileEntity.h"
+#include "../Level.h"
+#include "../material/Material.h"
+#include "../../Facing.h"
+#include "../../entity/item/ItemEntity.h"
+
+ChestTile::ChestTile( int id )
+:	super(id, Material::wood)
+{
+	tex = 10 + 16;
+	const float m = 0.025f;
+	setShape(m, 0, m, 1-m, 1-m-m, 1-m);
+}
+
+bool ChestTile::isSolidRender()
+{
+	return false;
+}
+
+bool ChestTile::isCubeShaped()
+{
+	return false;
+}
+
+int ChestTile::getRenderShape()
+{
+	return super::getRenderShape();
+	//return Tile::SHAPE_ENTITYTILE_ANIMATED;
+}
+
+void ChestTile::onPlace( Level* level, int x, int y, int z )
+{
+	super::onPlace(level, x, y, z);
+	recalcLockDir(level, x, y, z);
+
+	//@fullchest
+	//int n = level->getTile(x, y, z - 1); // face = 2
+	//int s = level->getTile(x, y, z + 1); // face = 3
+	//int w = level->getTile(x - 1, y, z); // face = 4
+	//int e = level->getTile(x + 1, y, z); // face = 5
+	//if (n == id) recalcLockDir(level, x, y, z - 1);
+	//if (s == id) recalcLockDir(level, x, y, z + 1);
+	//if (w == id) recalcLockDir(level, x - 1, y, z);
+	//if (e == id) recalcLockDir(level, x + 1, y, z);
+}
+
+void ChestTile::setPlacedBy( Level* level, int x, int y, int z, Mob* by )
+{
+	int n = level->getTile(x, y, z - 1); // face = 2
+	int s = level->getTile(x, y, z + 1); // face = 3
+	int w = level->getTile(x - 1, y, z); // face = 4
+	int e = level->getTile(x + 1, y, z); // face = 5
+
+	int facing = 0;
+	int dir = (Mth::floor(by->yRot * 4 / (360) + 0.5f)) & 3;
+
+	if (dir == 0) facing = Facing::NORTH;
+	if (dir == 1) facing = Facing::EAST;
+	if (dir == 2) facing = Facing::SOUTH;
+	if (dir == 3) facing = Facing::WEST;
+
+	if (n != id && s != id && w != id && e != id) {
+		level->setData(x, y, z, facing);
+	} else {
+		if ((n == id || s == id) && (facing == Facing::WEST || facing == Facing::EAST)) {
+			if (n == id) level->setData(x, y, z - 1, facing);
+			else level->setData(x, y, z + 1, facing);
+			level->setData(x, y, z, facing);
+		}
+		if ((w == id || e == id) && (facing == Facing::NORTH || facing == Facing::SOUTH)) {
+			if (w == id) level->setData(x - 1, y, z, facing);
+			else level->setData(x + 1, y, z, facing);
+			level->setData(x, y, z, facing);
+		}
+	}
+}
+
+void ChestTile::recalcLockDir( Level* level, int x, int y, int z )
+{
+	if (level->isClientSide)
+		return;
+
+	int n = level->getTile(x, y, z - 1); // face = 2
+	int s = level->getTile(x, y, z + 1); // face = 3
+	int w = level->getTile(x - 1, y, z); // face = 4
+	int e = level->getTile(x + 1, y, z); // face = 5
+
+	// Long!
+	//@fullchest
+	int lockDir = 4;
+	/*
+	if (n == id || s == id) {
+		int w2 = level->getTile(x - 1, y, n == id ? z - 1 : z + 1);
+		int e2 = level->getTile(x + 1, y, n == id ? z - 1 : z + 1);
+
+		lockDir = 5;
+
+		int otherDir = -1;
+		if (n == id) otherDir = level->getData(x, y, z - 1);
+		else otherDir = level->getData(x, y, z + 1);
+		if (otherDir == 4) lockDir = 4;
+
+		if ((Tile::solid[w] || Tile::solid[w2]) && !Tile::solid[e] && !Tile::solid[e2]) lockDir = 5;
+		if ((Tile::solid[e] || Tile::solid[e2]) && !Tile::solid[w] && !Tile::solid[w2]) lockDir = 4;
+	} else if (w == id || e == id) {
+		int n2 = level->getTile(w == id ? x - 1 : x + 1, y, z - 1);
+		int s2 = level->getTile(w == id ? x - 1 : x + 1, y, z + 1);
+
+		lockDir = 3;
+		int otherDir = -1;
+		if (w == id) otherDir = level->getData(x - 1, y, z);
+		else otherDir = level->getData(x + 1, y, z);
+		if (otherDir == 2) lockDir = 2;
+
+		if ((Tile::solid[n] || Tile::solid[n2]) && !Tile::solid[s] && !Tile::solid[s2]) lockDir = 3;
+		if ((Tile::solid[s] || Tile::solid[s2]) && !Tile::solid[n] && !Tile::solid[n2]) lockDir = 2;
+	} else */ {
+		lockDir = level->getData(x, y, z);
+		if ((lockDir == Facing::NORTH && Tile::solid[n])
+		||  (lockDir == Facing::SOUTH && Tile::solid[s])
+		||  (lockDir == Facing::WEST  && Tile::solid[w])
+		||  (lockDir == Facing::EAST  && Tile::solid[e])) {
+			if (Tile::solid[n] && !Tile::solid[s]) lockDir = Facing::SOUTH;
+			if (Tile::solid[s] && !Tile::solid[n]) lockDir = Facing::NORTH;
+			if (Tile::solid[w] && !Tile::solid[e]) lockDir = Facing::EAST;
+			if (Tile::solid[e] && !Tile::solid[w]) lockDir = Facing::WEST;
+		}
+	}
+
+	level->setData(x, y, z, lockDir);
+}
+
+int ChestTile::getTexture( LevelSource* level, int x, int y, int z, int face )
+{
+	if (face == 1) return tex - 1;
+	if (face == 0) return tex - 1;
+
+	/*
+	int n = level->getTile(x, y, z - 1); // face = 2
+	int s = level->getTile(x, y, z + 1); // face = 3
+	int w = level->getTile(x - 1, y, z); // face = 4
+	int e = level->getTile(x + 1, y, z); // face = 5
+	*/
+
+	// Long!
+	//@fullchest
+	/*
+	if (n == id || s == id) { 
+		if (face == 2 || face == 3) return tex;
+		int offs = 0;
+		if (n == id) {
+			offs = -1;
+		}
+
+		int w2 = level->getTile(x - 1, y, n == id ? z - 1 : z + 1);
+		int e2 = level->getTile(x + 1, y, n == id ? z - 1 : z + 1);
+
+		if (face == 4) offs = -1 - offs;
+
+		int lockDir = 5;
+		if ((Tile::solid[w] || Tile::solid[w2]) && !Tile::solid[e] && !Tile::solid[e2]) lockDir = 5;
+		if ((Tile::solid[e] || Tile::solid[e2]) && !Tile::solid[w] && !Tile::solid[w2]) lockDir = 4;
+		return (face == lockDir ? tex + 16 : tex + 32) + offs;
+	} else if (w == id || e == id) {
+		if (face == 4 || face == 5) return tex;
+		int offs = 0;
+		if (w == id) {
+			offs = -1;
+		}
+
+		int n2 = level->getTile(w == id ? x - 1 : x + 1, y, z - 1);
+		int s2 = level->getTile(w == id ? x - 1 : x + 1, y, z + 1);
+
+		if (face == 3) offs = -1 - offs;
+		int lockDir = 3;
+		if ((Tile::solid[n] || Tile::solid[n2]) && !Tile::solid[s] && !Tile::solid[s2]) lockDir = 3;
+		if ((Tile::solid[s] || Tile::solid[s2]) && !Tile::solid[n] && !Tile::solid[n2]) lockDir = 2;
+
+		return (face == lockDir ? tex + 16 : tex + 32) + offs;
+	} else { */
+		//int lockDir = 3;
+		int lockDir = level->getData(x, y, z);
+
+		/*
+		if ((lockDir == Facing::NORTH && Tile::solid[n])
+			||  (lockDir == Facing::SOUTH && Tile::solid[s])
+			||  (lockDir == Facing::WEST  && Tile::solid[w])
+			||  (lockDir == Facing::EAST  && Tile::solid[e])) {
+				if (Tile::solid[n] && !Tile::solid[s]) lockDir = 3;
+				if (Tile::solid[s] && !Tile::solid[n]) lockDir = 2;
+				if (Tile::solid[w] && !Tile::solid[e]) lockDir = 5;
+				if (Tile::solid[e] && !Tile::solid[w]) lockDir = 4;
+		}
+		*/
+
+		/*
+		if (Tile::solid[n] && !Tile::solid[s]) lockDir = 3;
+		if (Tile::solid[s] && !Tile::solid[n]) lockDir = 2;
+		if (Tile::solid[w] && !Tile::solid[e]) lockDir = 5;
+		if (Tile::solid[e] && !Tile::solid[w]) lockDir = 4;
+		*/
+		return (face == lockDir)? tex + 1 : tex;
+}
+
+int ChestTile::getTexture( int face )
+{
+	if (face == 1) return tex - 1;
+	if (face == 0) return tex - 1;
+	if (face == 3) return tex + 1;
+	return tex;
+}
+
+bool ChestTile::mayPlace( Level* level, int x, int y, int z, unsigned char face )
+{
+	int chestCount = 0;
+
+	if (level->getTile(x - 1, y, z) == id) chestCount++;
+	if (level->getTile(x + 1, y, z) == id) chestCount++;
+	if (level->getTile(x, y, z - 1) == id) chestCount++;
+	if (level->getTile(x, y, z + 1) == id) chestCount++;
+
+	//@fullchest
+	if (chestCount > 0) return false;
+
+	//if (isFullChest(level, x - 1, y, z)) return false;
+	//if (isFullChest(level, x + 1, y, z)) return false;
+	//if (isFullChest(level, x, y, z - 1)) return false;
+	//if (isFullChest(level, x, y, z + 1)) return false;
+	return true;
+}
+
+void ChestTile::neighborChanged( Level* level, int x, int y, int z, int type )
+{
+	super::neighborChanged(level, x, y, z, type);
+	recalcLockDir(level, x, y, z);
+	TileEntity* te = level->getTileEntity(x, y, z);
+	if (te != NULL) te->clearCache();
+}
+
+void ChestTile::onRemove( Level* level, int x, int y, int z )
+{
+	if (!level->isClientSide) {
+		TileEntity* te = level->getTileEntity(x, y, z);
+		if (te != NULL && te->type == TileEntityType::Chest) {
+			Container* container = (ChestTileEntity*) te;
+			for (int i = 0; i < container->getContainerSize(); i++) {
+				ItemInstance* item = container->getItem(i);
+				if (item != NULL) {
+					float xo = random.nextFloat() * 0.8f + 0.1f;
+					float yo = random.nextFloat() * 0.8f + 0.1f;
+					float zo = random.nextFloat() * 0.8f + 0.1f;
+
+					while (item->count > 0) {
+						int count = random.nextInt(21) + 10;
+						if (count > item->count) count = item->count;
+						item->count -= count;
+						ItemEntity* itemEntity = new ItemEntity(level, x + xo, y + yo, z + zo, ItemInstance(item->id, count, item->getAuxValue()));
+						float pow = 0.05f;
+						itemEntity->xd = (float) random.nextGaussian() * pow;
+						itemEntity->yd = (float) random.nextGaussian() * pow + 0.2f;
+						itemEntity->zd = (float) random.nextGaussian() * pow;
+						//if (item->hasTag()) {
+						//    itemEntity->item->setTag((CompoundTag*) item->getTag()->copy());
+						//}
+						level->addEntity(itemEntity);
+					}
+				}
+			}
+		}
+	}
+	super::onRemove(level, x, y, z);
+}
+
+bool ChestTile::use( Level* level, int x, int y, int z, Player* player )
+{
+	TileEntity* te = level->getTileEntity(x, y, z);
+	if (!TileEntity::isType(te, TileEntityType::Chest))
+		return true;
+
+	ChestTileEntity* chest = (ChestTileEntity*) te;
+
+	if (level->isSolidBlockingTile(x, y + 1, z)) return true;
+
+	// @fullchest
+	//if (level->getTile(x - 1, y, z) == id && (level->isSolidBlockingTile(x - 1, y + 1, z))) return true;
+	//if (level->getTile(x + 1, y, z) == id && (level->isSolidBlockingTile(x + 1, y + 1, z))) return true;
+	//if (level->getTile(x, y, z - 1) == id && (level->isSolidBlockingTile(x, y + 1, z - 1))) return true;
+	//if (level->getTile(x, y, z + 1) == id && (level->isSolidBlockingTile(x, y + 1, z + 1))) return true;
+
+	//if (level->getTile(x - 1, y, z) == id) container = /*new*/ CompoundContainer("Large chest", (ChestTileEntity) level->getTileEntity(x - 1, y, z), container);
+	//if (level->getTile(x + 1, y, z) == id) container = /*new*/ CompoundContainer("Large chest", container, (ChestTileEntity) level->getTileEntity(x + 1, y, z));
+	//if (level->getTile(x, y, z - 1) == id) container = /*new*/ CompoundContainer("Large chest", (ChestTileEntity) level->getTileEntity(x, y, z - 1), container);
+	//if (level->getTile(x, y, z + 1) == id) container = /*new*/ CompoundContainer("Large chest", container, (ChestTileEntity) level->getTileEntity(x, y, z + 1));
+
+	if (level->isClientSide) {
+		return true;
+	}
+
+	player->openContainer(chest);
+
+	return true;
+}
+
+TileEntity* ChestTile::newTileEntity()
+{
+	return TileEntityFactory::createTileEntity(TileEntityType::Chest);
+}
+
+bool ChestTile::isFullChest( Level* level, int x, int y, int z )
+{
+	return false; //@fullchest
+	/*
+	if (level->getTile(x, y, z) != id) return false;
+	if (level->getTile(x - 1, y, z) == id) return true;
+	if (level->getTile(x + 1, y, z) == id) return true;
+	if (level->getTile(x, y, z - 1) == id) return true;
+	if (level->getTile(x, y, z + 1) == id) return true;
+	return false;
+	*/
+}
+
+=== CropTile.cpp (113 LoC) ===
+#include "CropTile.h"
+#include "Tile.h"
+#include "../../entity/item/ItemEntity.h"
+
+CropTile::CropTile( int id, int tex ) : super(id, tex) {
+	this->tex = tex;
+	setTicking(true);
+	float ss = 0.5f;
+	setShape(0.5f - ss, 0, 0.5f - ss, 0.5f + ss, 0.25f, 0.5f + ss);
+}
+
+void CropTile::tick( Level* level, int x, int y, int z, Random* random ) {
+	super::tick(level, x, y, z, random);
+	if(level->getRawBrightness(x, y, z) >= Level::MAX_BRIGHTNESS - 6) {
+		int age = level->getData(x, y, z);
+		if(age < 7) {
+			float growthSpeed = getGrowthSpeed(level, x, y, z);
+			if(random->nextInt(int(25 / growthSpeed)) == 0) {
+				age++;
+				level->setData(x, y, z, age);
+			}
+		}
+	}
+}
+
+void CropTile::growCropsToMax( Level* level, int x, int y, int z ) {
+	level->setData(x, y, z, 7);
+}
+
+float CropTile::getGrowthSpeed( Level* level, int x, int y, int z ) {
+	float speed = 1;
+
+	int n = level->getTile(x, y, z - 1);
+	int s = level->getTile(x, y, z + 1);
+	int w = level->getTile(x - 1, y, z);
+	int e = level->getTile(x + 1, y, z);
+
+	int d0 = level->getTile(x - 1, y, z - 1);
+	int d1 = level->getTile(x + 1, y, z - 1);
+	int d2 = level->getTile(x + 1, y, z + 1);
+	int d3 = level->getTile(x - 1, y, z + 1);
+
+	bool horizontal = w == this->id || e == this->id;
+	bool vertical = n == this->id || s == this->id;
+	bool diagonal = d0 == this->id || d1 == this->id || d2 == this->id || d3 == this->id;
+
+	for (int xx = x - 1; xx <= x + 1; xx++) {
+		for (int zz = z - 1; zz <= z + 1; zz++) {
+			int t = level->getTile(xx, y - 1, zz);
+
+			float tileSpeed = 0;
+			if (t == Tile::farmland->id) {
+				tileSpeed = 1;
+				if (level->getData(xx, y - 1, zz) > 0) tileSpeed = 3;
+			}
+
+			if (xx != x || zz != z) tileSpeed /= 4;
+
+			speed += tileSpeed;
+		}
+	}
+	if (diagonal || (horizontal && vertical)) speed /= 2;
+
+	return speed;
+}
+
+int CropTile::getTexture( LevelSource* level, int x, int y, int z, int face ) {
+	int data = level->getData(x, y, z);
+	if (data < 0) data = 7;
+	return tex + data;
+}
+
+int CropTile::getTexture( int face, int data ) {
+	if (data < 0) data = 7;
+	return tex + data;
+}
+
+int CropTile::getRenderShape() {
+	return Tile::SHAPE_ROWS;
+}
+void CropTile::spawnResources( Level* level, int x, int y, int z, int data, float odds ) {
+	super::spawnResources(level, x, y, z, data, odds);
+
+	if (level->isClientSide) {
+		return;
+	}
+	int count = 3;
+	for (int i = 0; i < count; i++) {
+		if (level->random.nextInt(5 * 3) > data) continue;
+		float s = 0.7f;
+		float xo = level->random.nextFloat() * s + (1 - s) * 0.5f;
+		float yo = level->random.nextFloat() * s + (1 - s) * 0.5f;
+		float zo = level->random.nextFloat() * s + (1 - s) * 0.5f;
+		ItemEntity* item = new ItemEntity(level, float(x) + xo, float(y) + yo, float(z) + zo, ItemInstance(Item::seeds_wheat));
+		item->throwTime = 10;
+		level->addEntity(item);
+	}
+}
+
+int CropTile::getResource( int data, Random* random ) {
+	if (data == 7) {
+		return Item::wheat->id;
+	}
+	return -1;
+}
+
+int CropTile::getResourceCount( Random* random ) {
+	return 1;
+}
+
+bool CropTile::mayPlaceOn( int tile ) {
+	return tile == Tile::farmland->id;
+}
+
+=== FurnaceTile.cpp (175 LoC) ===
+#include "FurnaceTile.h"
+#include "entity/FurnaceTileEntity.h"
+#include "../material/Material.h"
+#include "../../Facing.h"
+#include "../../entity/Mob.h"
+#include "../../entity/item/ItemEntity.h"
+#include "../../entity/player/Player.h"
+#include "../../item/ItemInstance.h"
+#include "../../../util/Mth.h"
+#include "../LevelSource.h"
+#include "../Level.h"
+
+bool FurnaceTile::noDrop = false;
+
+FurnaceTile::FurnaceTile( int id, bool lit )
+:   super(id, Material::stone),
+	lit(lit)
+{
+	tex = 13 + 16 * 2;
+}
+
+int FurnaceTile::getResource( int data, Random* random/*, int playerBonusLevel*/ )
+{
+	return Tile::furnace->id;
+}
+
+void FurnaceTile::onPlace( Level* level, int x, int y, int z )
+{
+	super::onPlace(level, x, y, z);
+	recalcLockDir(level, x, y, z);
+}
+
+int FurnaceTile::getTexture( LevelSource* level, int x, int y, int z, int face )
+{
+	if (face == 1) return tex + 17;
+	if (face == 0) return tex + 17;
+
+	int lockDir = level->getData(x, y, z);
+
+	if (face != lockDir) return tex;
+	if (lit) return tex + 16;
+	else return tex - 1;
+}
+
+int FurnaceTile::getTexture( int face )
+{
+	if (face == 1) return tex + 17;
+	if (face == 0) return tex + 17;
+	if (face == 3) return tex - 1;
+	return tex;
+}
+
+void FurnaceTile::animateTick( Level* level, int xt, int yt, int zt, Random* random )
+{
+	if (!lit) return;
+
+	int dir = level->getData(xt, yt, zt);
+
+	float x = xt + 0.5f;
+	float y = yt + 0.0f + random->nextFloat() * 6 / 16.0f;
+	float z = zt + 0.5f;
+	float r = 0.52f;
+	float ss = random->nextFloat() * 0.6f - 0.3f;
+
+	if (dir == 4) {
+		level->addParticle(PARTICLETYPE(smoke), x - r, y, z + ss, 0, 0, 0);
+		level->addParticle(PARTICLETYPE(flame), x - r, y, z + ss, 0, 0, 0);
+	} else if (dir == 5) {
+		level->addParticle(PARTICLETYPE(smoke), x + r, y, z + ss, 0, 0, 0);
+		level->addParticle(PARTICLETYPE(flame), x + r, y, z + ss, 0, 0, 0);
+	} else if (dir == 2) {
+		level->addParticle(PARTICLETYPE(smoke), x + ss, y, z - r, 0, 0, 0);
+		level->addParticle(PARTICLETYPE(flame), x + ss, y, z - r, 0, 0, 0);
+	} else if (dir == 3) {
+		level->addParticle(PARTICLETYPE(smoke), x + ss, y, z + r, 0, 0, 0);
+		level->addParticle(PARTICLETYPE(flame), x + ss, y, z + r, 0, 0, 0);
+	}
+}
+
+bool FurnaceTile::use( Level* level, int x, int y, int z, Player* player )
+{
+	if (level->isClientSide)
+		return true;
+
+	FurnaceTileEntity* furnace = static_cast<FurnaceTileEntity*>(level->getTileEntity(x, y, z));
+	if (furnace != NULL) player->openFurnace(furnace);
+	return true;
+}
+
+/*static*/
+void FurnaceTile::setLit( bool lit, Level* level, int x, int y, int z )
+{
+	int data = level->getData(x, y, z);
+	TileEntity* te = level->getTileEntity(x, y, z);
+
+	noDrop = true;
+	if (lit) level->setTile(x, y, z, Tile::furnace_lit->id);
+	else level->setTile(x, y, z, Tile::furnace->id);
+	noDrop = false;
+
+	level->setData(x, y, z, data);
+
+	LOGI("lit? %d @ %d, %d, %d\n", lit, x, y, z);
+
+	if (te != NULL) {
+		te->clearRemoved();
+		level->setTileEntity(x, y, z, te);
+	}
+}
+
+TileEntity* FurnaceTile::newTileEntity()
+{
+	return TileEntityFactory::createTileEntity(TileEntityType::Furnace);
+}
+
+void FurnaceTile::setPlacedBy( Level* level, int x, int y, int z, Mob* by )
+{
+	int dir = (Mth::floor(by->yRot * 4 / (360) + 0.5f)) & 3;
+
+	if (dir == 0) level->setData(x, y, z, Facing::NORTH);
+	if (dir == 1) level->setData(x, y, z, Facing::EAST);
+	if (dir == 2) level->setData(x, y, z, Facing::SOUTH);
+	if (dir == 3) level->setData(x, y, z, Facing::WEST);
+}
+
+void FurnaceTile::onRemove( Level* level, int x, int y, int z )
+{
+	if (!noDrop && !level->isClientSide) {
+		FurnaceTileEntity* container = (FurnaceTileEntity*) level->getTileEntity(x, y, z);
+		if (container != NULL) {
+			for (int i = 0; i < container->getContainerSize(); i++) {
+				ItemInstance* item = container->getItem(i);
+				if (item) {
+					float xo = random.nextFloat() * 0.8f + 0.1f;
+					float yo = random.nextFloat() * 0.8f + 0.1f;
+					float zo = random.nextFloat() * 0.8f + 0.1f;
+
+					while (item->count > 0) {
+						int count = random.nextInt(21) + 10;
+						if (count > item->count) count = item->count;
+						item->count -= count;
+
+						ItemEntity* itemEntity = new ItemEntity(level, x + xo, y + yo, z + zo, ItemInstance(item->id, count, item->getAuxValue()));
+						float pow = 0.05f;
+						itemEntity->xd = random.nextGaussian() * pow;
+						itemEntity->yd = random.nextGaussian() * pow + 0.2f;
+						itemEntity->zd = random.nextGaussian() * pow;
+						level->addEntity(itemEntity);
+					}
+				}
+			}
+		}
+	}
+	super::onRemove(level, x, y, z);
+}
+
+void FurnaceTile::recalcLockDir( Level* level, int x, int y, int z )
+{
+	if (level->isClientSide) {
+		return;
+	}
+
+	int n = level->getTile(x, y, z - 1); // face = 2
+	int s = level->getTile(x, y, z + 1); // face = 3
+	int w = level->getTile(x - 1, y, z); // face = 4
+	int e = level->getTile(x + 1, y, z); // face = 5
+
+	int lockDir = 3;
+	if (Tile::solid[e] && !Tile::solid[w]) lockDir = 4;
+	else if (Tile::solid[w] && !Tile::solid[e]) lockDir = 5;
+	else if (Tile::solid[s] && !Tile::solid[n]) lockDir = 2;
+	else if (Tile::solid[n] && !Tile::solid[s]) lockDir = 3;
+
+	level->setData(x, y, z, lockDir);
+}
+
+=== DoorTile.cpp (230 LoC) ===
+#include "DoorTile.h"
+#include "LevelEvent.h"
+#include "../Level.h"
+#include "../../item/Item.h"
+#include "../../entity/player/Player.h"
+
+DoorTile::DoorTile(int id, const Material* material)
+:	super(id, material)
+{
+	tex = 1 + 6 * 16;
+	if (material == Material::metal) tex++;
+
+	float r = 0.5f;
+	float h = 1.0f;
+	super::setShape(0.5f - r, 0, 0.5f - r, 0.5f + r, h, 0.5f + r);
+}
+
+int DoorTile::getTexture(LevelSource* level, int x, int y, int z, int face) {
+	if (face == 0 || face == 1) return tex;
+
+	int compositeData = getCompositeData(level, x, y, z);
+	int texture = tex;
+	if ((compositeData & C_IS_UPPER_MASK) != 0) texture -= 16;
+
+	int dir = compositeData & C_DIR_MASK;
+	bool isOpen = (compositeData & C_OPEN_MASK) != 0;
+	if (isOpen) {
+		if (dir == 0 && face == 2) texture = -texture;
