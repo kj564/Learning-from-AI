@@ -4,6 +4,7 @@
 import { Tile } from './Tile';
 import { Material } from '../material/Material';
 import { Tiles } from './Tiles';
+import { Item } from '../../item/Item';
 
 export class OreTile extends Tile {
   constructor(id: number, tex: number) {
@@ -18,6 +19,9 @@ export class OreTile extends Tile {
   // }
   // Item::coal/emerald/dye_powder deferred until Item port. For MVP return id.
   getResource(_data: number, _random: unknown): number {
+    if (this.id === Tiles.coalOre!.id) return Item.coal!.id;
+    if (this.id === Tiles.emeraldOre!.id) return Item.emerald!.id;
+    if (this.id === Tiles.lapisOre!.id) return Item.dye_powder!.id;
     return this.id;
   }
 
@@ -36,6 +40,7 @@ export class OreTile extends Tile {
   // }
   // DyePowderItem::BLUE not ported yet. Return 0.
   protected getSpawnResourcesAuxValue(_data: number): number {
+    if (this.id === Tiles.lapisOre!.id) return 4; // DyePowderItem::BLUE
     return 0;
   }
 }

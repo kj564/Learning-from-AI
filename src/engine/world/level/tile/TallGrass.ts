@@ -22,6 +22,7 @@
 import { Bush } from './Bush';
 import { Material } from '../material/Material';
 import { ItemInstance } from '../../item/ItemInstance';
+import { Item } from '../../item/Item';
 
 export class TallGrass extends Bush {
   static readonly DEAD_SHRUB = 0;
@@ -70,10 +71,7 @@ export class TallGrass extends Bush {
   // TallGrass.cpp:442 — getResource(data, random)
   getResource(_data: number, random: { nextInt(n: number): number }): number {
     if (random.nextInt(8) === 0) {
-      // C++: return Item::seeds_wheat->id; (Item port deferred)
-      // Without Item::seeds_wheat, we return -1 (no drop). Source comment in C++
-      // would return -1 too if Item::seeds_wheat was undefined.
-      return -1;
+      return Item.seeds_wheat!.id;
     }
     return -1;
   }
@@ -83,7 +81,7 @@ export class TallGrass extends Bush {
     getSelectedItem(): { id: number } | null;
   }, x: number, y: number, z: number, data: number): void {
     const selected = player.getSelectedItem();
-    if (selected && selected.id === -1 /* Item::shears — deferred */) {
+    if (selected && selected.id === Item.shears!.id) {
       // C++: popResource(level, x, y, z, ItemInstance(Tile::tallgrass, 1, data));
       // We need access to the TallGrass tile instance for ItemInstance(tile, count).
       // Use this (since playerDestroy is called on the TallGrass instance).

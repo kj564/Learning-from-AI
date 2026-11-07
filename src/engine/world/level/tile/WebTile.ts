@@ -3,6 +3,7 @@
  */
 import { Tile, RENDERLAYER_ALPHATEST, SHAPE_CROSS_TEXTURE } from './Tile';
 import { Material } from '../material/Material';
+import { Item } from '../../item/Item';
 
 export class WebTile extends Tile {
   constructor(id: number, tex: number) {
@@ -17,6 +18,5 @@ export class WebTile extends Tile {
   // C++: AABB* getAABB(Level*, x,y,z) { return NULL; }
   getAABB(_level: unknown, _x: number, _y: number, _z: number): null { return null; }
   // C++: int getResource(int data, Random*) { return Item::string->id; }
-  // Item::string deferred — return id (the dropped string item is in a later iter).
-  getResource(_data: number, _random: unknown): number { return this.id; }
+  getResource(_data: number, _random: unknown): number { return Item.string!.id; }
 }

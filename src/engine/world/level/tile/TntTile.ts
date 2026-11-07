@@ -3,6 +3,7 @@
  */
 import { Tile } from './Tile';
 import { Material } from '../material/Material';
+import { Item } from '../../item/Item';
 
 export class TntTile extends Tile {
   static readonly EXPLODE_BIT = 1;
@@ -18,5 +19,6 @@ export class TntTile extends Tile {
   }
 
   getResourceCount(_random: unknown): number { return 1; }
-  // wasExploded / destroy / use bodies live in TntTile.cpp — deferred.
+  // TntTile.cpp use: checks Item::flintAndSteel on carried item.
+  // Full use() body needs PrimedTnt entity (deferred until entity/item/FallingTile.cpp).
 }

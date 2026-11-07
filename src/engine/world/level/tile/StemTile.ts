@@ -7,6 +7,8 @@
 import { Bush } from './Bush';
 import { Tile, SHAPE_STEM } from './Tile';
 import { Tiles } from './Tiles';
+import { Item } from '../../item/Item';
+import { ItemInstance } from '../../item/ItemInstance';
 
 export class StemTile extends Bush {
   private fruitTile: Tile;
@@ -171,9 +173,13 @@ export class StemTile extends Bush {
   }, x: number, y: number, z: number, data: number, odds: number): void {
     super.spawnResources(level, x, y, z, data, odds);
     if (level.isClientSide) return;
-    // C++: Item* seed = NULL; if (fruit == Tile::melon) seed = Item::seeds_melon;
-    // Item::seeds_melon deferred. Without Item port we can't spawn the seed.
-    // This is a documented gap — the source depends on Item::seeds_melon existing.
+    // C++: if (fruit == Tile::melon) seed = Item::seeds_melon;
+    if (this.fruitTile === Tiles.melon) {
+      for (let i = 0; i < 3; i++) {
+        if (level.random.nextInt(5 * 3) > data) continue;
+        this.popResource(level as never, x, y, z, new ItemInstance(Item.seeds_melon!, 1, 0));
+      }
+    }
   }
 
   // StemTile.cpp:155 — getResource: return -1 (no resource; stem drops seeds via spawnResources)

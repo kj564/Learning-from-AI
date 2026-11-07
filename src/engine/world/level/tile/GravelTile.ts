@@ -3,6 +3,7 @@
  */
 import { HeavyTile } from './HeavyTile';
 import { Tiles } from './Tiles';
+import { Item } from '../../item/Item';
 
 export class GravelTile extends HeavyTile {
   constructor(type: number, tex: number) {
@@ -13,8 +14,7 @@ export class GravelTile extends HeavyTile {
   // Item::flint is not yet ported (Item port is a later iter). Return id for now.
   getResource(_data: number, random: { nextInt(n: number): number }): number {
     if (random.nextInt(10) === 0) {
-      // Item::flint->id — deferred until Item is ported.
-      return this.id;
+      return Item.flint!.id;
     }
     return this.id;
   }

@@ -12,6 +12,8 @@
 
 import { Tile, SHAPE_DOOR, RENDERLAYER_ALPHATEST } from './Tile';
 import { Material } from '../material/Material';
+import { Item } from '../../item/Item';
+import { ItemInstance } from '../../item/ItemInstance';
 import { AABB, HitResult } from '../../phys/AABB';
 import { Vec3 } from '../../phys/Vec3';
 
@@ -207,8 +209,11 @@ export class DoorTile extends Tile {
     } else {
       if (level.getTile(x, y - 1, z) !== this.id) {
         level.setTile(x, y, z, 0);
-        // C++: popResource(level, x, y, z, ItemInstance(Item::door_wood / Item::door_iron))
-        // Item::door_wood / door_iron deferred. Without Item port we can't drop the door item.
+        if (this.doorMaterial === Material.metal) {
+          this.popResource(level as never, x, y, z, new ItemInstance(Item.door_iron!, 1, 0));
+        } else {
+          this.popResource(level as never, x, y, z, new ItemInstance(Item.door_wood!, 1, 0));
+        }
       }
       if (type > 0 && type !== this.id) {
         this.neighborChanged(level, x, y - 1, z, type);
@@ -219,10 +224,8 @@ export class DoorTile extends Tile {
   // DoorTile.cpp:224 — getResource
   getResource(data: number, _random: unknown): number {
     if ((data & 8) !== 0) return 0;
-    // C++: if (material == Material::metal) return Item::door_iron->id;
-    //      return Item::door_wood->id;
-    // Item::door_iron/wood deferred — return 0 (no resource) until Item port.
-    return 0;
+    if (this.doorMaterial === Material.metal) return Item.door_iron!.id;
+    return Item.door_wood!.id;
   }
 
   // DoorTile.cpp:229 — clip

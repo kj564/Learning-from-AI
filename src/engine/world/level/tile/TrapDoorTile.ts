@@ -5,6 +5,8 @@
 import { Tile, RENDERLAYER_ALPHATEST } from './Tile';
 import { Material } from '../material/Material';
 import { Tiles } from './Tiles';
+import { Item } from '../../item/Item';
+import { ItemInstance } from '../../item/ItemInstance';
 import { AABB, HitResult } from '../../phys/AABB';
 import { Vec3 } from '../../phys/Vec3';
 
@@ -97,9 +99,7 @@ export class TrapDoorTile extends Tile {
     if ((data & 3) === 3) xt--;
     if (!this.attachesTo(level.getTile(xt, y, zt))) {
       level.setTile(x, y, z, 0);
-      // C++: popResource(level, x, y, z, ItemInstance(Tile::trapdoor))
-      // Item::trapdoor (Item version of trapdoor = id - 256) deferred.
-      // Without Item port we skip the drop.
+      this.popResource(level as never, x, y, z, new ItemInstance({ id: this.id + 256, count: 1, auxValue: 0 } as never));
     }
     const signal = level.hasNeighborSignal(x, y, z);
     if (signal || type === 0) {
