@@ -181,6 +181,48 @@ export const TOOL_DEFINITIONS: ToolSchema[] = [
     },
   },
   {
+    name: 'image_edit',
+    description:
+      'Edit an existing image (either a previously generated one or one the user uploaded) using a text prompt. ' +
+      'Use this when the user says "modify this image", "make it more X", "change the background to Y", etc. ' +
+      'Pass the image URL (data: URL or /api/image/asset?id=... URL) and the edit prompt.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        prompt: { type: 'string', description: 'How to edit the image (e.g. "make the sky purple").' },
+        image: { type: 'string', description: 'Source image: data URL or /api/image/asset?id=... URL.' },
+        size: {
+          type: 'string',
+          description: 'Output size.',
+          enum: ['1024x1024', '768x1344', '864x1152', '1344x768', '1152x864', '1440x720', '720x1440'],
+        },
+      },
+      required: ['prompt', 'image'],
+    },
+  },
+  {
+    name: 'video_generate',
+    description:
+      'Generate a short video from a text prompt (text-to-video) or from an image + prompt (image-to-video). ' +
+      'Use this when the user asks to "create a video", "make a video of", "animate this", etc. ' +
+      'Video generation is async — the tool returns a taskId; the UI polls until the video is ready. ' +
+      'Keep prompts concise (1-2 sentences). Default duration ~5 seconds.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        prompt: { type: 'string', description: 'Description of the video to generate.' },
+        image_url: {
+          type: 'string',
+          description: 'Optional: seed image URL (data: URL or /api/image/asset?id=...). For image-to-video.',
+        },
+        quality: { type: 'string', description: 'speed or quality', enum: ['speed', 'quality'] },
+        with_audio: { type: 'boolean', description: 'Generate audio. Default true.' },
+        duration: { type: 'number', description: 'Video duration in seconds. Default ~5.' },
+      },
+      required: ['prompt'],
+    },
+  },
+  {
     name: 'knowledge_search',
     description:
       'Search the workspace knowledge base for relevant documents. Returns matching snippets. ' +

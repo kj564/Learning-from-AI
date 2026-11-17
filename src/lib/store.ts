@@ -32,6 +32,8 @@ export interface ChatMessage {
   attachments?: Attachment[];
   /** AI-generated images shown as inline cards in the assistant message. */
   images?: GeneratedImageRef[];
+  /** AI-generated videos — taskId for polling, url filled in on completion */
+  videos?: { taskId: string; prompt: string; url?: string; status?: 'PROCESSING' | 'SUCCESS' | 'FAIL' }[];
   /** Web search results shown as a collapsible "Searched the web" panel above the content. */
   webSearch?: { query: string; results: WebSearchSource[] };
   /** Read-aloud audio URL (cached after first TTS call). */

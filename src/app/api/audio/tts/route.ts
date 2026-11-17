@@ -29,8 +29,8 @@ export async function POST(req: NextRequest) {
     if (!text || typeof text !== 'string') {
       return NextResponse.json({ error: 'text required' }, { status: 400 });
     }
-    // TTS has limits — truncate very long text
-    const truncated = text.length > 2000 ? text.slice(0, 2000) : text;
+    // TTS limit raised to 8000 chars (was 2000) — for long read-aloud sessions
+    const truncated = text.length > 8000 ? text.slice(0, 8000) + '…' : text;
 
     const zai = await ZAI.create();
     const ttsResponse: any = await zai.audio.tts.create({

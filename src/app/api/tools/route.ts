@@ -247,6 +247,56 @@ export async function POST(req: NextRequest) {
         }
       }
 
+      // === IMAGE EDIT (new) ===
+      case 'image_edit': {
+        const prompt = args.prompt as string;
+        const image = args.image as string;
+        const size = (args.size as string) || '1024x1024';
+        if (!prompt || !image) return NextResponse.json({ error: 'prompt + image required' }, { status: 400 });
+        try {
+          const editRes = await fetch('http://localhost:3000/api/image/edit', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ prompt, image, size }),
+          });
+          const data = await editRes.json();
+          return NextResponse.json({
+            success: !!data.success,
+            prompt,
+            image: data.image || null,
+          });
+        } catch (e) {
+          return NextResponse.json({ success: false, error: (e as Error).message }, { status: 500 });
+        }
+      }
+
+      // === VIDEO GENERATION (new, async) ===
+      case 'video_generate': {
+        const prompt = args.prompt as string;
+        const image_url = args.image_url as string | undefined;
+        const quality = (args.quality as 'speed' | 'quality') || 'quality';
+        const with_audio = args.with_audio !== false;
+        const duration = args.duration as number | undefined;
+        if (!prompt && !image_url) return NextResponse.json({ error: 'prompt or image_url required' }, { status: 400 });
+        try {
+          const genRes = await fetch('http://localhost:3000/api/video/generate', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ prompt, image_url, quality, with_audio, duration }),
+          });
+          const data = await genRes.json();
+          return NextResponse.json({
+            success: !!data.success,
+            prompt,
+            taskId: data.taskId,
+            status: data.status,
+            note: 'Video generation is async. Poll /api/video/status?taskId=<id> every 5-10s until status === SUCCESS.',
+          });
+        } catch (e) {
+          return NextResponse.json({ success: false, error: (e as Error).message }, { status: 500 });
+        }
+      }
+
       // === KNOWLEDGE SEARCH (new) ===
       case 'knowledge_search': {
         const query = args.query as string;

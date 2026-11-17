@@ -19,7 +19,7 @@
 
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { useStore } from '@/lib/store';
-import { streamChat, generateImage, vision, webSearch, type GeneratedImage } from '@/lib/api';
+import { streamChat, generateImage, vision, webSearch, generateVideo, type GeneratedImage } from '@/lib/api';
 import { toast } from 'sonner';
 import IconRail, { type PanelId } from '@/components/librechat/IconRail';
 import Sidebar from '@/components/librechat/Sidebar';
@@ -29,18 +29,24 @@ import ChatInput from '@/components/librechat/ChatInput';
 import DocumentsPanel from '@/components/librechat/DocumentsPanel';
 import ImageGenDialog from '@/components/librechat/ImageGenDialog';
 import ImageLightbox from '@/components/librechat/ImageLightbox';
+import CommandPalette from '@/components/librechat/CommandPalette';
+import KeyboardShortcutsHelp from '@/components/librechat/KeyboardShortcutsHelp';
 import type { GeneratedImageRef } from '@/lib/store';
 
 const genId = (prefix: string) => `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 
-/** Parse a tool_result's JSON-encoded result payload to extract rich media (images, web search). */
+/** Parse a tool_result's JSON-encoded result payload to extract rich media (images, web search, videos, edits). */
 function parseToolResult(
   tool: string,
   resultStr: string
-): { images?: GeneratedImageRef[]; webSearch?: { query: string; results: any[] } } {
+): {
+  images?: GeneratedImageRef[];
+  videos?: { taskId: string; prompt: string; status?: 'PROCESSING' | 'SUCCESS' | 'FAIL' }[];
+  webSearch?: { query: string; results: any[] };
+} {
   try {
     const parsed = JSON.parse(resultStr);
-    if (tool === 'image_generate' && parsed.image) {
+    if ((tool === 'image_generate' || tool === 'image_edit') && parsed.image) {
       return {
         images: [
           {
@@ -52,6 +58,11 @@ function parseToolResult(
             height: parsed.image.height,
           },
         ],
+      };
+    }
+    if (tool === 'video_generate' && parsed.taskId) {
+      return {
+        videos: [{ taskId: parsed.taskId, prompt: String(parsed.prompt || ''), status: parsed.status || 'PROCESSING' }],
       };
     }
     if (tool === 'web_search' && Array.isArray(parsed.results)) {
@@ -68,6 +79,7 @@ function parseToolResult(
 export default function Page() {
   const [activePanel, setActivePanel] = useState<PanelId>('conversations');
   const [imageDialogOpen, setImageDialogOpen] = useState(false);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
 
   // Layout state
   const isMobile = useStore((s) => s.isMobile);
@@ -112,6 +124,23 @@ export default function Page() {
     window.addEventListener('resize', check);
     return () => window.removeEventListener('resize', check);
   }, [setIsMobile]);
+
+  // Keyboard shortcuts: cmd+n (new chat), cmd+b (toggle sidebar/drawer)
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'n') {
+        e.preventDefault();
+        newConversation();
+      }
+      if ((e.metaKey || e.ctrlKey) && e.key === 'b') {
+        e.preventDefault();
+        if (isMobile) setDrawerOpen(true);
+        else useStore.getState().toggleSidebar();
+      }
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [newConversation, isMobile, setDrawerOpen]);
 
   // Close drawer when switching to desktop
   useEffect(() => {
@@ -197,8 +226,8 @@ export default function Page() {
                 { tool: event.name, args: event.input, success: false },
               ],
             }));
-            // Optimistic placeholder for image_generate
-            if (event.name === 'image_generate') {
+            // Optimistic placeholder for image_generate / image_edit
+            if (event.name === 'image_generate' || event.name === 'image_edit') {
               const prompt = (event.input.prompt as string) || '';
               const size = (event.input.size as string) || '1024x1024';
               const placeholderId = `img_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
@@ -206,6 +235,17 @@ export default function Page() {
                 images: [
                   ...(prev?.images || []),
                   { id: placeholderId, url: '', prompt, size, width: 1024, height: 1024, pending: true },
+                ],
+              }));
+            }
+            // Optimistic placeholder for video_generate
+            if (event.name === 'video_generate') {
+              const prompt = (event.input.prompt as string) || '';
+              const placeholderTaskId = `pending_${Date.now()}`;
+              updateMessage(convoId, pendingMsgId, (prev) => ({
+                videos: [
+                  ...(prev?.videos || []),
+                  { taskId: placeholderTaskId, prompt, status: 'PROCESSING' },
                 ],
               }));
             }
@@ -221,7 +261,7 @@ export default function Page() {
                 }
               }
               const patch: any = { toolExecutions: execs };
-              // Parse rich results: images, web search
+              // Parse rich results: images, videos, web search
               const rich = parseToolResult(event.tool, event.result);
               if (rich.images) {
                 // Replace the placeholder image(s) with the real one
@@ -233,6 +273,17 @@ export default function Page() {
                   imgs.push(...rich.images);
                 }
                 patch.images = imgs;
+              }
+              if (rich.videos) {
+                // Replace the placeholder video with the real taskId
+                const vids = [...(prev?.videos || [])];
+                const placeholderIdx = vids.findIndex((v) => v.taskId.startsWith('pending_'));
+                if (placeholderIdx >= 0) {
+                  vids[placeholderIdx] = rich.videos[0];
+                } else {
+                  vids.push(...rich.videos);
+                }
+                patch.videos = vids;
               }
               if (rich.webSearch && !prev?.webSearch) {
                 patch.webSearch = rich.webSearch;
@@ -481,6 +532,15 @@ export default function Page() {
 
       {/* Image lightbox */}
       <ImageLightbox />
+
+      {/* Command palette (⌘K) */}
+      <CommandPalette
+        onGenerateImage={() => setImageDialogOpen(true)}
+        onShowShortcuts={() => setShortcutsOpen(true)}
+      />
+
+      {/* Keyboard shortcuts help (⌘/) */}
+      <KeyboardShortcutsHelp open={shortcutsOpen} onOpenChange={setShortcutsOpen} />
     </div>
   );
 }

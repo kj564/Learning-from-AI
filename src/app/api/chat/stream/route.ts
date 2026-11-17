@@ -34,8 +34,8 @@ export const AI_MODELS = [
 // In-memory session history (per conversationId) — used to drive the agentic tool loop.
 // Messages are ALSO persisted to SQLite for cross-session continuity.
 const sessions = new Map<string, { role: string; content: string }[]>();
-const MAX_MESSAGES = 40;
-const MAX_TOOL_ROUNDS = 5;
+const MAX_MESSAGES = 100; // was 40 — relaxed
+const MAX_TOOL_ROUNDS = 10; // was 5 — relaxed for complex agentic tasks
 
 const BASE_SYSTEM_PROMPT = `# claude_behavior
 
@@ -321,7 +321,7 @@ export async function POST(req: NextRequest) {
             tool_use_id: toolUseId,
             tool: toolCall.tool,
             success: execResult.success,
-            result: execResult.result.slice(0, 2000),
+            result: execResult.result.slice(0, 8000), // was 2000 — relaxed
           });
 
           history.push({ role: 'assistant', content: raw });

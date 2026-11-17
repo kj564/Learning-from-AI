@@ -555,3 +555,138 @@ export async function webSearch(query: string, num = 6): Promise<WebSearchResult
   const data = await res.json();
   return (data.results || []) as WebSearchResult[];
 }
+
+// ============================================================
+// Video generation (async)
+// ============================================================
+
+export interface VideoGenerateResponse {
+  success: boolean;
+  taskId: string;
+  status: 'PROCESSING' | 'SUCCESS' | 'FAIL';
+}
+
+export interface VideoStatusResponse {
+  success: boolean;
+  taskId: string;
+  status: 'PROCESSING' | 'SUCCESS' | 'FAIL';
+  videoUrl: string | null;
+}
+
+/** Start a video generation task. Returns a taskId. */
+export async function generateVideo(opts: {
+  prompt?: string;
+  image_url?: string | string[];
+  quality?: 'speed' | 'quality';
+  with_audio?: boolean;
+  duration?: number;
+}): Promise<VideoGenerateResponse> {
+  const res = await fetch('/api/video/generate', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(opts),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
+    throw new Error(err.error || `HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
+/** Poll a video generation task's status. */
+export async function videoStatus(taskId: string): Promise<VideoStatusResponse> {
+  const res = await fetch(`/api/video/status?taskId=${encodeURIComponent(taskId)}`);
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
+    throw new Error(err.error || `HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
+// ============================================================
+// Image editing
+// ============================================================
+
+/** Edit an existing image with a text prompt. */
+export async function editImage(opts: {
+  prompt: string;
+  image: string;
+  size?: string;
+  conversationId?: string;
+}): Promise<GeneratedImage | null> {
+  const res = await fetch('/api/image/edit', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(opts),
+  });
+  if (!res.ok) return null;
+  const data = await res.json();
+  return (data.image as GeneratedImage) || null;
+}
+
+// ============================================================
+// Conversation persistence (load from server)
+// ============================================================
+
+export interface ConversationListItem {
+  id: string;
+  title: string;
+  model: string;
+  assistantId: string | null;
+  projectId: string | null;
+  createdAt: number;
+  updatedAt: number;
+  messageCount: number;
+}
+
+export interface ConversationMessage {
+  id: string;
+  role: 'user' | 'assistant' | 'system';
+  content: string;
+  toolExecutions: { tool: string; args: Record<string, unknown>; success: boolean }[];
+  sessionId: string | null;
+  createdAt: number;
+}
+
+export interface ConversationDetail extends ConversationListItem {
+  messages?: ConversationMessage[];
+}
+
+export async function listConversations(): Promise<ConversationListItem[]> {
+  const res = await fetch('/api/conversations');
+  if (!res.ok) return [];
+  const data = await res.json();
+  return (data.conversations || []) as ConversationListItem[];
+}
+
+export async function getConversation(id: string): Promise<ConversationDetail | null> {
+  const res = await fetch(`/api/conversations?id=${encodeURIComponent(id)}`);
+  if (!res.ok) return null;
+  const data = await res.json();
+  return (data.conversation as ConversationDetail) || null;
+}
+
+export async function deleteConversation(id: string): Promise<boolean> {
+  const res = await fetch('/api/conversations', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'delete', id }),
+  });
+  return res.ok;
+}
+
+export async function createConversation(opts?: {
+  title?: string;
+  model?: string;
+  assistantId?: string;
+  projectId?: string;
+}): Promise<ConversationListItem | null> {
+  const res = await fetch('/api/conversations', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'create', ...(opts || {}) }),
+  });
+  if (!res.ok) return null;
+  const data = await res.json();
+  return (data.conversation as ConversationListItem) || null;
+}

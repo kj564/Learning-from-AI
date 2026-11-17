@@ -16,7 +16,7 @@
 import { useState, useEffect } from 'react';
 import {
   Copy, Check, RefreshCw, Wrench, Sparkles, FileText, Code, Terminal,
-  Search, FolderPlus, BookOpen, Package, Link2, ChevronRight, Image as ImageIcon,
+  Search, FolderPlus, BookOpen, Package, Link2, ChevronRight, Image as ImageIcon, Film,
 } from 'lucide-react';
 import type { ChatMessage, GeneratedImageRef } from '@/lib/store';
 import { useStore } from '@/lib/store';
@@ -25,6 +25,8 @@ import WebSearchResultsPanel from './WebSearchResultsPanel';
 import GeneratedImageCard from './GeneratedImageCard';
 import AttachmentThumbs from './AttachmentThumbs';
 import AudioMessageWidget from './AudioMessageWidget';
+import VideoMessageWidget from './VideoMessageWidget';
+import CodeExecutionOutput from './CodeExecutionOutput';
 import ReadAloudButton from './ReadAloudButton';
 
 const TOOL_ICONS: Record<string, { icon: typeof Wrench; color: string }> = {
@@ -38,6 +40,8 @@ const TOOL_ICONS: Record<string, { icon: typeof Wrench; color: string }> = {
   web_search: { icon: Search, color: 'text-accent-primary' },
   image_generate: { icon: ImageIcon, color: 'text-status-info' },
   image_search: { icon: ImageIcon, color: 'text-accent-primary' },
+  image_edit: { icon: ImageIcon, color: 'text-status-warning' },
+  video_generate: { icon: Film, color: 'text-status-info' },
   knowledge_search: { icon: BookOpen, color: 'text-accent-primary' },
   project_create: { icon: FolderPlus, color: 'text-status-info' },
   canva_mcp: { icon: Link2, color: 'text-accent-primary' },
@@ -57,6 +61,8 @@ function ToolExecutionCard({ tool, args, success }: { tool: string; args: Record
     tool === 'web_search' ? `search ${args.query}` :
     tool === 'image_generate' ? `draw ${String(args.prompt || '').slice(0, 40)}` :
     tool === 'image_search' ? `find ${args.query}` :
+    tool === 'image_edit' ? `edit ${String(args.prompt || '').slice(0, 40)}` :
+    tool === 'video_generate' ? `video ${String(args.prompt || '').slice(0, 40)}` :
     tool === 'knowledge_search' ? `kb search: ${args.query}` :
     tool === 'project_create' ? `scaffold ${args.name}` :
     tool === 'canva_mcp' ? 'canva call' :
@@ -202,10 +208,32 @@ export default function MessageRow({ message, isLast, onRegenerate, convoId, onR
                 </div>
               )}
 
+              {/* 3b. Generated videos */}
+              {message.videos && message.videos.length > 0 && (
+                <div className="mb-2 space-y-2">
+                  {message.videos.map((v, i) => (
+                    <VideoMessageWidget key={v.taskId || i} taskId={v.taskId} prompt={v.prompt} />
+                  ))}
+                </div>
+              )}
+
+              {/* 3c. Code execution outputs (for code_run/shell_run tool results) */}
+              {message.toolExecutions?.some((t) =>
+                (t.tool === 'code_run' || t.tool === 'shell_run' || t.tool === 'npm_install') && t.result
+              ) && (
+                <div className="mb-2 space-y-1">
+                  {message.toolExecutions.filter((t) =>
+                    (t.tool === 'code_run' || t.tool === 'shell_run' || t.tool === 'npm_install') && t.result
+                  ).map((t, i) => (
+                    <CodeExecutionOutput key={i} tool={t.tool} result={t.result!} />
+                  ))}
+                </div>
+              )}
+
               {/* 4. Markdown content */}
               {message.content ? (
                 <Markdown content={message.content} streaming={message.streaming} />
-              ) : !message.toolExecutions?.length && !message.images?.length && !message.webSearch ? (
+              ) : !message.toolExecutions?.length && !message.images?.length && !message.videos?.length && !message.webSearch ? (
                 <span className="text-text-tertiary text-xs italic">(no text response)</span>
               ) : null}
 
