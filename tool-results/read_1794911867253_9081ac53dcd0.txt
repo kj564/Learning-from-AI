@@ -1,0 +1,838 @@
+     1→import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+     2→import { ChevronDown } from 'lucide-react';
+     3→import { useDrag, useDragLayer, useDrop } from 'react-dnd';
+     4→import { Skeleton, useMediaQuery, useToastContext, buttonVariants } from '@librechat/client';
+     5→import type { TConversation, TEndpointsConfig } from 'librechat-data-provider';
+     6→import type { DropTargetMonitor } from 'react-dnd';
+     7→import type {
+     8→  SelectEndpointHandler,
+     9→  SelectSpecHandler,
+    10→} from '~/components/Nav/Favorites/useFavoritesData';
+    11→import type { ConversationDragItem } from './dnd';
+    12→import type { Favorite } from '~/store/favorites';
+    13→import {
+    14→  CONVERSATION_DRAG_TYPE,
+    15→  beginPinnedDrag,
+    16→  endedOverExternalTarget,
+    17→  markPinnedHover,
+    18→  mergeVisibleOrder,
+    19→  shouldSwapOnHover,
+    20→} from './dnd';
+    21→import {
+    22→  useActiveJobs,
+    23→  useGetPinnedOrderQuery,
+    24→  usePinConversationMutation,
+    25→  useUpdatePinnedOrderMutation,
+    26→} from '~/data-provider';
+    27→import useFavoritesData from '~/components/Nav/Favorites/useFavoritesData';
+    28→import FavoriteItem from '~/components/Nav/Favorites/FavoriteItem';
+    29→import { useLocalize, useLocalStorage } from '~/hooks';
+    30→import { getSpecAgentAvatarURL, cn } from '~/utils';
+    31→import { NotificationSeverity } from '~/common';
+    32→import { Collapse } from '~/components/ui';
+    33→import { focusFirstRow } from './focus';
+    34→import Convo from './Convo';
+    35→
+    36→const FAVORITE_ROW_DRAG_TYPE = 'favorite-item';
+    37→
+    38→/** Declared on each row's focus target: a screen-reader user tabbing straight
+    39→ *  to a row would otherwise never meet the section's written hint, leaving the
+    40→ *  only non-pointer way to reorder undiscoverable. */
+    41→const REORDER_SHORTCUTS = 'Alt+ArrowUp Alt+ArrowDown';
+    42→/** The whole section accepts both kinds: a drop anywhere on it pins a chat that
+    43→ *  is not pinned yet, whichever row it happened to land on. */
+    44→const PINNED_ROW_ACCEPTS = [CONVERSATION_DRAG_TYPE, FAVORITE_ROW_DRAG_TYPE];
+    45→/** What a row answers a release with, so the drag can tell a reorder inside
+    46→ *  this list from a drop that filed the chat somewhere else. */
+    47→const PINNED_ROW_DROP_RESULT = { pinnedRowReorder: true } as const;
+    48→
+    49→const noop = () => {};
+    50→
+    51→/** A key identifies a row everywhere in this section, so the encoding has to be
+    52→ *  injective. The favorites API accepts any string for an endpoint or a model,
+    53→ *  so a plain `endpoint::model` join collides: `a::b` + `c` and `a` + `b::c`
+    54→ *  both read back as `a::b::c`, and the dedupe below would then hide one of two
+    55→ *  distinct favorites. Length-prefixing the endpoint makes the split exact. */
+    56→export const favoriteEntryKey = (favorite: Favorite): string => {
+    57→  if (favorite.agentId) {
+    58→    return `agent:${favorite.agentId}`;
+    59→  }
+    60→  if (favorite.spec) {
+    61→    return `spec:${favorite.spec}`;
+    62→  }
+    63→  const endpoint = favorite.endpoint ?? '';
+    64→  return `model:${endpoint.length}:${endpoint}:${favorite.model ?? ''}`;
+    65→};
+    66→
+    67→const convoEntryKey = (conversationId: string): string => `convo:${conversationId}`;
+    68→
+    69→type PinnedEntry =
+    70→  | { key: string; kind: 'favorite'; favorite: Favorite }
+    71→  | { key: string; kind: 'convo'; conversationId: string };
+    72→
+    73→type PinnedRowDragItem = ConversationDragItem & { key: string };
+    74→
+    75→/** Mirrors a favorite row (h-9, icon, title) so the loading swap keeps height. */
+    76→const FavoriteRowSkeleton = () => (
+    77→  <div className="flex w-full items-center rounded-lg p-2" aria-hidden="true">
+    78→    <Skeleton className="me-2 h-5 w-5 rounded-full" />
+    79→    <Skeleton className="h-4 w-24" />
+    80→  </div>
+    81→);
+    82→
+    83→interface DraggablePinnedRowProps {
+    84→  entry: PinnedEntry;
+    85→  conversation?: TConversation;
+    86→  indexOfKey: (key: string) => number;
+    87→  moveEntry: (dragKey: string, hoverKey: string) => void;
+    88→  moveEntryBy: (key: string, delta: number) => void;
+    89→  onDrop: (handledElsewhere: boolean) => void;
+    90→  /** Released while the row's title is being edited, so a drag-select inside
+    91→   *  the rename input is not swallowed by the drag source. */
+    92→  canDrag?: boolean;
+    93→  children: React.ReactNode;
+    94→}
+    95→
+    96→/** Hover-reorder wrapper for the unified pinned list, following the favorites
+    97→ *  pattern: rows shift as the drag passes them and the order commits on drop.
+    98→ *  Touch pointers are excluded, matching every other drag source here, so the
+    99→ *  Alt+Arrow shortcut below is the only way to reorder without a mouse. */
+   100→const DraggablePinnedRow = ({
+   101→  entry,
+   102→  conversation,
+   103→  indexOfKey,
+   104→  moveEntry,
+   105→  moveEntryBy,
+   106→  onDrop,
+   107→  canDrag = true,
+   108→  children,
+   109→}: DraggablePinnedRowProps) => {
+   110→  const ref = useRef<HTMLDivElement>(null);
+   111→  const hasHoverPointer = useMediaQuery('(hover: hover)');
+   112→  const moveAtPointer = (
+   113→    item: PinnedRowDragItem,
+   114→    monitor: DropTargetMonitor<PinnedRowDragItem, unknown>,
+   115→  ) => {
+   116→    /* Record even the dragged row itself: returning to it ends an earlier
+   117→     * external hover, despite having no effect on the order. */
+   118→    markPinnedHover();
+   119→    if (!item.key || item.key === entry.key || !ref.current) {
+   120→      return;
+   121→    }
+   122→    const clientOffset = monitor.getClientOffset();
+   123→    if (!clientOffset) {
+   124→      return;
+   125→    }
+   126→    const rect = ref.current.getBoundingClientRect();
+   127→    if (
+   128→      shouldSwapOnHover({
+   129→        dragIndex: indexOfKey(item.key),
+   130→        hoverIndex: indexOfKey(entry.key),
+   131→        pointerY: clientOffset.y,
+   132→        hoverTop: rect.top,
+   133→        hoverBottom: rect.bottom,
+   134→      })
+   135→    ) {
+   136→      moveEntry(item.key, entry.key);
+   137→    }
+   138→  };
+   139→  const [{ handlerId }, drop] = useDrop<PinnedRowDragItem, unknown, { handlerId: unknown }>({
+   140→    /* A row only takes a drag of its own kind, so a pinned chat never shifts a
+   141→     * pinned agent or model out of the way — not even as a preview. The two
+   142→     * groups are ordered independently, and the drag layer shows no
+   143→     * displacement for a target that cannot receive it. */
+   144→    accept: entry.kind === 'convo' ? CONVERSATION_DRAG_TYPE : FAVORITE_ROW_DRAG_TYPE,
+   145→    /* A release on a row ends a reorder; it files nothing. The row has to stay
+   146→     * droppable to get there — the HTML5 backend reports hover only for targets
+   147→     * that could receive the drag, and the hover is what reorders — so it names
+   148→     * itself in the drop result instead. Without that name, `end` below saw
+   149→     * `monitor.didDrop()` and read the release as a filing action, discarding
+   150→     * the arrangement: every pointer reorder snapped back on release. */
+   151→    drop: (item, monitor) => {
+   152→      // Hover runs before React DnD publishes its latest pointer offset, and
+   153→      // the HTML5 backend batches it on RAF. A quick release may arrive first.
+   154→      // Drop observes the final offset; settle it before end commits the order.
+   155→      moveAtPointer(item, monitor);
+   156→      return PINNED_ROW_DROP_RESULT;
+   157→    },
+   158→    collect(monitor) {
+   159→      return { handlerId: monitor.getHandlerId() };
+   160→    },
+   161→    hover: moveAtPointer,
+   162→  });
+   163→
+   164→  const [{ isDragging }, drag] = useDrag<PinnedRowDragItem, unknown, { isDragging: boolean }>({
+   165→    type: entry.kind === 'convo' ? CONVERSATION_DRAG_TYPE : FAVORITE_ROW_DRAG_TYPE,
+   166→    item: (): PinnedRowDragItem => {
+   167→      beginPinnedDrag();
+   168→      return entry.kind === 'convo'
+   169→        ? {
+   170→            key: entry.key,
+   171→            conversationId: entry.conversationId,
+   172→            chatProjectId: conversation?.chatProjectId ?? null,
+   173→            pinned: conversation?.pinned === true,
+   174→          }
+   175→        : { key: entry.key, conversationId: '', chatProjectId: null, pinned: false };
+   176→    },
+   177→    collect: (monitor) => ({ isDragging: monitor.isDragging() }),
+   178→    /* A drop the list itself answered is a reorder and keeps the arrangement.
+   179→     * Anything else that handled it filed the chat — into a project, or back
+   180→     * into Chats — and a refused external target reports no handler at all, so
+   181→     * the last thing under the pointer settles that case. */
+   182→    end: (_item, monitor) => {
+   183→      const result = monitor.getDropResult() as { pinnedRowReorder?: boolean } | null;
+   184→      const filedElsewhere = monitor.didDrop() && result?.pinnedRowReorder !== true;
+   185→      onDrop(filedElsewhere || endedOverExternalTarget());
+   186→    },
+   187→  });
+   188→
+   189→  drop(ref);
+   190→  drag(hasHoverPointer && canDrag ? ref : null);
+   191→
+   192→  /* Keyboard equivalent of the drag: the shortcut is caught as it bubbles from
+   193→   * whichever element inside the row holds focus, so the row keeps that focus
+   194→   * across the move. It obeys the same gate as the pointer drag, which also
+   195→   * keeps Alt/Option+Arrow doing its usual word-wise caret movement inside an
+   196→   * open rename input rather than moving the row out from under it. */
+   197→  const handleKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+   198→    if (!canDrag) {
+   199→      return;
+   200→    }
+   201→    if (!event.altKey || event.ctrlKey || event.metaKey) {
+   202→      return;
+   203→    }
+   204→    if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') {
+   205→      return;
+   206→    }
+   207→    event.preventDefault();
+   208→    event.stopPropagation();
+   209→    moveEntryBy(entry.key, event.key === 'ArrowUp' ? -1 : 1);
+   210→  };
+   211→
+   212→  return (
+   213→    <div
+   214→      ref={ref}
+   215→      className={isDragging ? 'opacity-0' : undefined}
+   216→      data-handler-id={handlerId}
+   217→      onKeyDown={handleKeyDown}
+   218→    >
+   219→      {children}
+   220→    </div>
+   221→  );
+   222→};
+   223→
+   224→interface FavoriteRowProps {
+   225→  favorite: Favorite;
+   226→  agentsMap: ReturnType<typeof useFavoritesData>['agentsMap'];
+   227→  specsMap: ReturnType<typeof useFavoritesData>['specsMap'];
+   228→  endpointsConfig: TEndpointsConfig;
+   229→  isAgentsLoading: boolean;
+   230→  onSelectEndpoint: SelectEndpointHandler;
+   231→  onSelectSpec: SelectSpecHandler;
+   232→  onRemoveFocus: () => void;
+   233→  keyShortcuts?: string;
+   234→}
+   235→
+   236→/** One favorite rendered for the unified list; skeleton while its agent is
+   237→ *  still resolving, nothing if the agent or spec is gone (cleanup handles the
+   238→ *  latter asynchronously). */
+   239→const FavoriteRow = ({
+   240→  favorite,
+   241→  agentsMap,
+   242→  specsMap,
+   243→  endpointsConfig,
+   244→  isAgentsLoading,
+   245→  onSelectEndpoint,
+   246→  onSelectSpec,
+   247→  onRemoveFocus,
+   248→  keyShortcuts,
+   249→}: FavoriteRowProps) => {
+   250→  if (favorite.agentId) {
+   251→    const agent = agentsMap[favorite.agentId];
+   252→    if (!agent) {
+   253→      if (isAgentsLoading) {
+   254→        return <FavoriteRowSkeleton />;
+   255→      }
+   256→      return null;
+   257→    }
+   258→    return (
+   259→      <FavoriteItem
+   260→        item={agent}
+   261→        type="agent"
+   262→        onSelectEndpoint={onSelectEndpoint}
+   263→        onRemoveFocus={onRemoveFocus}
+   264→        keyShortcuts={keyShortcuts}
+   265→      />
+   266→    );
+   267→  }
+   268→  if (favorite.spec) {
+   269→    const spec = specsMap[favorite.spec];
+   270→    if (!spec) {
+   271→      return null;
+   272→    }
+   273→    return (
+   274→      <FavoriteItem
+   275→        item={spec}
+   276→        type="spec"
+   277→        onSelectSpec={onSelectSpec}
+   278→        endpointsConfig={endpointsConfig}
+   279→        agentAvatarURL={getSpecAgentAvatarURL(spec, agentsMap)}
+   280→        onRemoveFocus={onRemoveFocus}
+   281→        keyShortcuts={keyShortcuts}
+   282→      />
+   283→    );
+   284→  }
+   285→  if (favorite.model && favorite.endpoint) {
+   286→    return (
+   287→      <FavoriteItem
+   288→        item={{ model: favorite.model, endpoint: favorite.endpoint }}
+   289→        type="model"
+   290→        onSelectEndpoint={onSelectEndpoint}
+   291→        endpointsConfig={endpointsConfig}
+   292→        onRemoveFocus={onRemoveFocus}
+   293→        keyShortcuts={keyShortcuts}
+   294→      />
+   295→    );
+   296→  }
+   297→  return null;
+   298→};
+   299→
+   300→interface PinnedSectionProps {
+   301→  conversations: TConversation[];
+   302→  toggleNav: () => void;
+   303→  isSmallScreen?: boolean;
+   304→  /** True when this list is the whole pinned list: no bookmark filter, and the
+   305→   *  pinned query has finished draining. Only then can keys the section cannot
+   306→   *  resolve be treated as gone rather than merely unseen. */
+   307→  membershipComplete?: boolean;
+   308→  /** When the pinned query last delivered, compared against the stored order's
+   309→   *  own fetch time to tell membership that reconciled with it from membership
+   310→   *  that is merely still inside its own freshness window. */
+   311→  membershipUpdatedAt?: number;
+   312→}
+   313→
+   314→/** Pinned chats and pinned agents/models/specs (favorites) render as ONE
+   315→ *  reorderable list, kept in two groups — favorites first, then chats — because
+   316→ *  a row only reorders against its own kind. The order persists per user, and
+   317→ *  the section opens with the same collapse motion as the Projects section
+   318→ *  above it. */
+   319→const PinnedSection = ({
+   320→  conversations,
+   321→  toggleNav,
+   322→  isSmallScreen,
+   323→  membershipComplete = false,
+   324→  membershipUpdatedAt = 0,
+   325→}: PinnedSectionProps) => {
+   326→  const localize = useLocalize();
+   327→  const [isExpanded, setIsExpanded] = useLocalStorage('pinnedSectionExpanded', true);
+   328→  const { data: activeJobsData } = useActiveJobs();
+   329→  const favoritesData = useFavoritesData();
+   330→  /* Gated on success, not on the fetch having been attempted: a failed GET
+   331→   * still reports as fetched while leaving the order undefined, and merging
+   332→   * against that `?? []` then cancelling the retry would post only the visible
+   333→   * keys and discard saved positions for good. A reconciling refetch counts as
+   334→   * not ready either: returning to this tab after another changed the order
+   335→   * would otherwise let a reorder cancel that refetch and post the stale
+   336→   * arrangement straight back over it. */
+   337→  const {
+   338→    data: storedOrder,
+   339→    isSuccess: orderFetched,
+   340→    isFetching: orderFetching,
+   341→    dataUpdatedAt: orderUpdatedAt,
+   342→  } = useGetPinnedOrderQuery();
+   343→  const orderLoaded = orderFetched && !orderFetching;
+   344→  const updatePinnedOrder = useUpdatePinnedOrderMutation();
+   345→  const pinMutation = usePinConversationMutation();
+   346→  const { showToast } = useToastContext();
+   347→  const sectionRef = useRef<HTMLDivElement | null>(null);
+   348→  const activeJobIds = useMemo(
+   349→    () => new Set(activeJobsData?.activeJobIds ?? []),
+   350→    [activeJobsData?.activeJobIds],
+   351→  );
+   352→
+   353→  /* Dropping an unpinned conversation anywhere on the section pins it. Row
+   354→   * drops reorder instead (their targets carry no drop handler, so a drop that
+   355→   * misses them bubbles here), and already-pinned rows are refused so an
+   356→   * aborted reorder never re-pins anything. */
+   357→  const [{ isPinOver, canPin }, pinDropRef] = useDrop<
+   358→    ConversationDragItem,
+   359→    unknown,
+   360→    { isPinOver: boolean; canPin: boolean }
+   361→  >({
+   362→    accept: PINNED_ROW_ACCEPTS,
+   363→    canDrop: (item, monitor) =>
+   364→      monitor.getItemType() === CONVERSATION_DRAG_TYPE && item.pinned !== true,
+   365→    /* The header and the padding around the rows are part of this list too, so
+   366→     * a drag that wandered onto a project and came back to rest on one of them
+   367→     * is still a reorder even though no row hover ran. */
+   368→    hover: () => markPinnedHover(),
+   369→    drop: (item, monitor) => {
+   370→      if (monitor.getItemType() !== CONVERSATION_DRAG_TYPE) {
+   371→        return;
+   372→      }
+   373→      if (!item.conversationId) {
+   374→        return;
+   375→      }
+   376→      pinMutation.mutate(
+   377→        { conversationId: item.conversationId, pinned: true },
+   378→        {
+   379→          onError: () => {
+   380→            showToast({
+   381→              message: localize('com_ui_pin_error'),
+   382→              severity: NotificationSeverity.ERROR,
+   383→              showIcon: true,
+   384→            });
+   385→          },
+   386→        },
+   387→      );
+   388→    },
+   389→    collect: (monitor) => ({ isPinOver: monitor.isOver(), canPin: monitor.canDrop() }),
+   390→  });
+   391→
+   392→  /* An empty section still needs to receive the drop, so it materializes as a
+   393→   * drop zone while a conversation is being dragged. */
+   394→  const draggingConversation = useDragLayer(
+   395→    (monitor) => monitor.isDragging() && monitor.getItemType() === CONVERSATION_DRAG_TYPE,
+   396→  );
+   397→
+   398→  /** Natural order: favorites in their stored order, then pinned chats. Keys
+   399→   *  identify a row everywhere here, so a repeat has to be dropped rather than
+   400→   *  rendered: the `/favorites` payload validator accepts a duplicate entry,
+   401→   *  and one would give two rows the same React key, point every drag at the
+   402→   *  first copy, and make the order endpoint reject the write outright. */
+   403→  const naturalEntries = useMemo<PinnedEntry[]>(() => {
+   404→    const entries: PinnedEntry[] = [];
+   405→    const seen = new Set<string>();
+   406→    for (const favorite of favoritesData.favorites) {
+   407→      const key = favoriteEntryKey(favorite);
+   408→      if (seen.has(key)) {
+   409→        continue;
+   410→      }
+   411→      seen.add(key);
+   412→      entries.push({ key, kind: 'favorite', favorite });
+   413→    }
+   414→    for (const convo of conversations) {
+   415→      const conversationId = convo.conversationId;
+   416→      if (!conversationId) {
+   417→        continue;
+   418→      }
+   419→      const key = convoEntryKey(conversationId);
+   420→      if (seen.has(key)) {
+   421→        continue;
+   422→      }
+   423→      seen.add(key);
+   424→      entries.push({ key, kind: 'convo', conversationId });
+   425→    }
+   426→    return entries;
+   427→  }, [favoritesData.favorites, conversations]);
+   428→
+   429→  /** Stored keys order the entries they still resolve to; the rest append in
+   430→   *  natural order, so a stale order never hides an item. Kinds stay grouped —
+   431→   *  pinned agents and models first, then pinned chats — because neither kind
+   432→   *  can be dragged through the other: an order saved before that rule, with
+   433→   *  the two interleaved, would otherwise leave a row walled in by neighbours
+   434→   *  it is not allowed to swap with. */
+   435→  const orderedEntries = useMemo<PinnedEntry[]>(() => {
+   436→    if (!storedOrder || storedOrder.length === 0) {
+   437→      return naturalEntries;
+   438→    }
+   439→    const byKey = new Map(naturalEntries.map((entry) => [entry.key, entry]));
+   440→    const ordered: PinnedEntry[] = [];
+   441→    const placed = new Set<string>();
+   442→    for (const key of storedOrder) {
+   443→      const entry = byKey.get(key);
+   444→      if (entry) {
+   445→        ordered.push(entry);
+   446→        placed.add(key);
+   447→      }
+   448→    }
+   449→    for (const entry of naturalEntries) {
+   450→      if (!placed.has(entry.key)) {
+   451→        ordered.push(entry);
+   452→      }
+   453→    }
+   454→    return [
+   455→      ...ordered.filter((entry) => entry.kind === 'favorite'),
+   456→      ...ordered.filter((entry) => entry.kind === 'convo'),
+   457→    ];
+   458→  }, [storedOrder, naturalEntries]);
+   459→
+   460→  /* The live list the drag mutates; keyed ordering only, so a refetch under a
+   461→   * drag cannot clobber the in-flight arrangement. */
+   462→  const dragEntriesRef = useRef<PinnedEntry[]>(orderedEntries);
+   463→  const dragMembershipRef = useRef(naturalEntries);
+   464→  const [liveEntries, setLiveEntries] = useState<PinnedEntry[] | null>(null);
+   465→  const [announcement, setAnnouncement] = useState('');
+   466→  /** `RenameForm` has no blur cancellation, so a second row's form can open
+   467→   *  while the first is still mounted. Every renaming row has to keep its drag
+   468→   *  source released, not just the most recent one. */
+   469→  const [renamingKeys, setRenamingKeys] = useState<ReadonlySet<string>>(() => new Set());
+   470→
+   471→  const setRowRenaming = useCallback((key: string, renaming: boolean) => {
+   472→    setRenamingKeys((previous) => {
+   473→      if (previous.has(key) === renaming) {
+   474→        return previous;
+   475→      }
+   476→      const next = new Set(previous);
+   477→      if (renaming) {
+   478→        next.add(key);
+   479→      } else {
+   480→        next.delete(key);
+   481→      }
+   482→      return next;
+   483→    });
+   484→  }, []);
+   485→
+   486→  if (orderedEntries !== dragEntriesRef.current && liveEntries === null) {
+   487→    dragEntriesRef.current = orderedEntries;
+   488→    dragMembershipRef.current = naturalEntries;
+   489→  }
+   490→
+   491→  const displayEntries = liveEntries ?? orderedEntries;
+   492→
+   493→  /** Live index of a key in the list the drag is mutating, so a hover can tell
+   494→   *  which side of the hovered row the drag is coming from. */
+   495→  /* Read inside callbacks that outlive the render they were created in. */
+   496→  const orderLoadedRef = useRef(orderLoaded);
+   497→  orderLoadedRef.current = orderLoaded;
+   498→
+   499→  const indexOfKey = useCallback(
+   500→    (key: string) => dragEntriesRef.current.findIndex((entry) => entry.key === key),
+   501→    [],
+   502→  );
+   503→
+   504→  /* Every drag end runs the commit, including drags that only filed a chat
+   505→   * into a project and drags that were abandoned without passing a row. Only a
+   506→   * drag that actually reordered something is worth a write. */
+   507→  const hasReorderedRef = useRef(false);
+   508→  /* Bumped by every move. A write that settles after the user has already
+   509→   * arranged the list again must not clear the snapshot showing that newer
+   510→   * arrangement, or the rows would snap back to the older order while the drag
+   511→   * still holds, and releasing would save something no longer on screen. */
+   512→  const arrangementRef = useRef(0);
+   513→
+   514→  /** A move only ever swaps two rows of the same kind. Chats and favorites are
+   515→   *  two independently ordered groups, so the position announced for the
+   516→   *  keyboard path counts within the moved row's own group. */
+   517→  const moveEntry = useCallback((dragKey: string, hoverKey: string) => {
+   518→    const list = [...dragEntriesRef.current];
+   519→    const from = list.findIndex((entry) => entry.key === dragKey);
+   520→    const to = list.findIndex((entry) => entry.key === hoverKey);
+   521→    if (from < 0 || to < 0 || from === to || list[from].kind !== list[to].kind) {
+   522→      return;
+   523→    }
+   524→    const [moved] = list.splice(from, 1);
+   525→    list.splice(to, 0, moved);
+   526→    dragEntriesRef.current = list;
+   527→    hasReorderedRef.current = true;
+   528→    arrangementRef.current += 1;
+   529→    setLiveEntries(list);
+   530→  }, []);
+   531→
+   532→  /** Keyboard reorder: one step per keypress, persisted immediately, with the
+   533→   *  new position announced because nothing visual conveys it to a screen
+   534→   *  reader. A step that would leave the row's own group does nothing, matching
+   535→   *  what the pointer can do. */
+   536→  const moveEntryBy = useCallback(
+   537→    (key: string, delta: number) => {
+   538→      if (!orderLoadedRef.current) {
+   539→        return;
+   540→      }
+   541→      const list = [...dragEntriesRef.current];
+   542→      const from = list.findIndex((entry) => entry.key === key);
+   543→      const to = from + delta;
+   544→      if (from < 0 || to < 0 || to >= list.length || list[from].kind !== list[to].kind) {
+   545→        return;
+   546→      }
+   547→      const kind = list[from].kind;
+   548→      const [moved] = list.splice(from, 1);
+   549→      list.splice(to, 0, moved);
+   550→      dragEntriesRef.current = list;
+   551→      hasReorderedRef.current = true;
+   552→      arrangementRef.current += 1;
+   553→      setLiveEntries(list);
+   554→      const group = list.filter((entry) => entry.kind === kind);
+   555→      const position = group.findIndex((entry) => entry.key === key) + 1;
+   556→      setAnnouncement(
+   557→        localize('com_ui_moved_to_position', { 0: `${position}`, 1: `${group.length}` }),
+   558→      );
+   559→      commitOrderRef.current();
+   560→    },
+   561→    [localize],
+   562→  );
+   563→
+   564→  const commitOrder = useCallback(
+   565→    (handledElsewhere = false) => {
+   566→      if (!hasReorderedRef.current) {
+   567→        return;
+   568→      }
+   569→      /* A reconciling refetch is in flight. `canDrag` only disconnects the
+   570→       * source for drags that have not started, so one already under the
+   571→       * pointer still lands here, and the array built now would be merged onto
+   572→       * the order that refetch is about to replace. The arrangement is kept
+   573→       * and written once the fresh order arrives, below. */
+   574→      if (!handledElsewhere && !orderLoadedRef.current) {
+   575→        return;
+   576→      }
+   577→      hasReorderedRef.current = false;
+   578→      const arrangement = arrangementRef.current;
+   579→      if (handledElsewhere) {
+   580→        /* The drop filed the chat into a project or back into Chats. The rows
+   581→         * the pointer crossed on the way shifted only incidentally, so that
+   582→         * movement is discarded rather than saved as a deliberate reorder. */
+   583→        setLiveEntries(null);
+   584→        return;
+   585→      }
+   586→      const entries = dragEntriesRef.current;
+   587→      const visibleKeys = entries.map((entry) => entry.key);
+   588→      /* Merging keeps keys the section cannot currently see, which is right
+   589→       * while a bookmark filter hides rows or the pinned query is still
+   590→       * draining. Once the visible list is known to be the whole list, those
+   591→       * keys really are gone and replacing prunes them: merging forever would
+   592→       * grow the array until the endpoint's size guard rejected every write. */
+   593→      /* Every membership source has to have actually delivered, not merely
+   594→       * stopped loading: a favorites fetch that exhausted its retries leaves
+   595→       * the list empty, and pruning against that would drop every favorite key
+   596→       * from the stored order. */
+   597→      /* Current enough, too, and not merely settled: the pinned query holds its
+   598→       * data for five minutes while the order has no such window, so focusing a
+   599→       * tab reconciles the order on its own. Pruning that newer order against
+   600→       * the older membership beside it would drop the position of a favorite
+   601→       * or conversation another tab pinned in between. Until both membership
+   602→       * sources catch up, merging keeps those keys. */
+   603→      const membershipCurrent = membershipComplete && membershipUpdatedAt >= orderUpdatedAt;
+   604→      /* Reconciled membership can arrive while the live arrangement is frozen.
+   605→       * Its keys are not necessarily represented by that older snapshot. */
+   606→      const canPrune =
+   607→        membershipCurrent &&
+   608→        favoritesData.isLoaded &&
+   609→        favoritesData.dataUpdatedAt >= orderUpdatedAt &&
+   610→        dragMembershipRef.current === naturalEntries;
+   611→      const nextOrder = canPrune ? visibleKeys : mergeVisibleOrder(storedOrder ?? [], visibleKeys);
+   612→
+   613→      updatePinnedOrder.mutate(nextOrder, {
+   614→        /* `pinnedOrder` is the only ordering the section reads: no consumer of
+   615→         * the favorites array depends on its order, so writing the arrangement
+   616→         * back there a second time bought nothing and raced the membership
+   617→         * mutations that share that array. */
+   618→        onError: () => {
+   619→          showToast({
+   620→            message: localize('com_ui_reorder_error'),
+   621→            severity: NotificationSeverity.ERROR,
+   622→            showIcon: true,
+   623→          });
+   624→        },
+   625→        /* Release the local arrangement once the write resolves either way: by
+   626→         * then the optimistic cache carries it, or the rollback has replaced it
+   627→         * with what the server actually holds. */
+   628→        onSettled: () => {
+   629→          if (arrangementRef.current !== arrangement) {
+   630→            return;
+   631→          }
+   632→          setLiveEntries(null);
+   633→        },
+   634→      });
+   635→    },
+   636→    [
+   637→      updatePinnedOrder,
+   638→      storedOrder,
+   639→      membershipComplete,
+   640→      membershipUpdatedAt,
+   641→      orderUpdatedAt,
+   642→      naturalEntries,
+   643→      favoritesData.isLoaded,
+   644→      favoritesData.dataUpdatedAt,
+   645→      showToast,
+   646→      localize,
+   647→    ],
+   648→  );
+   649→
+   650→  /* `moveEntryBy` is declared above `commitOrder` and both are stable across a
+   651→   * drag, so the commit is reached through a ref rather than reordering them
+   652→   * into a dependency cycle. */
+   653→  const commitOrderRef = useRef(commitOrder);
+   654→  commitOrderRef.current = commitOrder;
+   655→
+   656→  /* Flushes an arrangement that arrived while the order was reconciling. The
+   657→   * query settling is the external event being waited on, and `commitOrder`
+   658→   * returns immediately unless one is actually held. */
+   659→  useEffect(() => {
+   660→    if (orderLoaded) {
+   661→      commitOrderRef.current();
+   662→    }
+   663→  }, [orderLoaded]);
+   664→
+   665→  /* `FavoriteItem` reports the removal only once its row is already gone, so
+   666→   * there is no position left to search around: focus goes to the first
+   667→   * surviving row, matching what the favorites list did before this merge. */
+   668→  const handleRemoveFocus = useCallback(() => {
+   669→    focusFirstRow(sectionRef.current);
+   670→  }, []);
+   671→
+   672→  const handleSelectEndpoint = useCallback<SelectEndpointHandler>(
+   673→    (...args) => {
+   674→      favoritesData.onSelectEndpoint?.(...args);
+   675→      if (isSmallScreen) {
+   676→        toggleNav();
+   677→      }
+   678→    },
+   679→    [favoritesData, isSmallScreen, toggleNav],
+   680→  );
+   681→
+   682→  const handleSelectSpec = useCallback<SelectSpecHandler>(
+   683→    (...args) => {
+   684→      favoritesData.onSelectSpec?.(...args);
+   685→      if (isSmallScreen) {
+   686→        toggleNav();
+   687→      }
+   688→    },
+   689→    [favoritesData, isSmallScreen, toggleNav],
+   690→  );
+   691→
+   692→  const conversationByKey = useMemo(
+   693→    () => new Map(conversations.map((convo) => [convo.conversationId ?? '', convo])),
+   694→    [conversations],
+   695→  );
+   696→
+   697→  /** The section root is both the pin drop target and the scope focus falls
+   698→   *  back into when a row is removed. */
+   699→  const setSectionRef = useCallback(
+   700→    (node: HTMLDivElement | null) => {
+   701→      sectionRef.current = node;
+   702→      pinDropRef(node);
+   703→    },
+   704→    [pinDropRef],
+   705→  );
+   706→
+   707→  /* The section renders while either half is present or still resolving, and
+   708→   * drops out only once both are definitively empty. A live conversation drag
+   709→   * keeps it mounted as a drop target even when empty. */
+   710→  if (naturalEntries.length === 0 && !favoritesData.isLoading && !draggingConversation) {
+   711→    return null;
+   712→  }
+   713→
+   714→  return (
+   715→    <div
+   716→      ref={setSectionRef}
+   717→      className="flex flex-col px-3 pt-3 text-sm"
+   718→      role="region"
+   719→      /** The focus handoff after an unpin must act only on rows in this list:
+   720→       *  `ConversationsSection` is also a labelled region and an ancestor of
+   721→       *  the project rows, which render the same `Convo` and survive unpinning. */
+   722→      data-pinned-section=""
+   723→      aria-label={localize('com_ui_pinned')}
+   724→    >
+   725→      <div
+   726→        className={cn(
+   727→          'flex h-8 w-full items-center pe-1',
+   728→          isPinOver && canPin && 'bg-surface-nav-selected rounded-lg',
+   729→        )}
+   730→      >
+   731→        <button
+   732→          onClick={() => setIsExpanded(!isExpanded)}
+   733→          className={cn(buttonVariants({ variant: 'section-header' }), 'group min-w-0 flex-1')}
+   734→          type="button"
+   735→          aria-expanded={isExpanded}
+   736→        >
+   737→          <span className="truncate select-none">{localize('com_ui_pinned')}</span>
+   738→          <ChevronDown
+   739→            className={cn(
+   740→              'h-3 w-3 shrink-0 transition-transform duration-200',
+   741→              isExpanded ? '' : '-rotate-90',
+   742→            )}
+   743→            aria-hidden="true"
+   744→          />
+   745→        </button>
+   746→      </div>
+   747→
+   748→      <Collapse open={isExpanded}>
+   749→        {/* No scroll pane of its own: the sidebar scrolls as one surface. */}
+   750→        <div className="pt-0.5">
+   751→          {displayEntries.length === 0 && draggingConversation && (
+   752→            <div
+   753→              className={cn(
+   754→                'text-text-secondary flex h-9 items-center justify-center rounded-lg border border-dashed text-xs',
+   755→                isPinOver && canPin
+   756→                  ? 'border-border-medium bg-surface-nav-selected text-text-primary'
+   757→                  : 'border-border-light',
+   758→              )}
+   759→              aria-hidden="true"
+   760→            >
+   761→              {localize('com_ui_drop_to_pin')}
+   762→            </div>
+   763→          )}
+   764→          <p className="sr-only">{localize('com_ui_pinned_reorder_hint')}</p>
+   765→          <p className="sr-only" role="status" aria-live="polite">
+   766→            {announcement}
+   767→          </p>
+   768→          <ul className="m-0 list-none p-0">
+   769→            {favoritesData.isLoading && favoritesData.favorites.length === 0 && (
+   770→              <li className="list-none">
+   771→                <FavoriteRowSkeleton />
+   772→              </li>
+   773→            )}
+   774→            {displayEntries.map((entry) => {
+   775→              if (entry.kind === 'convo') {
+   776→                const convo = conversationByKey.get(entry.conversationId);
+   777→                if (!convo) {
+   778→                  return null;
+   779→                }
+   780→                return (
+   781→                  <li key={entry.key} className="list-none">
+   782→                    <DraggablePinnedRow
+   783→                      entry={entry}
+   784→                      conversation={convo}
+   785→                      indexOfKey={indexOfKey}
+   786→                      moveEntry={moveEntry}
+   787→                      moveEntryBy={moveEntryBy}
+   788→                      onDrop={commitOrder}
+   789→                      canDrag={orderLoaded && !renamingKeys.has(entry.key)}
+   790→                    >
+   791→                      <Convo
+   792→                        conversation={convo}
+   793→                        retainView={noop}
+   794→                        toggleNav={toggleNav}
+   795→                        isGenerating={activeJobIds.has(convo.conversationId ?? '')}
+   796→                        keyShortcuts={orderLoaded ? REORDER_SHORTCUTS : undefined}
+   797→                        onRenamingChange={(renaming) => setRowRenaming(entry.key, renaming)}
+   798→                      />
+   799→                    </DraggablePinnedRow>
+   800→                  </li>
+   801→                );
+   802→              }
+   803→              return (
+   804→                <li key={entry.key} className="list-none">
+   805→                  <DraggablePinnedRow
+   806→                    entry={entry}
+   807→                    indexOfKey={indexOfKey}
+   808→                    moveEntry={moveEntry}
+   809→                    moveEntryBy={moveEntryBy}
+   810→                    onDrop={commitOrder}
+   811→                    canDrag={orderLoaded}
+   812→                  >
+   813→                    <FavoriteRow
+   814→                      favorite={entry.favorite}
+   815→                      agentsMap={favoritesData.agentsMap}
+   816→                      specsMap={favoritesData.specsMap}
+   817→                      endpointsConfig={favoritesData.endpointsConfig}
+   818→                      isAgentsLoading={favoritesData.isAgentsLoading}
+   819→                      onSelectEndpoint={handleSelectEndpoint}
+   820→                      onSelectSpec={handleSelectSpec}
+   821→                      onRemoveFocus={handleRemoveFocus}
+   822→                      keyShortcuts={orderLoaded ? REORDER_SHORTCUTS : undefined}
+   823→                    />
+   824→                  </DraggablePinnedRow>
+   825→                </li>
+   826→              );
+   827→            })}
+   828→          </ul>
+   829→        </div>
+   830→      </Collapse>
+   831→    </div>
+   832→  );
+   833→};
+   834→
+   835→PinnedSection.displayName = 'PinnedSection';
+   836→
+   837→export default memo(PinnedSection);
+   838→

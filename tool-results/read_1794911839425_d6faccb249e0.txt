@@ -1,0 +1,731 @@
+     1→import { useMemo, memo, type FC, useCallback, useEffect, useRef } from 'react';
+     2→import { useDrop } from 'react-dnd';
+     3→import throttle from 'lodash/throttle';
+     4→import { useRecoilValue } from 'recoil';
+     5→import { useAtomValue, useSetAtom } from 'jotai';
+     6→import { List, CellMeasurer, CellMeasurerCache } from 'react-virtualized';
+     7→import {
+     8→  Button,
+     9→  Shimmer,
+    10→  Spinner,
+    11→  EmptyState,
+    12→  useRemScale,
+    13→  buttonVariants,
+    14→} from '@librechat/client';
+    15→import {
+    16→  Archive,
+    17→  ChevronDown,
+    18→  MessageSquareDashed,
+    19→  MessageSquareOff,
+    20→  SearchX,
+    21→  TriangleAlert,
+    22→} from 'lucide-react';
+    23→import type { TConversation } from 'librechat-data-provider';
+    24→import type { LucideIcon } from 'lucide-react';
+    25→import type { ReactNode } from 'react';
+    26→import type { ConversationDragItem } from './dnd';
+    27→import {
+    28→  chatFilterCountAtom,
+    29→  chatFilterTagsAtom,
+    30→  chatSortAtom,
+    31→  isAlphabeticalSort,
+    32→  isArchivedChatViewAtom,
+    33→  resetChatFiltersAtom,
+    34→} from './chatFilters';
+    35→import {
+    36→  CONVERSATION_DRAG_TYPE,
+    37→  markExternalHover,
+    38→  useAssignDroppedConversation,
+    39→  useEffectiveProjectId,
+    40→  useUnpinDroppedConversation,
+    41→} from './dnd';
+    42→import {
+    43→  isStatusGroup,
+    44→  unlistedRunningIds,
+    45→  RUNNING_CHATS_GROUP,
+    46→  FINISHED_CHATS_GROUP,
+    47→  groupConversationsByStatus,
+    48→} from './running';
+    49→import { useLocalize, TranslationKeys, useElementSize, useOuterScrollWindow } from '~/hooks';
+    50→import { useActiveJobs, useRunningConversationsQuery } from '~/data-provider';
+    51→import { facetFilterCountAtom, resetFacetsAtom } from './facets';
+    52→import useDrawerViewport from '~/hooks/Nav/useDrawerViewport';
+    53→import { groupConversations, cn } from '~/utils';
+    54→import { ListLoading } from '~/components/ui';
+    55→import Convo from './Convo';
+    56→import store from '~/store';
+    57→
+    58→export type CellPosition = {
+    59→  columnIndex: number;
+    60→  rowIndex: number;
+    61→};
+    62→
+    63→export type MeasuredCellParent = {
+    64→  invalidateCellSizeAfterRender?: ((cell: CellPosition) => void) | undefined;
+    65→  recomputeGridSize?: ((cell: CellPosition) => void) | undefined;
+    66→};
+    67→
+    68→interface ConversationsProps {
+    69→  conversations: Array<TConversation | null>;
+    70→  moveToTop: () => void;
+    71→  toggleNav: () => void;
+    72→  containerRef: React.RefObject<List>;
+    73→  loadMoreConversations: () => void;
+    74→  isLoading: boolean;
+    75→  isSearchLoading: boolean;
+    76→  isChatsExpanded: boolean;
+    77→  setIsChatsExpanded: (expanded: boolean) => void;
+    78→  /** Actions for the Chats header, alongside the Projects header's own. */
+    79→  chatsHeaderTrailing?: ReactNode;
+    80→  /** Whether another page exists, so an empty list can be told apart from an unpaged one. */
+    81→  hasNextPage?: boolean;
+    82→  /** Whether the initial conversations request failed without usable rows. */
+    83→  isError?: boolean;
+    84→  /** Re-run the conversations request from the error state. */
+    85→  onRetry?: () => void;
+    86→  /** The sidebar's single scroll viewport: the list is windowed by it rather than
+    87→   *  scrolling on its own, so the sections above it scroll with the chats. */
+    88→  scrollViewport: HTMLElement | null;
+    89→  /** Wrapper around everything inside that viewport, whose height changes when a
+    90→   *  section above the list expands or collapses. */
+    91→  scrollContent: HTMLElement | null;
+    92→  /** The account holds projects, rendered above this list. The Chats section asks for
+    93→   *  chats that belong to no project, so its emptiness then means "everything is filed"
+    94→   *  rather than "the account has nothing". */
+    95→  accountHasProjects?: boolean;
+    96→}
+    97→
+    98→interface MeasuredRowProps {
+    99→  cache: CellMeasurerCache;
+   100→  rowKey: string;
+   101→  parent: MeasuredCellParent;
+   102→  index: number;
+   103→  style: React.CSSProperties;
+   104→  children: React.ReactNode;
+   105→}
+   106→
+   107→/** Reusable wrapper for virtualized row measurement.
+   108→ *  The List renders role="grid" over a role="rowgroup" container, so each row carries the
+   109→ *  row/gridcell roles those parents require of their children. */
+   110→const MeasuredRow: FC<MeasuredRowProps> = memo(
+   111→  ({ cache, rowKey, parent, index, style, children }) => (
+   112→    <CellMeasurer cache={cache} columnIndex={0} key={rowKey} parent={parent} rowIndex={index}>
+   113→      {({ registerChild }) => (
+   114→        <div
+   115→          ref={registerChild as React.LegacyRef<HTMLDivElement>}
+   116→          style={style}
+   117→          className="px-3"
+   118→          data-testid="convo-list-row"
+   119→          role="row"
+   120→        >
+   121→          <div role="gridcell">{children}</div>
+   122→        </div>
+   123→      )}
+   124→    </CellMeasurer>
+   125→  ),
+   126→);
+   127→
+   128→MeasuredRow.displayName = 'MeasuredRow';
+   129→
+   130→interface ChatsHeaderProps {
+   131→  isExpanded: boolean;
+   132→  onToggle: () => void;
+   133→  /** Section-scoped actions, mirroring the Projects header. */
+   134→  trailing?: ReactNode;
+   135→  /** Drop-target affordance while a project conversation is dragged over the section. */
+   136→  highlight?: boolean;
+   137→}
+   138→
+   139→/** Collapsible header for the Chats section */
+   140→const ChatsHeader: FC<ChatsHeaderProps> = memo(({ isExpanded, onToggle, trailing, highlight }) => {
+   141→  const localize = useLocalize();
+   142→
+   143→  return (
+   144→    <div
+   145→      className={cn(
+   146→        'flex h-8 w-full items-center pr-1',
+   147→        highlight && 'bg-surface-nav-selected rounded-lg',
+   148→      )}
+   149→    >
+   150→      <button
+   151→        onClick={onToggle}
+   152→        className={cn(buttonVariants({ variant: 'section-header' }), 'group min-w-0 flex-1')}
+   153→        type="button"
+   154→        aria-expanded={isExpanded}
+   155→      >
+   156→        <span className="truncate select-none">{localize('com_ui_chats')}</span>
+   157→        <ChevronDown
+   158→          className={cn(
+   159→            'h-3 w-3 shrink-0 transition-transform duration-200',
+   160→            isExpanded ? '' : '-rotate-90',
+   161→          )}
+   162→          aria-hidden="true"
+   163→        />
+   164→      </button>
+   165→      {trailing}
+   166→    </div>
+   167→  );
+   168→});
+   169→
+   170→ChatsHeader.displayName = 'ChatsHeader';
+   171→
+   172→type DateLabelProps = {
+   173→  groupName: string;
+   174→  isFirst?: boolean;
+   175→  isAlphabetical?: boolean;
+   176→  /** Status groups show how many chats they hold; date groups leave this out. */
+   177→  count?: number;
+   178→};
+   179→
+   180→const statusSectionLabels: Record<string, TranslationKeys> = {
+   181→  [RUNNING_CHATS_GROUP]: 'com_a11y_chats_running_section',
+   182→  [FINISHED_CHATS_GROUP]: 'com_a11y_chats_finished_section',
+   183→};
+   184→
+   185→const DateLabel: FC<DateLabelProps> = memo(
+   186→  ({ groupName, isFirst, isAlphabetical = false, count }) => {
+   187→    const localize = useLocalize();
+   188→    const displayName = localize(groupName as TranslationKeys) || groupName;
+   189→    const statusLabel = statusSectionLabels[groupName] as TranslationKeys | undefined;
+   190→    let ariaLabel: string;
+   191→    if (statusLabel) {
+   192→      ariaLabel = localize(statusLabel, { count: count ?? 0 });
+   193→    } else if (isAlphabetical) {
+   194→      ariaLabel = localize('com_a11y_chats_alpha_section', { letter: displayName });
+   195→    } else {
+   196→      ariaLabel = localize('com_a11y_chats_date_section', { date: displayName });
+   197→    }
+   198→    return (
+   199→      <h2
+   200→        aria-label={ariaLabel}
+   201→        className={cn(
+   202→          'text-text-secondary pt-0.5 pl-1 text-xs',
+   203→          isFirst === true ? 'mt-0' : 'mt-1.5',
+   204→        )}
+   205→      >
+   206→        {displayName}
+   207→        {count != null && <span className="text-text-tertiary"> · {count}</span>}
+   208→      </h2>
+   209→    );
+   210→  },
+   211→);
+   212→
+   213→DateLabel.displayName = 'DateLabel';
+   214→
+   215→type FlattenedItem =
+   216→  | { type: 'header'; groupName: string; count?: number }
+   217→  | { type: 'convo'; convo: TConversation }
+   218→  | { type: 'loading' };
+   219→
+   220→const Conversations: FC<ConversationsProps> = ({
+   221→  conversations: rawConversations,
+   222→  moveToTop,
+   223→  toggleNav,
+   224→  containerRef,
+   225→  loadMoreConversations,
+   226→  isLoading,
+   227→  isSearchLoading,
+   228→  isChatsExpanded,
+   229→  setIsChatsExpanded,
+   230→  chatsHeaderTrailing,
+   231→  hasNextPage = false,
+   232→  isError = false,
+   233→  onRetry,
+   234→  scrollViewport,
+   235→  scrollContent,
+   236→  accountHasProjects = false,
+   237→}) => {
+   238→  const localize = useLocalize();
+   239→  const search = useRecoilValue(store.search);
+   240→  const sort = useAtomValue(chatSortAtom);
+   241→  const isArchivedView = useAtomValue(isArchivedChatViewAtom);
+   242→  const activeFilterCount = useAtomValue(chatFilterCountAtom);
+   243→  const filterTags = useAtomValue(chatFilterTagsAtom);
+   244→  /** Date, endpoint and attachment facets narrow the same list as the bookmark tags,
+   245→   *  so an empty result under either has to read as "nothing matched", not as an
+   246→   *  account with no chats in it. */
+   247→  const facetFilterCount = useAtomValue(facetFilterCountAtom);
+   248→  const resetFilters = useSetAtom(resetChatFiltersAtom);
+   249→  const resetFacets = useSetAtom(resetFacetsAtom);
+   250→  /** What the menu's Reset clears, counted the same way: the empty state offers the
+   251→   *  way out of every narrowing, not only of the ones the tag filters know about. */
+   252→  const narrowedCount = activeFilterCount + facetFilterCount;
+   253→  const clearNarrowing = useCallback(() => {
+   254→    resetFilters();
+   255→    resetFacets();
+   256→  }, [resetFilters, resetFacets]);
+   257→  const isSmallScreen = useDrawerViewport();
+   258→  /* Dropping a chat on the Chats section makes it an ordinary chat: out of its
+   259→   * project, and unpinned. A root-list chat that is not pinned already is one,
+   260→   * so it is rejected rather than given a drop that would do nothing. */
+   261→  const assignDropped = useAssignDroppedConversation();
+   262→  const unpinDropped = useUnpinDroppedConversation();
+   263→  const effectiveProjectId = useEffectiveProjectId();
+   264→  const chatsRegionRef = useRef<HTMLDivElement>(null);
+   265→  const [{ isDropOver, canDrop }, dropRef] = useDrop<
+   266→    ConversationDragItem,
+   267→    unknown,
+   268→    { isDropOver: boolean; canDrop: boolean }
+   269→  >({
+   270→    accept: CONVERSATION_DRAG_TYPE,
+   271→    canDrop: (item) => effectiveProjectId(item) != null || item.pinned === true,
+   272→    /* Reported even when refused, so a root chat dropped back on Chats does not
+   273→     * save the shift its pointer caused on the way out of the pinned list. */
+   274→    hover: () => markExternalHover(),
+   275→    drop: (item) => {
+   276→      /* Sequenced rather than fired together, for a pinned chat that also sits
+   277→       * in a project. The pin write answers with the conversation as it stands
+   278→       * once it has run, so a pin that overlapped the project write would
+   279→       * publish a row still carrying its old `chatProjectId` into the lists the
+   280→       * assignment had just corrected. Waiting also gives a failure one shape:
+   281→       * an assignment that did not take leaves the chat pinned where it was,
+   282→       * instead of unpinning it out of a project it is still in. Each half is a
+   283→       * no-op when it already holds. */
+   284→      void assignDropped(item, null).then((filed) => {
+   285→        if (filed) {
+   286→          unpinDropped(item);
+   287→        }
+   288→      });
+   289→    },
+   290→    collect: (monitor) => ({ isDropOver: monitor.isOver(), canDrop: monitor.canDrop() }),
+   291→  });
+   292→  dropRef(chatsRegionRef);
+   293→  const convoHeight = isSmallScreen ? 44 : 34;
+   294→  const remScale = useRemScale();
+   295→  const { ref: listContainerRef, width: listWidth } = useElementSize<HTMLDivElement>();
+   296→  /** The list does not scroll: the sidebar's one scroll container does, and the
+   297→   *  list virtualizes against the slice of it the rows currently occupy. */
+   298→  const {
+   299→    ref: listWindowRef,
+   300→    height: windowHeight,
+   301→    scrollTop: windowScrollTop,
+   302→    isOnScreen: isListOnScreen,
+   303→  } = useOuterScrollWindow(scrollViewport, scrollContent);
+   304→
+   305→  /** One element is both the width source and the window anchor; a stable
+   306→   *  callback keeps React from detaching and reattaching it every render. */
+   307→  const setListNode = useCallback(
+   308→    (node: HTMLDivElement | null) => {
+   309→      listContainerRef(node);
+   310→      listWindowRef(node);
+   311→    },
+   312→    [listContainerRef, listWindowRef],
+   313→  );
+   314→
+   315→  // Fetch active job IDs for showing generation indicators
+   316→  const { data: activeJobsData } = useActiveJobs();
+   317→  const activeJobIdsRef = useRef<Set<string> | null>(null);
+   318→  const activeJobIds = useMemo(() => {
+   319→    const ids = activeJobsData?.activeJobIds ?? [];
+   320→    const next = new Set(ids);
+   321→    const previous = activeJobIdsRef.current;
+   322→    if (previous && next.size === previous.size && ids.every((id) => previous.has(id))) {
+   323→      return previous;
+   324→    }
+   325→    activeJobIdsRef.current = next;
+   326→    return next;
+   327→  }, [activeJobsData?.activeJobIds]);
+   328→
+   329→  const filteredConversations = useMemo(
+   330→    () => rawConversations.filter(Boolean) as TConversation[],
+   331→    [rawConversations],
+   332→  );
+   333→
+   334→  /** The pinned section carries pins except in the archive or during search, when it is
+   335→   *  hidden. Keep matching pins in the Chats results instead of showing an empty list. */
+   336→  const includePinned = isArchivedView || !!search.query;
+   337→  const datedConversations = useMemo(
+   338→    () =>
+   339→      groupConversations(filteredConversations, {
+   340→        field: sort.field,
+   341→        direction: sort.direction,
+   342→        includePinned,
+   343→      }),
+   344→    [filteredConversations, includePinned, sort.direction, sort.field],
+   345→  );
+   346→  /** Running chats this list holds no row for — filed in a project, pinned, or past the
+   347→   *  loaded pages — join the Running group only while nothing narrows the list: a search
+   348→   *  or filter result that grew rows it did not match would stop reading as that result. */
+   349→  const isUnnarrowed =
+   350→    !search.query && !isArchivedView && filterTags.length === 0 && facetFilterCount === 0;
+   351→  const listsNewestFirst = sort.field === 'updatedAt' && sort.direction === 'desc';
+   352→  const runningIdsToFetch = useMemo(
+   353→    () =>
+   354→      isUnnarrowed && isChatsExpanded && listsNewestFirst
+   355→        ? unlistedRunningIds(datedConversations, activeJobIds)
+   356→        : [],
+   357→    [isUnnarrowed, isChatsExpanded, listsNewestFirst, datedConversations, activeJobIds],
+   358→  );
+   359→  const unlistedRunning = useRunningConversationsQuery(runningIdsToFetch);
+   360→  /** The archive keeps its server order, while search still promotes active matches. */
+   361→  const groupedConversations = useMemo(
+   362→    () =>
+   363→      groupConversationsByStatus(
+   364→        datedConversations,
+   365→        activeJobIds,
+   366→        {
+   367→          field: sort.field,
+   368→          direction: sort.direction,
+   369→          includePinned: isArchivedView,
+   370→        },
+   371→        isUnnarrowed ? unlistedRunning : undefined,
+   372→      ),
+   373→    [
+   374→      datedConversations,
+   375→      activeJobIds,
+   376→      isArchivedView,
+   377→      isUnnarrowed,
+   378→      unlistedRunning,
+   379→      sort.direction,
+   380→      sort.field,
+   381→    ],
+   382→  );
+   383→
+   384→  /* Outside search, pins are stripped from the date groups. An all-pin page leaves
+   385→     the virtual list with no rows, so onRowsRendered never fires and later
+   386→     unpinned chats stay unreachable. Ask for another page only when the
+   387→     conversations input actually changes; a failed fetchNextPage leaves
+   388→     the same array and must not loop. */
+   389→  const paginatedFromRef = useRef<Array<TConversation | null> | null>(null);
+   390→
+   391→  /* A drain that exhausted its retries leaves that array unchanged, so the
+   392→     guard above would bar every later attempt and the remaining chats would
+   393→     stay unreachable for the rest of the session. Collapsing the section is a
+   394→     deliberate act, so reopening it is allowed to try once more, which is a
+   395→     retry path rather than a loop. */
+   396→  useEffect(() => {
+   397→    if (!isChatsExpanded) {
+   398→      paginatedFromRef.current = null;
+   399→    }
+   400→  }, [isChatsExpanded]);
+   401→
+   402→  useEffect(() => {
+   403→    if (!isChatsExpanded || isLoading || isSearchLoading || groupedConversations.length > 0) {
+   404→      return;
+   405→    }
+   406→    if (paginatedFromRef.current === rawConversations) {
+   407→      return;
+   408→    }
+   409→    paginatedFromRef.current = rawConversations;
+   410→    loadMoreConversations();
+   411→  }, [
+   412→    isChatsExpanded,
+   413→    isLoading,
+   414→    isSearchLoading,
+   415→    groupedConversations.length,
+   416→    rawConversations,
+   417→    loadMoreConversations,
+   418→  ]);
+   419→
+   420→  const flattenedItems = useMemo(() => {
+   421→    const items: FlattenedItem[] = [];
+   422→    if (isChatsExpanded) {
+   423→      groupedConversations.forEach(([groupName, convos]) => {
+   424→        items.push({
+   425→          type: 'header',
+   426→          groupName,
+   427→          count: isStatusGroup(groupName) ? convos.length : undefined,
+   428→        });
+   429→        items.push(...convos.map((convo) => ({ type: 'convo' as const, convo })));
+   430→      });
+   431→
+   432→      if (isLoading) {
+   433→        items.push({ type: 'loading' } as any);
+   434→      }
+   435→    }
+   436→    return items;
+   437→  }, [groupedConversations, isLoading, isChatsExpanded]);
+   438→
+   439→  // Store flattenedItems in a ref for keyMapper to access without recreating cache
+   440→  const flattenedItemsRef = useRef(flattenedItems);
+   441→  flattenedItemsRef.current = flattenedItems;
+   442→
+   443→  // Create a stable cache that doesn't depend on flattenedItems
+   444→  const cache = useMemo(
+   445→    () =>
+   446→      new CellMeasurerCache({
+   447→        fixedWidth: true,
+   448→        defaultHeight: Math.round(convoHeight * remScale),
+   449→        keyMapper: (index) => {
+   450→          const item = flattenedItemsRef.current[index];
+   451→          if (!item) {
+   452→            return `unknown-${index}`;
+   453→          }
+   454→          if (item.type === 'header') {
+   455→            return `header-${item.groupName}-${index === 0 ? 'first' : 'sub'}`;
+   456→          }
+   457→          if (item.type === 'convo') {
+   458→            return `convo-${item.convo.conversationId}`;
+   459→          }
+   460→          if (item.type === 'loading') {
+   461→            return 'loading';
+   462→          }
+   463→          return `unknown-${index}`;
+   464→        },
+   465→      }),
+   466→    [convoHeight, remScale],
+   467→  );
+   468→
+   469→  /** Rows are sized in rem, so a UI scale change resizes them without changing the
+   470→   *  sidebar's physical width: pinned at its cap, the width effect below never fires
+   471→   *  and every cached height stays stale. */
+   472→  useEffect(() => {
+   473→    const frameId = requestAnimationFrame(() => {
+   474→      cache.clearAll();
+   475→      if (containerRef.current && 'recomputeRowHeights' in containerRef.current) {
+   476→        containerRef.current.recomputeRowHeights(0);
+   477→      }
+   478→    });
+   479→    return () => cancelAnimationFrame(frameId);
+   480→  }, [search.query, remScale, cache, containerRef]);
+   481→
+   482→  /** Grid only re-derives row offsets when the row count changes; reorders that
+   483→   *  keep the count (e.g. a convo bumped across date groups) need an explicit recompute. */
+   484→  useEffect(() => {
+   485→    const frameId = requestAnimationFrame(() => {
+   486→      if (containerRef.current && 'recomputeRowHeights' in containerRef.current) {
+   487→        containerRef.current.recomputeRowHeights(0);
+   488→      }
+   489→    });
+   490→    return () => cancelAnimationFrame(frameId);
+   491→  }, [flattenedItems, containerRef]);
+   492→
+   493→  /** CellMeasurerCache(fixedWidth) keys heights by row, not width. Rows first measured
+   494→   *  at a narrow width (e.g. mid expand-animation from a collapsed sidebar) would
+   495→   *  otherwise persist their wrapped heights — re-measure when the width changes. */
+   496→  const measuredWidthRef = useRef(0);
+   497→  useEffect(() => {
+   498→    if (listWidth === 0 || listWidth === measuredWidthRef.current) {
+   499→      return;
+   500→    }
+   501→    measuredWidthRef.current = listWidth;
+   502→    const frameId = requestAnimationFrame(() => {
+   503→      cache.clearAll();
+   504→      if (containerRef.current && 'recomputeRowHeights' in containerRef.current) {
+   505→        containerRef.current.recomputeRowHeights(0);
+   506→      }
+   507→    });
+   508→    return () => cancelAnimationFrame(frameId);
+   509→  }, [listWidth, cache, containerRef]);
+   510→
+   511→  const rowRenderer = useCallback(
+   512→    ({ index, key, parent, style }) => {
+   513→      const item = flattenedItems[index];
+   514→      const rowProps = { cache, rowKey: key, parent, index, style };
+   515→
+   516→      if (item.type === 'loading') {
+   517→        return (
+   518→          <MeasuredRow key={key} {...rowProps}>
+   519→            <ListLoading />
+   520→          </MeasuredRow>
+   521→        );
+   522→      }
+   523→
+   524→      if (item.type === 'header') {
+   525→        return (
+   526→          <MeasuredRow key={key} {...rowProps}>
+   527→            <DateLabel
+   528→              groupName={item.groupName}
+   529→              isFirst={index === 0}
+   530→              isAlphabetical={isAlphabeticalSort(sort.field)}
+   531→              count={item.count}
+   532→            />
+   533→          </MeasuredRow>
+   534→        );
+   535→      }
+   536→
+   537→      if (item.type === 'convo') {
+   538→        const isGenerating = activeJobIds.has(item.convo.conversationId ?? '');
+   539→        /** Keyed by chat, not by the row index react-virtualized passes: an index key
+   540→         *  keeps a row's local state (an open delete dialog, a rename field) in its slot
+   541→         *  while a different chat moves into it. */
+   542→        const convoKey = item.convo.conversationId ? `convo-${item.convo.conversationId}` : key;
+   543→        return (
+   544→          <MeasuredRow key={convoKey} {...rowProps} rowKey={convoKey}>
+   545→            <Convo
+   546→              conversation={item.convo}
+   547→              retainView={moveToTop}
+   548→              toggleNav={toggleNav}
+   549→              isGenerating={isGenerating}
+   550→              showProjectBadge
+   551→              draggable
+   552→            />
+   553→          </MeasuredRow>
+   554→        );
+   555→      }
+   556→
+   557→      return null;
+   558→    },
+   559→    [cache, flattenedItems, moveToTop, toggleNav, activeJobIds, sort.field],
+   560→  );
+   561→
+   562→  const getRowHeight = useCallback(
+   563→    ({ index }: { index: number }) => cache.getHeight(index, 0),
+   564→    [cache],
+   565→  );
+   566→
+   567→  const throttledLoadMore = useMemo(
+   568→    () => throttle(loadMoreConversations, 300),
+   569→    [loadMoreConversations],
+   570→  );
+   571→
+   572→  const handleRowsRendered = useCallback(
+   573→    ({ stopIndex }: { stopIndex: number }) => {
+   574→      /** Reaching the end of what is rendered only means the reader is near the
+   575→       *  end of the list when the reader can see it. A list still below the
+   576→       *  fold renders its first row to keep a height, and on a page whose chats
+   577→       *  are nearly all pinned that row is already within the threshold — which
+   578→       *  would spend another request on chats nobody has looked at. The list
+   579→       *  fills the moment it comes into view instead; a page holding no chats
+   580→       *  at all is drained by the separate all-pin effect above.
+   581→       *
+   582→       *  Asked here rather than read from the last frame: a commit that swaps
+   583→       *  what the sidebar holds — leaving a search restores the sections and
+   584→       *  the unfiltered page together — reports its rows before any observer
+   585→       *  has seen the new layout. */
+   586→      if (!isListOnScreen()) {
+   587→        return;
+   588→      }
+   589→      if (stopIndex >= flattenedItems.length - 8) {
+   590→        throttledLoadMore();
+   591→      }
+   592→    },
+   593→    [flattenedItems.length, throttledLoadMore, isListOnScreen],
+   594→  );
+   595→  const isListError =
+   596→    isChatsExpanded &&
+   597→    isError &&
+   598→    !isLoading &&
+   599→    !isSearchLoading &&
+   600→    filteredConversations.length === 0;
+   601→
+   602→  /** A list that came back empty is a dead end the user has to be able to leave: say why
+   603→   *  it is empty and offer the way back. A drained page can still contain only pinned rows,
+   604→   *  which render in PinnedSection and do not make the account empty. */
+   605→  const hasUnfilteredRows =
+   606→    !search.query &&
+   607→    filterTags.length === 0 &&
+   608→    facetFilterCount === 0 &&
+   609→    !isArchivedView &&
+   610→    filteredConversations.length > 0;
+   611→  const isEmpty =
+   612→    isChatsExpanded &&
+   613→    !isLoading &&
+   614→    !isSearchLoading &&
+   615→    !isListError &&
+   616→    !hasNextPage &&
+   617→    groupedConversations.length === 0 &&
+   618→    !hasUnfilteredRows;
+   619→
+   620→  /** Which dead end this is decides both the line and the glyph above it: a search
+   621→   *  that found nothing, a filter that matched nothing, an empty archive, an account
+   622→   *  whose chats all live under projects, and an account with no chats yet are five
+   623→   *  different situations wearing one sentence. */
+   624→  let emptyLabel: TranslationKeys = 'com_ui_no_chats';
+   625→  let emptyIcon: LucideIcon = MessageSquareDashed;
+   626→  if (search.query) {
+   627→    emptyLabel = 'com_ui_no_search_results';
+   628→    emptyIcon = SearchX;
+   629→  } else if (filterTags.length > 0 || facetFilterCount > 0) {
+   630→    emptyLabel = 'com_ui_no_chats_match_filters';
+   631→    emptyIcon = MessageSquareOff;
+   632→  } else if (isArchivedView) {
+   633→    emptyLabel = 'com_ui_no_archived_chats';
+   634→    emptyIcon = Archive;
+   635→  } else if (accountHasProjects) {
+   636→    emptyLabel = 'com_ui_no_unassigned_chats';
+   637→    emptyIcon = MessageSquareDashed;
+   638→  }
+   639→  /** Nothing has been narrowed: the list is empty because the account is. That reads
+   640→   *  as a heading, where the narrowed states are a single line under the glyph. */
+   641→  const isUntouched = emptyLabel === 'com_ui_no_chats';
+   642→
+   643→  let body: ReactNode = (
+   644→    <div ref={setListNode} className="flex-1">
+   645→      <List
+   646→        ref={containerRef}
+   647→        autoHeight
+   648→        width={listWidth}
+   649→        height={windowHeight}
+   650→        scrollTop={windowScrollTop}
+   651→        deferredMeasurementCache={cache}
+   652→        rowCount={flattenedItems.length}
+   653→        rowHeight={getRowHeight}
+   654→        rowRenderer={rowRenderer}
+   655→        overscanRowCount={10}
+   656→        aria-readonly={false}
+   657→        className="outline-hidden"
+   658→        aria-label="Conversations"
+   659→        onRowsRendered={handleRowsRendered}
+   660→        tabIndex={-1}
+   661→        containerRole="rowgroup"
+   662→      />
+   663→    </div>
+   664→  );
+   665→  if (isSearchLoading) {
+   666→    body = (
+   667→      <div className="text-text-primary flex flex-1 items-center justify-center">
+   668→        <Spinner className="m-0" />
+   669→        <Shimmer className="ml-2">{localize('com_ui_loading')}</Shimmer>
+   670→      </div>
+   671→    );
+   672→  } else if (isListError) {
+   673→    body = (
+   674→      <div
+   675→        className="flex flex-1 items-center justify-center"
+   676→        data-testid="convo-list-error"
+   677→        role="alert"
+   678→      >
+   679→        <EmptyState
+   680→          icon={TriangleAlert}
+   681→          title={localize('com_ui_chats_load_error')}
+   682→          action={
+   683→            onRetry && (
+   684→              <Button type="button" variant="outline" size="sm" onClick={onRetry}>
+   685→                {localize('com_ui_retry')}
+   686→              </Button>
+   687→            )
+   688→          }
+   689→        />
+   690→      </div>
+   691→    );
+   692→  } else if (isEmpty) {
+   693→    body = (
+   694→      <div className="flex flex-1 items-center justify-center" data-testid="convo-list-empty">
+   695→        <EmptyState
+   696→          icon={emptyIcon}
+   697→          title={isUntouched ? localize(emptyLabel) : undefined}
+   698→          description={isUntouched ? undefined : localize(emptyLabel)}
+   699→          action={
+   700→            narrowedCount > 0 && (
+   701→              <Button type="button" variant="secondary" size="xs" onClick={clearNarrowing}>
+   702→                {localize('com_ui_clear_filters')}
+   703→              </Button>
+   704→            )
+   705→          }
+   706→        />
+   707→      </div>
+   708→    );
+   709→  }
+   710→
+   711→  return (
+   712→    <div
+   713→      ref={chatsRegionRef}
+   714→      className="text-text-primary relative flex flex-1 flex-col pt-3 pb-2 text-sm"
+   715→    >
+   716→      <div className="px-3">
+   717→        <ChatsHeader
+   718→          isExpanded={isChatsExpanded}
+   719→          onToggle={() => setIsChatsExpanded(!isChatsExpanded)}
+   720→          trailing={chatsHeaderTrailing}
+   721→          highlight={isDropOver && canDrop}
+   722→        />
+   723→      </div>
+   724→      {body}
+   725→    </div>
+   726→  );
+   727→};
+   728→
+   729→export { DateLabel };
+   730→export default memo(Conversations);
+   731→

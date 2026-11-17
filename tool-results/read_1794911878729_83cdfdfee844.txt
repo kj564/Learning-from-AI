@@ -1,0 +1,1034 @@
+     1→import { memo, useRef, useMemo, useEffect, useState, Suspense, useCallback } from 'react';
+     2→import { useRecoilValue } from 'recoil';
+     3→import { useWatch } from 'react-hook-form';
+     4→import { useAtom, useAtomValue } from 'jotai';
+     5→import { useNavigate } from 'react-router-dom';
+     6→import { isInlineablePastedText } from '@librechat/chat';
+     7→import { useDirection } from '@radix-ui/react-direction';
+     8→import {
+     9→  submitFromComposer,
+    10→  composerClearance,
+    11→  ComposerField,
+    12→  ComposerFrame,
+    13→} from '@librechat/chat/components';
+    14→import {
+    15→  PastedTextDialog,
+    16→  QuoteButton,
+    17→  composerHintId,
+    18→  ComposerHints as Hints,
+    19→} from '@librechat/chat/components';
+    20→import {
+    21→  useSteering,
+    22→  useComposerItems,
+    23→  showStopButtonByIndex,
+    24→  useComposerRestoreHost,
+    25→} from '@librechat/chat/react';
+    26→import {
+    27→  Constants,
+    28→  Permissions,
+    29→  PermissionTypes,
+    30→  isAgentsEndpoint,
+    31→  isAssistantsEndpoint,
+    32→} from 'librechat-data-provider';
+    33→import type { TChatProject, TMessage, TConversation } from 'librechat-data-provider';
+    34→import type { QueuedMessageContext } from '@librechat/chat';
+    35→import type { SetterOrUpdater } from 'recoil';
+    36→import type { ExtendedFile, FileSetter, ConvoGenerator, TAskFunction } from '~/common';
+    37→import {
+    38→  useTextarea,
+    39→  useAutoSave,
+    40→  useLocalize,
+    41→  useRequiresKey,
+    42→  useHandleKeyUp,
+    43→  useQueryParams,
+    44→  useSubmitMessage,
+    45→  useFocusChatEffect,
+    46→  useCodeWorkspace,
+    47→} from '~/hooks';
+    48→import {
+    49→  cn,
+    50→  getModelSpec,
+    51→  hasIncompleteFiles,
+    52→  getComposerDraftId,
+    53→  getPendingDraftId,
+    54→  clearAllDrafts,
+    55→  getFilesDraftCached,
+    56→  isPastedTextFileMarked,
+    57→} from '~/utils';
+    58→import {
+    59→  useChatContext,
+    60→  useChatFormContext,
+    61→  useAddedChatContext,
+    62→  BadgeRowProvider,
+    63→} from '~/Providers';
+    64→import {
+    65→  PendingToolApprovalButton,
+    66→  PendingToolApprovalPanel,
+    67→} from '~/components/Chat/approval/Review';
+    68→import { onGreetingSettled, canClaimWelcomeFocus, isTouchFirst } from '../welcome';
+    69→import useDiscardPastedFiles from '~/hooks/Files/useDiscardPastedFiles';
+    70→import useComposerRestore from '~/hooks/Input/useComposerRestore';
+    71→import { useChatSettings } from '~/Providers/ChatSettingsContext';
+    72→import usePastedTextEdit from '~/hooks/Files/usePastedTextEdit';
+    73→import useAskAnswerMode from '~/hooks/Input/useAskAnswerMode';
+    74→import { useTargetContext } from '~/Providers/TargetContext';
+    75→import useAttachTarget from '~/hooks/Input/useAttachTarget';
+    76→import { chatDirectionAtom } from '~/store/chatDirection';
+    77→import ProjectLandingChip from '../ProjectLandingChip';
+    78→import useHasAccess from '~/hooks/Roles/useHasAccess';
+    79→import useDictation from '~/hooks/Input/useDictation';
+    80→import { useGetStartupConfig } from '~/data-provider';
+    81→import { lazyWithRecovery } from '~/lib/assets/lazy';
+    82→import TextareaHeader from './TextareaHeader';
+    83→import AutoPlayAudio from './AutoPlayAudio';
+    84→import { mainTextareaId } from '~/common';
+    85→import Actions from './Composer/Actions';
+    86→import Queue from './Composer/Queue';
+    87→import Tray from './Composer/Tray';
+    88→import Bar from './Composer/Bar';
+    89→import store from '~/store';
+    90→
+    91→/**
+    92→ * The composer's popovers, dialogs and code-workspace controls render nothing until a trigger
+    93→ * (`/`, `@`, `+`, an ask, an approval, a workspace), so they load after the chat has painted
+    94→ * instead of with it. Each sits under a null Suspense fallback: it shows nothing either way.
+    95→ */
+    96→const AskUserQuestionPopover = lazyWithRecovery(() => import('./AskUserQuestionPopover'));
+    97→const CodeWorkspaceMenu = lazyWithRecovery(() => import('./CodeWorkspaceMenu'));
+    98→const CodeApprovalMenu = lazyWithRecovery(() => import('./CodeApprovalMenu'));
+    99→const PromptsCommand = lazyWithRecovery(() => import('./PromptsCommand'));
+   100→const SkillsCommand = lazyWithRecovery(() => import('./SkillsCommand'));
+   101→const ToolDialogs = lazyWithRecovery(() => import('./ToolDialogs'));
+   102→const Mention = lazyWithRecovery(() => import('./Mention'));
+   103→
+   104→interface ChatFormProps {
+   105→  index: number;
+   106→  placeholder?: string;
+   107→  project?: TChatProject;
+   108→  /** The host is reconciling the requested route with its conversation record. */
+   109→  routePending: boolean;
+   110→  /** Owned by ChatView: which layout the composer sits in — the welcome screen
+   111→   *  floats or bottoms it out, a conversation ends the page with it. */
+   112→  isLandingPage: boolean;
+   113→  /** Owned by the host: the persisted preference for whether Enter sends the
+   114→   *  message (vs. queues a newline). The composer only consumes it. */
+   115→  enterToSend: boolean;
+   116→  /** Owned by the host: the Auto Send Text preference dictation consumes. */
+   117→  autoSendText: number;
+   118→  /** Owned by the host: whether the shell has loaded the speech settings yet;
+   119→   *  dictation stays off until it has. */
+   120→  speechSettingsInitialized: boolean;
+   121→  /** Owned by the host: the app-level preference for where the welcome-screen
+   122→   *  composer sits. The chat feature only consumes it. */
+   123→  centerFormOnLanding: boolean;
+   124→  /** Owned by ChatView: whether a footer bar renders under this band. It is an
+   125→   *  absolutely positioned bar in a zero-height wrapper, so the clearance here
+   126→   *  is the only thing keeping it off the composer. True on the welcome screen,
+   127→   *  which always carries one, and in a conversation whose deployment
+   128→   *  configured footer content of its own. */
+   129→  footerBelow: boolean;
+   130→  /** From ChatContext: individual values so memo can compare them */
+   131→  files: Map<string, ExtendedFile>;
+   132→  setFiles: FileSetter;
+   133→  conversation: TConversation | null;
+   134→  setConversation: SetterOrUpdater<TConversation | null>;
+   135→  isSubmitting: boolean;
+   136→  setFilesLoading: React.Dispatch<React.SetStateAction<boolean>>;
+   137→  newConversation: ConvoGenerator;
+   138→  handleStopGenerating: (e: React.MouseEvent<HTMLButtonElement>) => void;
+   139→  stopGenerating: () => void;
+   140→}
+   141→
+   142→const ChatForm = memo(function ChatForm({
+   143→  index,
+   144→  placeholder,
+   145→  project,
+   146→  routePending,
+   147→  isLandingPage,
+   148→  enterToSend,
+   149→  autoSendText,
+   150→  speechSettingsInitialized,
+   151→  footerBelow,
+   152→  centerFormOnLanding,
+   153→  files,
+   154→  setFiles,
+   155→  conversation,
+   156→  setConversation,
+   157→  isSubmitting,
+   158→  setFilesLoading,
+   159→  newConversation,
+   160→  handleStopGenerating,
+   161→  stopGenerating,
+   162→}: ChatFormProps) {
+   163→  const submitButtonRef = useRef<HTMLButtonElement>(null);
+   164→  const textAreaRef = useRef<HTMLTextAreaElement>(null);
+   165→  const approvalTriggerRef = useRef<HTMLButtonElement>(null);
+   166→  /** The palette anchors to the whole composer, not to its own button, so it
+   167→   *  spans the composer width and sits flush above it. */
+   168→  const composerBoxRef = useRef<HTMLDivElement>(null);
+   169→  useFocusChatEffect(textAreaRef);
+   170→  const localize = useLocalize();
+   171→
+   172→  const [, setIsScrollable] = useState(false);
+   173→  const [isTextAreaFocused, setIsTextAreaFocused] = useState(false);
+   174→
+   175→  const SpeechToText = useRecoilValue(store.speechToText);
+   176→  const TextToSpeech = useRecoilValue(store.textToSpeech);
+   177→  const chatDirection = useAtomValue(chatDirectionAtom);
+   178→  const automaticPlayback = useRecoilValue(store.automaticPlayback);
+   179→  const maximizeChatSpace = useRecoilValue(store.maximizeChatSpace);
+   180→  const { isTemporary } = useChatSettings();
+   181→
+   182→  const [showStopButton, setShowStopButton] = useAtom(showStopButtonByIndex(index));
+   183→  const plusPopoverAtom = useMemo(() => store.showPlusPopoverFamily(index), [index]);
+   184→  const mentionPopoverAtom = useMemo(() => store.showMentionPopoverFamily(index), [index]);
+   185→
+   186→  const { requiresKey } = useRequiresKey();
+   187→  const target = useTargetContext();
+   188→  const methods = useChatFormContext();
+   189→  const {
+   190→    generateConversation,
+   191→    conversation: addedConvo,
+   192→    setConversation: setAddedConvo,
+   193→  } = useAddedChatContext();
+   194→  const { data: startupConfig } = useGetStartupConfig();
+   195→
+   196→  const endpoint = useMemo(
+   197→    () => conversation?.endpointType ?? conversation?.endpoint,
+   198→    [conversation?.endpointType, conversation?.endpoint],
+   199→  );
+   200→  const modelSpec = useMemo(
+   201→    () => getModelSpec({ specName: conversation?.spec, startupConfig }),
+   202→    [conversation?.spec, startupConfig],
+   203→  );
+   204→  const filesLoading = useMemo(() => hasIncompleteFiles(files), [files]);
+   205→  /** Agents and assistants carry their own tool configuration, so the composer's
+   206→   *  ephemeral tool controls only apply elsewhere, and a spec can suppress them
+   207→   *  outright. Same gate the old `showEphemeralBadges` prop applied. */
+   208→  const showTools = useMemo(
+   209→    () =>
+   210→      !!endpoint &&
+   211→      modelSpec?.hideBadgeRow !== true &&
+   212→      !isAgentsEndpoint(endpoint) &&
+   213→      !isAssistantsEndpoint(endpoint),
+   214→    [endpoint, modelSpec?.hideBadgeRow],
+   215→  );
+   216→  const conversationId = useMemo(
+   217→    () => conversation?.conversationId ?? Constants.NEW_CONVO,
+   218→    [conversation?.conversationId],
+   219→  );
+   220→  const isNewConversation = conversationId === '' || conversationId === Constants.NEW_CONVO;
+   221→  /**
+   222→   * The quote feature merges excerpts server-side in `BaseClient.sendMessage`,
+   223→   * which the Assistants endpoints bypass, so hide the UI there rather than
+   224→   * letting users queue quotes the assistant never receives.
+   225→   */
+   226→  const quotesEnabled = useMemo(() => !isAssistantsEndpoint(endpoint), [endpoint]);
+   227→
+   228→  const disableInputs = !!requiresKey;
+   229→
+   230→  /** Skipped on touchscreens so a tap does not raise the keyboard. */
+   231→  const focusTextArea = useCallback(() => {
+   232→    if (window.matchMedia?.('(pointer: coarse)').matches) {
+   233→      return;
+   234→    }
+   235→    textAreaRef.current?.focus();
+   236→  }, []);
+   237→
+   238→  /** The welcome screen hands the composer its focus once the greeting has finished
+   239→   * landing, so the caret arrives as the screen settles rather than before it. The cue
+   240→   * is a timer, so it is honoured only while nothing else holds focus or has a popup
+   241→   * open (`canClaimWelcomeFocus`), and never on a touchscreen, where focus would raise
+   242→   * the keyboard over the welcome screen. Only the welcome screen announces it. */
+   243→  useEffect(
+   244→    () =>
+   245→      onGreetingSettled(() => {
+   246→        if (!isTouchFirst() && canClaimWelcomeFocus()) {
+   247→          textAreaRef.current?.focus();
+   248→        }
+   249→      }),
+   250→    [],
+   251→  );
+   252→
+   253→  /** Actions that consume the composer from inside a popup (the during-run
+   254→   * hovercard) sit in exempted popup content, so they restore focus themselves. */
+   255→  const consumeComposer = useCallback(() => {
+   256→    methods.reset();
+   257→    focusTextArea();
+   258→  }, [methods, focusTextArea]);
+   259→
+   260→  const handleTextareaFocus = useCallback(() => {
+   261→    setIsTextAreaFocused(true);
+   262→  }, []);
+   263→
+   264→  const handleTextareaBlur = useCallback(() => {
+   265→    setIsTextAreaFocused(false);
+   266→  }, []);
+   267→
+   268→  const answerMode = useAskAnswerMode(conversationId);
+   269→  const answerPlaceholder = answerMode.batchMode
+   270→    ? localize('com_ui_answer_questions_above')
+   271→    : (answerMode.otherLabel ?? localize('com_ui_something_else'));
+   272→  /** The composer is not a plain chat composer: it either IS this pause's
+   273→   *  answer box, or is locked behind the batch card that owns the answer. A
+   274→   *  collapsed batch is neither, it hands the composer back to the thread. */
+   275→  const composerReserved = answerMode.composerAnswers || answerMode.composerLocked;
+   276→  const textValue = useWatch({ control: methods.control, name: 'text' });
+   277→
+   278→  const { consumeDraft, preserveText, settleText } = useAutoSave({
+   279→    index,
+   280→    files,
+   281→    setFiles,
+   282→    textAreaRef,
+   283→    conversationId,
+   284→    isSubmitting,
+   285→    // While a question pause is live the composer is the answer box: drafts
+   286→    // swap to the answer's own key, and the conversation draft is restored
+   287→    // when the question resolves.
+   288→    draftId: answerMode.draftId,
+   289→  });
+   290→
+   291→  const {
+   292→    isPreparing: isPreparingFromUrl,
+   293→    settingsError: urlSettingsError,
+   294→    clearSettingsError,
+   295→  } = useQueryParams({
+   296→    textAreaRef,
+   297→    routePending,
+   298→    targetReady: target.ready,
+   299→    onBeforePrompt: preserveText,
+   300→    onPromptSettled: settleText,
+   301→  });
+   302→
+   303→  const discardFiles = useDiscardPastedFiles(index, conversationId);
+   304→  const pastedTextEdit = usePastedTextEdit({ index, files, setFiles, textAreaRef });
+   305→
+   306→  /** Provenance, not the filename, decides which chips are pastes: a user can deliberately
+   307→   * upload a `pasted-text.txt`. Restored provenance comes from the files draft; marks made
+   308→   * this session are read live from the registry, so new pastes need no recompute. */
+   309→  const pastedTextFileIds = useMemo(() => {
+   310→    const draftId = getComposerDraftId(index, conversationId, isSubmitting);
+   311→    const draftIds = getFilesDraftCached(draftId).pastedTextIds ?? [];
+   312→    return new Set<string>(draftIds);
+   313→  }, [index, conversationId, isSubmitting]);
+   314→  const isPastedTextFile = useCallback(
+   315→    (file: ExtendedFile) =>
+   316→      pastedTextFileIds.has(file.file_id) ||
+   317→      (file.temp_file_id != null && pastedTextFileIds.has(file.temp_file_id)) ||
+   318→      isPastedTextFileMarked(file.file_id) ||
+   319→      isPastedTextFileMarked(file.temp_file_id),
+   320→    [pastedTextFileIds],
+   321→  );
+   322→  /** The chip's actions hide while a replacement upload or inline move is in flight, so the
+   323→   * same original cannot be acted on twice. */
+   324→  const { isActionPending } = pastedTextEdit;
+   325→  const isPasteActionPending = useCallback(
+   326→    (file: ExtendedFile) => isActionPending(file),
+   327→    [isActionPending],
+   328→  );
+   329→
+   330→  const { submitMessage, submitPrompt } = useSubmitMessage();
+   331→  const codeWorkspace = useCodeWorkspace(conversation, addedConvo);
+   332→
+   333→  /** Queued/steered sends carry their FULL submission context: explicit
+   334→   *  (possibly empty) overrides stop `ask` from vacuuming quotes or skill
+   335→   *  picks the user has staged in the composer for their NEXT message. */
+   336→  const sendNow = useCallback(
+   337→    (text: string, overrideFiles?: TMessage['files'], context?: QueuedMessageContext) =>
+   338→      submitMessage({
+   339→        text,
+   340→        overrideFiles,
+   341→        overrideQuotes: context?.quotes ?? [],
+   342→        overrideManualSkills: context?.manualSkills ?? [],
+   343→        overrideReasoning: context?.reasoningOverride ?? null,
+   344→        overrideClientRequestId: context?.clientRequestId,
+   345→        overrideRecoverySteerId: context?.recoverySteerId,
+   346→        overrideExpectedPredecessorCreatedAt: context?.expectedPredecessorCreatedAt,
+   347→        overrideQueuedMessageOrigin: context?.queuedMessageOrigin,
+   348→      }),
+   349→    [submitMessage],
+   350→  );
+   351→  const navigate = useNavigate();
+   352→  /** A queued message becomes the first message of a fresh chat through the same
+   353→   *  `prompt` + `submit` query contract that deep links already use. */
+   354→  const startQueuedInNewChat = useCallback(
+   355→    (text: string) => navigate(`/c/new?${new URLSearchParams({ prompt: text, submit: 'true' })}`),
+   356→    [navigate],
+   357→  );
+   358→  const { restoreReclaimedSteer, canRestoreToComposer } = useComposerRestore({
+   359→    index,
+   360→    conversationId,
+   361→    methods,
+   362→    files,
+   363→    setFiles,
+   364→    textAreaRef,
+   365→    answerModeActive: composerReserved,
+   366→  });
+   367→  /* Surfaces outside the composer (a steer cancelled from the thread) re-home
+   368→     their words through the same guarded restore the queue rail gets as a
+   369→     prop. Published while this composer is mounted; a recovery that resolves
+   370→     after it has gone finds nothing and falls back to the queue. */
+   371→  const { publish: publishComposerRestore, publishRewake } = useComposerRestoreHost();
+   372→  useEffect(() => {
+   373→    publishComposerRestore(restoreReclaimedSteer);
+   374→    return () => publishComposerRestore(null);
+   375→  }, [publishComposerRestore, restoreReclaimedSteer]);
+   376→  const steering = useSteering({
+   377→    discardFiles,
+   378→    consumeDraft,
+   379→    addedConversation: addedConvo,
+   380→    index,
+   381→    conversationId,
+   382→    conversation,
+   383→    codeEnvironmentMode: codeWorkspace.mode,
+   384→    isSubmitting,
+   385→    answerModeActive: composerReserved,
+   386→    composerDisabled: isPreparingFromUrl,
+   387→    files,
+   388→    setFiles,
+   389→    filesLoading,
+   390→    sendNow,
+   391→    stopGenerating,
+   392→  });
+   393→  /* A steer retried from the thread can land in the queue after the run it
+   394→     belonged to has ended and spent its one-shot drain signal; the thread
+   395→     reaches the drain through the same host as the restore above. */
+   396→  const { rewakeDrain: steeringRewakeDrain } = steering;
+   397→  useEffect(() => {
+   398→    publishRewake(steeringRewakeDrain);
+   399→    return () => publishRewake(null);
+   400→  }, [publishRewake, steeringRewakeDrain]);
+   401→
+   402→  /** Ctrl/Cmd+Enter selects the alternate; both interrupt chords use the same mode. */
+   403→  const handleDuringRunModifier = useCallback(
+   404→    (kind: 'other' | 'interrupt' | 'preempt') => {
+   405→      const text = methods.getValues('text');
+   406→      let consumed = false;
+   407→      if (kind === 'interrupt') {
+   408→        consumed = steering.interruptSteer(text);
+   409→      } else if (kind === 'preempt') {
+   410→        consumed = steering.interruptSteer(text);
+   411→      } else if (steering.effectiveAction !== 'queue') {
+   412→        consumed = steering.queueFromComposer(text);
+   413→      } else {
+   414→        consumed = steering.steerFromComposer(text);
+   415→      }
+   416→      if (consumed) {
+   417→        methods.reset();
+   418→      }
+   419→    },
+   420→    [methods, steering],
+   421→  );
+   422→
+   423→  const handleKeyUp = useHandleKeyUp({
+   424→    index,
+   425→    textAreaRef,
+   426→  });
+   427→  const {
+   428→    isNotAppendable,
+   429→    handlePaste,
+   430→    handleKeyDown,
+   431→    handleCompositionStart,
+   432→    handleCompositionEnd,
+   433→  } = useTextarea({
+   434→    textAreaRef,
+   435→    submitButtonRef,
+   436→    setIsScrollable,
+   437→    /* Only picks the missing-key placeholder; preparation and answer holds live on the textarea. */
+   438→    disabled: disableInputs,
+   439→    // The composer IS the free-form answer box while a question pause is live.
+   440→    placeholder: composerReserved ? answerPlaceholder : placeholder,
+   441→    // Enter stays live during a run when it can steer/queue instead of send.
+   442→    allowSubmitWhileGenerating: steering.duringRunActive || answerMode.composerAnswers,
+   443→    onDuringRunModifier: steering.duringRunActive ? handleDuringRunModifier : undefined,
+   444→    answerModeActive: answerMode.composerAnswers,
+   445→    enterToSend,
+   446→  });
+   447→
+   448→  /** Attachments stand in for text only on the normal send path. Answer mode
+   449→   *  hands the composer text straight to the paused run, which answers with
+   450→   *  values and cannot consume files, so an empty draft must stay unsubmittable
+   451→   *  there rather than enabling a button whose submit is silently dropped. */
+   452→  const submittableFileCount = composerReserved ? 0 : files.size;
+   453→  const hasInlinePaste = useMemo(() => {
+   454→    if (composerReserved || filesLoading) return false;
+   455→    for (const file of files.values()) if (isInlineablePastedText(file)) return true;
+   456→    return false;
+   457→  }, [composerReserved, filesLoading, files]);
+   458→
+   459→  const { ref, ...registerProps } = methods.register('text', {
+   460→    required: submittableFileCount === 0,
+   461→    onChange: useCallback(
+   462→      (e: React.ChangeEvent<HTMLTextAreaElement>) =>
+   463→        methods.setValue('text', e.target.value, { shouldValidate: true }),
+   464→      [methods],
+   465→    ),
+   466→  });
+   467→
+   468→  const interfaceDirection = useDirection();
+   469→  /** An empty `dir="auto"` field resolves to LTR, which would park an RTL interface's placeholder on
+   470→   *  the wrong edge, so the empty field follows the interface until text gives it a direction. */
+   471→  const autoDirection = textValue ? 'auto' : interfaceDirection;
+   472→  const textDirection = chatDirection === 'auto' ? autoDirection : chatDirection;
+   473→
+   474→  const composerItems = useComposerItems(conversationId, quotesEnabled);
+   475→  const attachTarget = useAttachTarget(conversation, disableInputs);
+   476→  const hasPromptsAccess = useHasAccess({
+   477→    permissionType: PermissionTypes.PROMPTS,
+   478→    permission: Permissions.USE,
+   479→  });
+   480→  const slashCommandEnabled = useRecoilValue(store.slashCommand);
+   481→  const atCommandEnabled = useRecoilValue(store.atCommand);
+   482→  const idleActions = useMemo(
+   483→    () => ({
+   484→      prompts: hasPromptsAccess && slashCommandEnabled,
+   485→      mentions: atCommandEnabled,
+   486→      attach: attachTarget.canAttach,
+   487→    }),
+   488→    [hasPromptsAccess, slashCommandEnabled, atCommandEnabled, attachTarget.canAttach],
+   489→  );
+   490→  const { submitText: submitAnswerText } = answerMode;
+   491→  const dictationAnswerModeActive = answerMode.composerAnswers;
+   492→  const speechDisabled =
+   493→    !speechSettingsInitialized ||
+   494→    disableInputs ||
+   495→    isNotAppendable ||
+   496→    answerMode.composerLocked ||
+   497→    isPreparingFromUrl;
+   498→  /** The same gate `onSubmit` applies: while a question pause is live the
+   499→   * composer IS the answer box, so a dictated turn has to answer it rather
+   500→   * than start a turn the paused run would drop. */
+   501→  const dictationAsk = useCallback<TAskFunction>(
+   502→    (props) => {
+   503→      if (dictationAnswerModeActive && submitAnswerText(props.text)) {
+   504→        return;
+   505→      }
+   506→      return submitMessage({ text: props.text });
+   507→    },
+   508→    [dictationAnswerModeActive, submitAnswerText, submitMessage],
+   509→  );
+   510→  const dictation = useDictation({
+   511→    ask: dictationAsk,
+   512→    duringRunSubmit: steering.duringRunActive ? steering.submitDuringRun : undefined,
+   513→    methods,
+   514→    /* Answer mode leaves the run submitting while handing the composer over,
+   515→       which is exactly when speech must still reach it: the send button is
+   516→       enabled on the same terms. */
+   517→    isSubmitting: (isSubmitting && !dictationAnswerModeActive) || answerMode.composerLocked,
+   518→    filesLoading,
+   519→    /* A dictated question answer is cleared by answer mode only after the
+   520→       resume succeeds. A transient failure must leave the transcript intact. */
+   521→    deferComposerReset: dictationAnswerModeActive,
+   522→    disabled: speechDisabled,
+   523→    autoSendText,
+   524→    speechToText: SpeechToText,
+   525→    index,
+   526→  });
+   527→  /** The waveform stands in for the placeholder until words arrive, and is
+   528→   *  then the only thing drawn on that line. */
+   529→  const listening = dictation.active && (textValue?.trim() ?? '') === '';
+   530→  const uploadingCount = useMemo(() => {
+   531→    let count = 0;
+   532→    for (const file of files.values()) {
+   533→      if (file.progress < 1 && !isInlineablePastedText(file)) {
+   534→        count++;
+   535→      }
+   536→    }
+   537→    return count;
+   538→  }, [files]);
+   539→
+   540→  /* The abort is generation-scoped and inert until the start POST installs the
+   541→     epoch; assistants abort through their own path and need no epoch. */
+   542→  const canStop = steering.canControlGeneration || isAssistantsEndpoint(endpoint);
+   543→
+   544→  /* Memoized for `memo(Bar)`: an inline element is a new identity every render,
+   545→     and this component re-renders on every keystroke. `Actions` reads the draft
+   546→     itself, so nothing here changes with it. */
+   547→  const actionSlot = useMemo(
+   548→    () => (
+   549→      <Actions
+   550→        submitButtonRef={submitButtonRef}
+   551→        isSubmitting={isSubmitting}
+   552→        answersAsk={answerMode.composerAnswers}
+   553→        hasEndpoint={!!endpoint}
+   554→        steering={steering}
+   555→        isNewConversation={isNewConversation}
+   556→        getText={() => methods.getValues('text')}
+   557→        onConsumed={consumeComposer}
+   558→        enterToSend={enterToSend}
+   559→        fileCount={submittableFileCount}
+   560→        hasInlinePaste={hasInlinePaste}
+   561→        sendDisabled={
+   562→          filesLoading ||
+   563→          isPreparingFromUrl ||
+   564→          disableInputs ||
+   565→          !target.ready ||
+   566→          routePending ||
+   567→          !codeWorkspace.canSubmit ||
+   568→          isNotAppendable ||
+   569→          answerMode.composerLocked
+   570→        }
+   571→        duringRunDisabled={filesLoading || isPreparingFromUrl}
+   572→        showStopButton={showStopButton}
+   573→        setShowStopButton={setShowStopButton}
+   574→        stop={handleStopGenerating}
+   575→        canStop={canStop}
+   576→        isPreparingFromUrl={isPreparingFromUrl}
+   577→      />
+   578→    ),
+   579→    [
+   580→      isSubmitting,
+   581→      answerMode.composerAnswers,
+   582→      answerMode.composerLocked,
+   583→      endpoint,
+   584→      steering,
+   585→      isNewConversation,
+   586→      methods,
+   587→      consumeComposer,
+   588→      enterToSend,
+   589→      submittableFileCount,
+   590→      hasInlinePaste,
+   591→      filesLoading,
+   592→      isPreparingFromUrl,
+   593→      disableInputs,
+   594→      target.ready,
+   595→      routePending,
+   596→      codeWorkspace.canSubmit,
+   597→      isNotAppendable,
+   598→      showStopButton,
+   599→      setShowStopButton,
+   600→      handleStopGenerating,
+   601→      canStop,
+   602→    ],
+   603→  );
+   604→
+   605→  const approvalSlot = useMemo(
+   606→    () => (
+   607→      <div className="flex items-center gap-1.5 empty:hidden">
+   608→        <Suspense fallback={null}>
+   609→          <CodeApprovalMenu
+   610→            conversation={conversation}
+   611→            addedConversation={addedConvo}
+   612→            codeEnvironmentMode={codeWorkspace.mode}
+   613→            setConversation={setConversation}
+   614→            disabled={disableInputs}
+   615→          />
+   616→        </Suspense>
+   617→        {index === 0 && conversationId != null && (
+   618→          <PendingToolApprovalButton
+   619→            conversationId={conversationId}
+   620→            triggerRef={approvalTriggerRef}
+   621→          />
+   622→        )}
+   623→      </div>
+   624→    ),
+   625→    [
+   626→      conversation,
+   627→      addedConvo,
+   628→      codeWorkspace.mode,
+   629→      setConversation,
+   630→      disableInputs,
+   631→      index,
+   632→      conversationId,
+   633→    ],
+   634→  );
+   635→
+   636→  const bottomClearance = composerClearance({
+   637→    isLandingPage,
+   638→    footerBelow,
+   639→    floating: centerFormOnLanding && !isSubmitting,
+   640→  });
+   641→
+   642→  /** Answer mode, then during-run steering or queueing (a run in flight, or a
+   643→   *  queued follow-up about to start), then an ordinary send: the same route
+   644→   *  for typed, dictated, and shortcut-bound submissions. */
+   645→  const submitComposerText = useCallback(
+   646→    (data: { text: string }): false | void =>
+   647→      !target.ready || routePending
+   648→        ? false
+   649→        : submitFromComposer(
+   650→            {
+   651→              answerMode,
+   652→              steering,
+   653→              submitMessage: (message) => {
+   654→                const result = submitMessage(message);
+   655→                if (result !== false) {
+   656→                  clearAllDrafts(getPendingDraftId(index));
+   657→                }
+   658→                return result;
+   659→              },
+   660→              reset: () => methods.reset(),
+   661→            },
+   662→            data,
+   663→          ),
+   664→    [answerMode, steering, submitMessage, methods, index, target.ready, routePending],
+   665→  );
+   666→
+   667→  return (
+   668→    <ComposerFrame
+   669→      onSubmit={methods.handleSubmit((data) => {
+   670→        if (!isPreparingFromUrl && submitComposerText(data) !== false) {
+   671→          clearSettingsError();
+   672→        }
+   673→      })}
+   674→      direction={chatDirection}
+   675→      maximizeChatSpace={maximizeChatSpace}
+   676→      clearanceClassName={bottomClearance}
+   677→      focused={isTextAreaFocused}
+   678→      isTemporary={isTemporary}
+   679→      surfaceRef={composerBoxRef}
+   680→      onFocusDraft={focusTextArea}
+   681→      /* Primary composer owns the selection popup so split-view doesn't double it. */
+   682→      quote={index === 0 && quotesEnabled && <QuoteButton conversationId={conversationId} />}
+   683→      queue={
+   684→        steering.enabled && (
+   685→          <Queue
+   686→            steering={steering}
+   687→            conversationId={conversationId}
+   688→            onRestoreToComposer={restoreReclaimedSteer}
+   689→            canRestoreToComposer={canRestoreToComposer}
+   690→            onStartNewChat={startQueuedInNewChat}
+   691→          />
+   692→        )
+   693→      }
+   694→      contextRail={
+   695→        project || codeWorkspace.visible ? (
+   696→          <>
+   697→            {project ? <ProjectLandingChip project={project} /> : null}
+   698→            {codeWorkspace.visible ? (
+   699→              <div className="min-w-0">
+   700→                <Suspense fallback={null}>
+   701→                  <CodeWorkspaceMenu
+   702→                    setConversation={setConversation}
+   703→                    workspace={codeWorkspace}
+   704→                    disabled={disableInputs || isSubmitting}
+   705→                  />
+   706→                </Suspense>
+   707→              </div>
+   708→            ) : null}
+   709→          </>
+   710→        ) : undefined
+   711→      }
+   712→      popovers={
+   713→        <>
+   714→          <Suspense fallback={null}>
+   715→            <Mention
+   716→              index={index}
+   717→              popoverAtom={plusPopoverAtom}
+   718→              newConversation={generateConversation}
+   719→              textAreaRef={textAreaRef}
+   720→              commandChar="+"
+   721→              placeholder="com_ui_add_model_preset"
+   722→              includeAssistants={false}
+   723→            />
+   724→          </Suspense>
+   725→          <Suspense fallback={null}>
+   726→            <Mention
+   727→              index={index}
+   728→              popoverAtom={mentionPopoverAtom}
+   729→              newConversation={newConversation}
+   730→              textAreaRef={textAreaRef}
+   731→            />
+   732→          </Suspense>
+   733→          <Suspense fallback={null}>
+   734→            <PromptsCommand index={index} textAreaRef={textAreaRef} submitPrompt={submitPrompt} />
+   735→          </Suspense>
+   736→          {index === 0 && (
+   737→            <Suspense fallback={null}>
+   738→              <AskUserQuestionPopover conversationId={conversationId} textAreaRef={textAreaRef} />
+   739→            </Suspense>
+   740→          )}
+   741→          {index === 0 && conversationId != null && (
+   742→            <PendingToolApprovalPanel
+   743→              conversationId={conversationId}
+   744→              triggerRef={approvalTriggerRef}
+   745→            />
+   746→          )}
+   747→          <Suspense fallback={null}>
+   748→            <SkillsCommand
+   749→              index={index}
+   750→              textAreaRef={textAreaRef}
+   751→              conversationId={conversationId}
+   752→              agentId={conversation?.agent_id}
+   753→            />
+   754→          </Suspense>
+   755→        </>
+   756→      }
+   757→      hints={
+   758→        <Hints
+   759→          index={index}
+   760→          enterToSend={enterToSend}
+   761→          hasText={(textValue?.trim() ?? '') !== ''}
+   762→          isSubmitting={isSubmitting}
+   763→          duringRunActive={steering.duringRunActive}
+   764→          canControlGeneration={steering.canControlGeneration}
+   765→          duringRunAction={steering.effectiveAction}
+   766→          /* A staged reasoning choice forces the message to queue, and the
+   767→           send-now chord then queues too; do not advertise it. */
+   768→          canSteer={steering.canSteer && steering.pendingReasoningOverride == null}
+   769→          answerModeActive={answerMode.active}
+   770→          uploadingCount={uploadingCount}
+   771→          idleActions={idleActions}
+   772→        />
+   773→      }
+   774→    >
+   775→      <TextareaHeader addedConvo={addedConvo} setAddedConvo={setAddedConvo} />
+   776→      <Tray
+   777→        items={composerItems}
+   778→        focusComposer={focusTextArea}
+   779→        conversation={conversation}
+   780→        files={files}
+   781→        setFiles={setFiles}
+   782→        setFilesLoading={setFilesLoading}
+   783→        index={index}
+   784→        isPastedTextFile={isPastedTextFile}
+   785→        isPasteActionPending={isPasteActionPending}
+   786→        onEditPastedText={pastedTextEdit.openEditor}
+   787→        onMovePastedTextInline={pastedTextEdit.moveInline}
+   788→      />
+   789→      <PastedTextDialog
+   790→        edit={pastedTextEdit.editing}
+   791→        onClose={pastedTextEdit.closeEditor}
+   792→        onSave={pastedTextEdit.saveEdit}
+   793→      />
+   794→      {endpoint && (
+   795→        <ComposerField
+   796→          textAreaRef={textAreaRef as React.MutableRefObject<HTMLTextAreaElement | null>}
+   797→          inputRef={ref}
+   798→          value={textValue ?? ''}
+   799→          listening={listening}
+   800→          dictationActive={dictation.active}
+   801→          locked={answerMode.composerLocked}
+   802→          ariaLabel={localize('com_ui_message_input')}
+   803→          textareaProps={{
+   804→            ...registerProps,
+   805→            dir: textDirection,
+   806→            disabled:
+   807→              disableInputs || isNotAppendable || answerMode.composerLocked || isPreparingFromUrl,
+   808→            onPaste: handlePaste,
+   809→            onKeyDown: (e) => {
+   810→              // Answer mode consumes option-navigation keys from the
+   811→              // empty composer; everything else follows the normal path.
+   812→              if (answerMode.handleComposerKeyDown(e)) {
+   813→                return;
+   814→              }
+   815→              handleKeyDown(e);
+   816→            },
+   817→            onKeyUp: handleKeyUp,
+   818→            onCompositionStart: handleCompositionStart,
+   819→            onCompositionEnd: handleCompositionEnd,
+   820→            id: mainTextareaId,
+   821→            tabIndex: 0,
+   822→            'data-testid': 'text-input',
+   823→            onFocus: handleTextareaFocus,
+   824→            onBlur: handleTextareaBlur,
+   825→            'aria-describedby': cn(
+   826→              composerHintId(index),
+   827→              (codeWorkspace.state === 'choose' || codeWorkspace.state === 'missing') &&
+   828→                `code-workspace-hint-${index}`,
+   829→            ),
+   830→          }}
+   831→        />
+   832→      )}
+   833→      {target.failed && (
+   834→        <p role="alert" className="text-text-secondary px-5 pb-2 text-sm">
+   835→          {localize('com_ui_chat_target_failed')}{' '}
+   836→          <button type="button" className="underline" onClick={target.retry}>
+   837→            {localize('com_ui_retry')}
+   838→          </button>
+   839→        </p>
+   840→      )}
+   841→      {(isPreparingFromUrl || urlSettingsError) && (
+   842→        <p role="status" className="text-text-secondary px-5 pb-2 text-sm">
+   843→          {localize(urlSettingsError ? 'com_ui_url_settings_failed' : 'com_ui_sending')}
+   844→        </p>
+   845→      )}
+   846→      {(codeWorkspace.state === 'choose' || codeWorkspace.state === 'missing') && (
+   847→        <p
+   848→          id={`code-workspace-hint-${index}`}
+   849→          role="status"
+   850→          className="text-text-secondary px-5 pb-2 text-sm"
+   851→        >
+   852→          {localize('com_error_code_workspace_required')}
+   853→        </p>
+   854→      )}
+   855→      {/* The composer is what keeps MCP connection and authorization state
+   856→          current wherever its ephemeral tools apply; the Agent Builder's
+   857→          tool library reads the same cache, so without this a server it
+   858→          lists reads as unknown and offers to connect instead of toggling. */}
+   859→      <BadgeRowProvider
+   860→        conversationId={conversationId}
+   861→        specName={conversation?.spec}
+   862→        isSubmitting={isSubmitting}
+   863→        observeToolAuthorization={showTools}
+   864→      >
+   865→        <Bar
+   866→          index={index}
+   867→          disabled={disableInputs}
+   868→          agentId={conversation?.agent_id}
+   869→          /* The RAW endpoint, not the effective type above: the attach
+   870→             destinations resolve the provider from its name, so a
+   871→             custom endpoint reduced to `custom` loses the uploads its
+   872→             provider actually takes (OpenRouter's video and audio).
+   873→             `endpointType` beside it carries the resolved type. */
+   874→          endpoint={conversation?.endpoint}
+   875→          endpointType={attachTarget.endpointType}
+   876→          endpointFileConfig={attachTarget.endpointFileConfig}
+   877→          useResponsesApi={attachTarget.useResponsesApi}
+   878→          conversationId={conversationId}
+   879→          conversation={conversation}
+   880→          files={files}
+   881→          setFiles={setFiles}
+   882→          setFilesLoading={setFilesLoading}
+   883→          canAttach={attachTarget.canAttach}
+   884→          anchorRef={composerBoxRef}
+   885→          showTools={showTools}
+   886→          isSubmitting={isSubmitting}
+   887→          showSpeech={SpeechToText}
+   888→          speechDisabled={speechDisabled}
+   889→          dictation={dictation}
+   890→          approvalSlot={approvalSlot}
+   891→          actionSlot={actionSlot}
+   892→          hasAddedConversation={addedConvo != null}
+   893→        />
+   894→        <Suspense fallback={null}>
+   895→          <ToolDialogs />
+   896→        </Suspense>
+   897→      </BadgeRowProvider>
+   898→      {TextToSpeech && automaticPlayback && <AutoPlayAudio index={index} />}
+   899→    </ComposerFrame>
+   900→  );
+   901→});
+   902→ChatForm.displayName = 'ChatForm';
+   903→
+   904→/**
+   905→ * Wrapper that subscribes to ChatContext and passes stable individual values
+   906→ * to the memo'd ChatForm. This prevents ChatForm from re-rendering on every
+   907→ * streaming chunk: it only re-renders when the specific values it uses change.
+   908→ */
+   909→function ChatFormWrapper({
+   910→  index = 0,
+   911→  placeholder,
+   912→  project,
+   913→  routePending = false,
+   914→  isLandingPage,
+   915→  /** Defaults to the atom's own default (`atomWithLocalStorage('enterToSend',
+   916→   *  true)`) so call sites that predate this prop, mainly tests, keep their
+   917→   *  prior behavior without passing it explicitly. */
+   918→  enterToSend = true,
+   919→  /** Same reason, from `atomWithLocalStorage('autoSendText', -1)`. */
+   920→  autoSendText = -1,
+   921→  /** Same reason, from the `speechSettingsInitialized` atom's `false`. */
+   922→  speechSettingsInitialized = false,
+   923→  footerBelow,
+   924→  centerFormOnLanding,
+   925→}: {
+   926→  index?: number;
+   927→  placeholder?: string;
+   928→  project?: TChatProject;
+   929→  routePending?: boolean;
+   930→  enterToSend?: boolean;
+   931→  autoSendText?: number;
+   932→  speechSettingsInitialized?: boolean;
+   933→  isLandingPage: boolean;
+   934→  footerBelow: boolean;
+   935→  centerFormOnLanding: boolean;
+   936→}) {
+   937→  const {
+   938→    files,
+   939→    setFiles,
+   940→    conversation,
+   941→    setConversation,
+   942→    isSubmitting,
+   943→    setFilesLoading,
+   944→    newConversation,
+   945→    handleStopGenerating,
+   946→    stopGenerating,
+   947→  } = useChatContext();
+   948→
+   949→  /**
+   950→   * Stabilize conversation reference: only update when rendering-relevant fields change,
+   951→   * not on every metadata update (e.g., title generation during streaming).
+   952→   */
+   953→  const hasMessages = (conversation?.messages?.length ?? 0) > 0;
+   954→  const stableConversation = useMemo(
+   955→    () => conversation,
+   956→    // eslint-disable-next-line react-hooks/exhaustive-deps
+   957→    [
+   958→      conversation?.conversationId,
+   959→      conversation?.endpoint,
+   960→      conversation?.endpointType,
+   961→      conversation?.agent_id,
+   962→      conversation?.assistant_id,
+   963→      conversation?.spec,
+   964→      conversation?.useResponsesApi,
+   965→      conversation?.model,
+   966→      conversation?.maxContextTokens,
+   967→      conversation?.codeApprovalMode,
+   968→      conversation?.codeEnvironmentMode,
+   969→      conversation?.codeWorkspaces,
+   970→      /** The composer's reasoning control reads its configured value off this
+   971→       *  object. Leaving these out held the old level on screen after a
+   972→       *  Parameters-panel edit, while the next send already used the new one. */
+   973→      conversation?.reasoning_effort,
+   974→      conversation?.effort,
+   975→      conversation?.thinkingLevel,
+   976→      conversation?.thinkingBudget,
+   977→      /** The attach picker resolves the upload route from it, and a Responses
+   978→       *  routing policy can send web-search turns to a different route. */
+   979→      conversation?.web_search,
+   980→      hasMessages,
+   981→    ],
+   982→  );
+   983→
+   984→  /** Stabilize function refs so they never trigger ChatForm re-renders */
+   985→  const handleStopRef = useRef(handleStopGenerating);
+   986→  handleStopRef.current = handleStopGenerating;
+   987→  const stableHandleStop = useCallback(
+   988→    (e: React.MouseEvent<HTMLButtonElement>) => handleStopRef.current(e),
+   989→    [],
+   990→  );
+   991→
+   992→  const newConvoRef = useRef(newConversation);
+   993→  newConvoRef.current = newConversation;
+   994→  const stableNewConversation: ConvoGenerator = useCallback(
+   995→    (...args: Parameters<ConvoGenerator>): ReturnType<ConvoGenerator> =>
+   996→      newConvoRef.current(...args),
+   997→    [],
+   998→  );
+   999→
+  1000→  const stopRef = useRef(stopGenerating);
+  1001→  stopRef.current = stopGenerating;
+  1002→  const stableStop = useCallback(() => {
+  1003→    void stopRef.current();
+  1004→  }, []);
+  1005→
+  1006→  return (
+  1007→    <ChatForm
+  1008→      index={index}
+  1009→      enterToSend={enterToSend}
+  1010→      autoSendText={autoSendText}
+  1011→      speechSettingsInitialized={speechSettingsInitialized}
+  1012→      placeholder={placeholder}
+  1013→      project={project}
+  1014→      routePending={routePending}
+  1015→      isLandingPage={isLandingPage}
+  1016→      footerBelow={footerBelow}
+  1017→      centerFormOnLanding={centerFormOnLanding}
+  1018→      files={files}
+  1019→      setFiles={setFiles}
+  1020→      conversation={stableConversation}
+  1021→      setConversation={setConversation}
+  1022→      isSubmitting={isSubmitting}
+  1023→      setFilesLoading={setFilesLoading}
+  1024→      newConversation={stableNewConversation}
+  1025→      handleStopGenerating={stableHandleStop}
+  1026→      stopGenerating={stableStop}
+  1027→    />
+  1028→  );
+  1029→}
+  1030→
+  1031→ChatFormWrapper.displayName = 'ChatFormWrapper';
+  1032→
+  1033→export default ChatFormWrapper;
+  1034→

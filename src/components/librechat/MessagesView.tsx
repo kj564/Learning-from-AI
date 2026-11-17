@@ -10,7 +10,7 @@
  */
 
 import { useEffect, useRef, useState } from 'react';
-import { ArrowDown, Sparkles, FileText, Code, Lightbulb, PenLine } from 'lucide-react';
+import { ArrowDown, Sparkles, FileText, Code, Lightbulb, PenLine, Image as ImageIcon, Globe, Search } from 'lucide-react';
 import { useStore } from '@/lib/store';
 import type { ChatMessage } from '@/lib/store';
 import MessageRow from './MessageRow';
@@ -21,36 +21,43 @@ import MessageRow from './MessageRow';
 const EMPTY_MESSAGES: ChatMessage[] = [];
 
 const STARTERS = [
-  { icon: PenLine, label: 'Write a story', prompt: 'Write a short story about a robot learning to dream.' },
-  { icon: Code, label: 'Explain code', prompt: 'Explain how a Promise works in JavaScript, with examples.' },
-  { icon: FileText, label: 'Summarize text', prompt: 'Summarize the key ideas of atomic habits in 5 bullet points.' },
-  { icon: Lightbulb, label: 'Brainstorm ideas', prompt: 'Brainstorm 10 unique ideas for a mobile app for book lovers.' },
+  { icon: ImageIcon, label: 'Generate image', prompt: 'Generate an image of a serene mountain landscape at sunset, watercolor style', accent: 'text-status-info' },
+  { icon: Globe, label: 'Search the web', prompt: 'Search the web for the latest news about AI and summarize the top 3 stories', accent: 'text-accent-primary' },
+  { icon: Code, label: 'Write code', prompt: 'Write a Python function that checks if a string is a palindrome, with tests', accent: 'text-status-success' },
+  { icon: PenLine, label: 'Write a story', prompt: 'Write a short story about a robot learning to dream', accent: 'text-status-warning' },
+  { icon: Lightbulb, label: 'Brainstorm', prompt: 'Brainstorm 10 unique ideas for a mobile app for book lovers', accent: 'text-accent-primary' },
+  { icon: FileText, label: 'Summarize', prompt: 'Summarize the key ideas of Atomic Habits in 5 bullet points', accent: 'text-status-info' },
 ];
 
 function WelcomeScreen({ onPick }: { onPick: (p: string) => void }) {
   return (
-    <div className="flex h-full transform-gpu flex-col items-center justify-center gap-6 px-4 pb-16">
-      <div className="bg-surface-active-alt flex size-12 items-center justify-center rounded-full">
-        <Sparkles size={24} className="text-accent-primary" />
+    <div className="flex h-full transform-gpu flex-col items-center justify-center gap-8 px-4 pb-24 pt-14">
+      <div className="flex flex-col items-center gap-4">
+        <div className="bg-surface-active-alt flex size-14 items-center justify-center rounded-2xl">
+          <Sparkles size={28} className="text-accent-primary" />
+        </div>
+        <div className="text-center">
+          <h1 className="text-text-primary text-3xl font-semibold tracking-tight sm:text-4xl">
+            How can I help you today?
+          </h1>
+          <p className="text-text-secondary mt-3 max-w-lg text-sm sm:text-base">
+            Ask anything, generate images, search the web, upload a photo, or use your voice.
+          </p>
+        </div>
       </div>
-      <div className="text-center">
-        <h1 className="text-text-primary text-2xl font-semibold sm:text-3xl">How can I help you today?</h1>
-        <p className="text-text-secondary mt-2 max-w-md text-sm">
-          Ask anything, or pick a starter below. I can write, code, summarize, brainstorm, and more — and I can use tools to do it for real.
-        </p>
-      </div>
-      <div className="grid w-full max-w-2xl grid-cols-1 gap-2 sm:grid-cols-2">
+
+      <div className="grid w-full max-w-2xl grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
         {STARTERS.map((s) => (
           <button
             key={s.label}
             onClick={() => onPick(s.prompt)}
-            className="border-border-light bg-surface-chat hover:bg-surface-active-alt group flex items-start gap-3 rounded-xl border p-3 text-start transition"
+            className="border-border-light bg-surface-chat hover:bg-surface-active-alt hover:border-accent-primary/30 group flex flex-col gap-2 rounded-xl border p-3.5 text-start transition"
           >
-            <s.icon size={18} className="text-accent-primary mt-0.5 shrink-0" />
-            <div>
-              <div className="text-text-primary text-sm font-medium">{s.label}</div>
-              <div className="text-text-tertiary line-clamp-2 text-xs">{s.prompt}</div>
+            <div className="flex items-center gap-2">
+              <s.icon size={16} className={`${s.accent} shrink-0`} />
+              <span className="text-text-primary text-sm font-medium">{s.label}</span>
             </div>
+            <div className="text-text-tertiary line-clamp-2 text-xs leading-relaxed">{s.prompt}</div>
           </button>
         ))}
       </div>
@@ -58,7 +65,7 @@ function WelcomeScreen({ onPick }: { onPick: (p: string) => void }) {
   );
 }
 
-export default function MessagesView({ onRegenerate }: { onRegenerate: () => void }) {
+export default function MessagesView({ onRegenerate, onRegenerateImage }: { onRegenerate: () => void; onRegenerateImage?: (img: import('@/lib/store').GeneratedImageRef) => void }) {
   const activeConversationId = useStore((s) => s.activeConversationId);
   const messages = useStore((s) =>
     activeConversationId ? (s.messagesByConversation[activeConversationId] ?? EMPTY_MESSAGES) : EMPTY_MESSAGES
@@ -113,6 +120,8 @@ export default function MessagesView({ onRegenerate }: { onRegenerate: () => voi
                   message={m}
                   isLast={i === messages.length - 1}
                   onRegenerate={onRegenerate}
+                  convoId={activeConversationId || undefined}
+                  onRegenerateImage={onRegenerateImage}
                 />
               ))}
               {isGenerating && messages[messages.length - 1]?.role === 'user' && (

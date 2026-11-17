@@ -137,11 +137,46 @@ export const TOOL_DEFINITIONS: ToolSchema[] = [
   {
     name: 'web_search',
     description:
-      'Search the web for current information. Returns a synthesized answer to the query. ' +
-      'Use this for facts, current events, or anything not in your training data.',
+      'Search the web for current information. Returns RANKED results with URL, title, snippet, host name, date, and favicon. ' +
+      'Use this for facts, current events, or anything not in your training data. Always cite the URLs in your response.',
     input_schema: {
       type: 'object',
-      properties: { query: { type: 'string', description: 'Search query.' } },
+      properties: {
+        query: { type: 'string', description: 'Search query.' },
+        num: { type: 'number', description: 'Max number of results. Default 6. Max 20.' },
+      },
+      required: ['query'],
+    },
+  },
+  {
+    name: 'image_generate',
+    description:
+      'Generate an image from a text prompt using AI. Use this when the user asks to "draw", "generate", "create an image of", "make a picture of", etc. ' +
+      'The image appears inline in the chat. Be descriptive and specific in the prompt for best results.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        prompt: { type: 'string', description: 'Detailed description of the image to generate.' },
+        size: {
+          type: 'string',
+          description: 'Image dimensions.',
+          enum: ['1024x1024', '768x1344', '864x1152', '1344x768', '1152x864', '1440x720', '720x1440'],
+        },
+      },
+      required: ['prompt'],
+    },
+  },
+  {
+    name: 'image_search',
+    description:
+      'Search the web for existing images matching a query. Returns real image URLs with captions and source attribution. ' +
+      'Use this when the user asks to "find me a picture of" or "show me an image of" something real (not generated).',
+    input_schema: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'Search query for images.' },
+        count: { type: 'number', description: 'Max number of images. Default 4.' },
+      },
       required: ['query'],
     },
   },

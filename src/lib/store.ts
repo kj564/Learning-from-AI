@@ -28,7 +28,47 @@ export interface ChatMessage {
   toolExecutions?: { tool: string; args: Record<string, unknown>; success: boolean; result?: string }[];
   /** True while the assistant is still streaming text into this message. */
   streaming?: boolean;
+  /** User-uploaded attachments (images/files/audio) shown as thumbnails above the bubble. */
+  attachments?: Attachment[];
+  /** AI-generated images shown as inline cards in the assistant message. */
+  images?: GeneratedImageRef[];
+  /** Web search results shown as a collapsible "Searched the web" panel above the content. */
+  webSearch?: { query: string; results: WebSearchSource[] };
+  /** Read-aloud audio URL (cached after first TTS call). */
+  audio?: { url: string; playing?: boolean };
   error?: string;
+}
+
+export interface Attachment {
+  id: string;
+  kind: 'image' | 'file' | 'audio';
+  name: string;
+  mime: string;
+  size: number;
+  /** For images: a data URL or /api/asset?id=... URL. */
+  url?: string;
+  /** For images: a thumbnail data URL (small preview). */
+  dataUrl?: string;
+}
+
+export interface GeneratedImageRef {
+  id: string;
+  url: string;
+  prompt: string;
+  size: string;
+  width: number;
+  height: number;
+  /** True while generating. */
+  pending?: boolean;
+}
+
+export interface WebSearchSource {
+  url: string;
+  name: string;
+  snippet: string;
+  host_name: string;
+  date?: string;
+  favicon?: string;
 }
 
 export interface Assistant {
@@ -86,6 +126,14 @@ interface WorkspaceState {
   // === Knowledge base ===
   knowledgeDocs: KnowledgeDocMeta[];
 
+  // === Composer multimodal state ===
+  composerAttachments: Attachment[];
+  webSearchEnabled: boolean;
+  voiceRecording: { isRecording: boolean; seconds: number } | null;
+  readAloud: { messageId: string; audioUrl: string; playing: boolean } | null;
+  imageLightbox: { url: string; prompt?: string } | null;
+  commandPaletteOpen: boolean;
+
   // === Actions ===
   newConversation: () => string;
   setActiveConversation: (id: string | null) => void;
@@ -115,6 +163,17 @@ interface WorkspaceState {
   setActiveAssistant: (id: string | null) => void;
 
   setKnowledgeDocs: (d: KnowledgeDocMeta[]) => void;
+
+  // Composer multimodal actions
+  addAttachment: (a: Attachment) => void;
+  removeAttachment: (id: string) => void;
+  clearAttachments: () => void;
+  toggleWebSearch: () => void;
+  setVoiceRecording: (state: { isRecording: boolean; seconds: number } | null) => void;
+  setReadAloud: (state: { messageId: string; audioUrl: string; playing: boolean } | null) => void;
+  openImageLightbox: (url: string, prompt?: string) => void;
+  closeImageLightbox: () => void;
+  setCommandPaletteOpen: (open: boolean) => void;
 }
 
 const genId = (prefix: string) => `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
@@ -138,6 +197,12 @@ export const useStore = create<WorkspaceState>()(
       assistants: [],
       activeAssistantId: null,
       knowledgeDocs: [],
+      composerAttachments: [],
+      webSearchEnabled: false,
+      voiceRecording: null,
+      readAloud: null,
+      imageLightbox: null,
+      commandPaletteOpen: false,
 
       newConversation: () => {
         const id = genId('convo');
@@ -247,6 +312,16 @@ export const useStore = create<WorkspaceState>()(
       setActiveAssistant: (id) => set({ activeAssistantId: id }),
 
       setKnowledgeDocs: (knowledgeDocs) => set({ knowledgeDocs }),
+
+      addAttachment: (a) => set((s) => ({ composerAttachments: [...s.composerAttachments, a] })),
+      removeAttachment: (id) => set((s) => ({ composerAttachments: s.composerAttachments.filter((a) => a.id !== id) })),
+      clearAttachments: () => set({ composerAttachments: [] }),
+      toggleWebSearch: () => set((s) => ({ webSearchEnabled: !s.webSearchEnabled })),
+      setVoiceRecording: (state) => set({ voiceRecording: state }),
+      setReadAloud: (state) => set({ readAloud: state }),
+      openImageLightbox: (url, prompt) => set({ imageLightbox: { url, prompt } }),
+      closeImageLightbox: () => set({ imageLightbox: null }),
+      setCommandPaletteOpen: (open) => set({ commandPaletteOpen: open }),
     }),
     {
       name: 'librechat-workspace-v1',
@@ -261,6 +336,7 @@ export const useStore = create<WorkspaceState>()(
         showDocumentsPanel: s.showDocumentsPanel,
         activeProject: s.activeProject,
         activeAssistantId: s.activeAssistantId,
+        webSearchEnabled: s.webSearchEnabled,
       }),
     }
   )

@@ -91,8 +91,37 @@ model Message {
   role           String // user | assistant | system
   content        String   @default("")
   toolExecutions String   @default("[]") // JSON array
+  attachments    String   @default("[]") // JSON: user-uploaded files/images [{kind,id,name,mime,size,url?}]
+  images         String   @default("[]") // JSON: AI-generated images [{id,url,prompt,size,width,height}]
+  webSearch      String?               // JSON: {query, results:[{url,name,snippet,host_name,date,favicon}]}
+  audioPath      String?               // server path for TTS read-aloud cache
   sessionId      String? // server-side /api/chat session id (for tool history)
   createdAt      DateTime @default(now())
 
   @@index([conversationId])
+}
+
+// === Generated images (history + dedup) ===
+model GeneratedImage {
+  id             String   @id @default(cuid())
+  conversationId String?
+  messageId      String?
+  prompt         String
+  size           String   @default("1024x1024")
+  path           String   // absolute file path on disk
+  width          Int     @default(1024)
+  height         Int     @default(1024)
+  createdAt      DateTime @default(now())
+
+  @@index([conversationId])
+}
+
+// === Assets (uploaded files, audio cache, etc.) ===
+model Asset {
+  id        String   @id @default(cuid())
+  kind      String   // 'image' | 'file' | 'audio'
+  path      String   // absolute file path on disk
+  mime      String
+  size      Int      @default(0)
+  createdAt DateTime @default(now())
 }

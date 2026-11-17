@@ -434,3 +434,124 @@ export async function searchKnowledge(query: string, topK = 4): Promise<Knowledg
   const data = await res.json();
   return (data.snippets || []) as KnowledgeSearchResult[];
 }
+
+// ============================================================
+// Multimodal: image generation, image search, vision, TTS, ASR, web search
+// ============================================================
+
+export interface GeneratedImage {
+  id: string;
+  url: string;
+  prompt: string;
+  size: string;
+  width: number;
+  height: number;
+}
+
+/** Generate an image from a text prompt. */
+export async function generateImage(opts: {
+  prompt: string;
+  size?: string;
+  conversationId?: string;
+  messageId?: string;
+}): Promise<GeneratedImage | null> {
+  const res = await fetch('/api/image/generate', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(opts),
+  });
+  if (!res.ok) return null;
+  const data = await res.json();
+  return (data.image as GeneratedImage) || null;
+}
+
+export interface ImageSearchResult {
+  original_url: string;
+  caption: string;
+  source: string;
+  original_width?: string;
+  original_height?: string;
+}
+
+/** Search the web for existing images. */
+export async function imageSearch(query: string, count = 4): Promise<ImageSearchResult[]> {
+  const res = await fetch('/api/image/search', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ query, count }),
+  });
+  if (!res.ok) return [];
+  const data = await res.json();
+  return (data.results || []) as ImageSearchResult[];
+}
+
+/** Understand an image (data URL, http URL, or our asset URL). Returns the AI's description. */
+export async function vision(opts: {
+  imageUrl: string;
+  prompt?: string;
+  history?: { role: string; content: string }[];
+}): Promise<string> {
+  const res = await fetch('/api/vision', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(opts),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
+    throw new Error(err.error || `HTTP ${res.status}`);
+  }
+  const data = await res.json();
+  return (data.text as string) || '';
+}
+
+/** Text-to-speech. Returns a /api/audio/asset?id=... URL. */
+export async function tts(text: string, voice?: string): Promise<string> {
+  const res = await fetch('/api/audio/tts', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ text, voice }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
+    throw new Error(err.error || `HTTP ${res.status}`);
+  }
+  const data = await res.json();
+  return (data.audioUrl as string) || '';
+}
+
+/** Speech-to-text. Pass base64-encoded audio (webm/wav/mp3 from MediaRecorder). */
+export async function asr(fileBase64: string): Promise<string> {
+  const res = await fetch('/api/audio/asr', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ file_base64: fileBase64 }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
+    throw new Error(err.error || `HTTP ${res.status}`);
+  }
+  const data = await res.json();
+  return (data.text as string) || '';
+}
+
+export interface WebSearchResult {
+  url: string;
+  name: string;
+  snippet: string;
+  host_name: string;
+  rank: number;
+  date: string;
+  favicon: string;
+}
+
+/** Real web search via the SDK's built-in functions.invoke('web_search'). */
+export async function webSearch(query: string, num = 6): Promise<WebSearchResult[]> {
+  const res = await fetch('/api/web/search', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ query, num }),
+  });
+  if (!res.ok) return [];
+  const data = await res.json();
+  return (data.results || []) as WebSearchResult[];
+}

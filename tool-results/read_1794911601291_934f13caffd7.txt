@@ -1,0 +1,343 @@
+     1→     1→'use client'
+     2→     2→
+     3→     3→/**
+     4→     4→ * AI Workspace — LibreChat UI
+     5→     5→ *
+     6→     6→ * System prompt: Claude Opus 5.5
+     7→     7→ * UI Design: LibreChat (github.com/LibreChat-AI/LibreChat)
+     8→     8→ *
+     9→     9→ * Layout (LibreChat faithful):
+    10→    10→ *   - Far left: Icon rail (48px, icons only)
+    11→    11→ *   - Left: Conversation sidebar (250px, project list + chat list)
+    12→    12→ *   - Center: Chat area (messages + input bar)
+    13→    13→ *   - Right: Documents panel (toggle)
+    14→    14→ */
+    15→    15→
+    16→    16→import { useEffect, useRef, useState, useCallback } from 'react'
+    17→    17→
+    18→    18→// === Types ===
+    19→    19→interface DocItem {
+    20→    20→  id: string; name: string; type: 'code' | 'text' | 'instruction' | 'config'
+    21→    21→  content: string; language?: string; updatedAt: number
+    22→    22→}
+    23→    23→interface ProjectItem {
+    24→    24→  id: string; name: string; description: string
+    25→    25→  documentCount: number; createdAt: number; updatedAt: number
+    26→    26→}
+    27→    27→interface FullProject extends ProjectItem {
+    28→    28→  documents: DocItem[]; instructions: string
+    29→    29→}
+    30→    30→interface ChatMsg {
+    31→    31→  role: 'user' | 'assistant'; content: string
+    32→    32→  toolCall?: { tool: string; args: Record<string, unknown> }
+    33→    33→}
+    34→    34→interface McpTool { name: string; description: string }
+    35→    35→interface AiModel { id: string; name: string; description: string }
+    36→    36→
+    37→    37→const MODELS: AiModel[] = [
+    38→    38→  { id: 'default', name: 'Claude Opus 5.5', description: 'Most powerful' },
+    39→    39→  { id: 'fast', name: 'Claude Haiku', description: 'Fast' },
+    40→    40→  { id: 'smart', name: 'Claude Sonnet 5', description: 'Balanced' },
+    41→    41→]
+    42→    42→
+    43→    43→function renderMarkdown(text: string): string {
+    44→    44→  return text
+    45→    45→    .replace(/```(\w*)\n([\s\S]*?)```/g, '<pre class="bg-zinc-800/80 rounded-lg p-3 my-2 overflow-x-auto text-xs font-mono"><code>$2</code></pre>')
+    46→    46→    .replace(/`([^`]+)`/g, '<code class="bg-zinc-700/60 px-1.5 py-0.5 rounded text-xs text-indigo-300">$1</code>')
+    47→    47→    .replace(/\*\*([^*]+)\*\*/g, '<strong class="font-semibold text-white">$1</strong>')
+    48→    48→    .replace(/^### (.+)$/gm, '<h3 class="text-sm font-semibold mt-3 mb-1 text-zinc-200">$1</h3>')
+    49→    49→    .replace(/^## (.+)$/gm, '<h2 class="text-base font-semibold mt-4 mb-1 text-zinc-100">$1</h2>')
+    50→    50→    .replace(/^# (.+)$/gm, '<h1 class="text-lg font-bold mt-4 mb-2 text-white">$1</h1>')
+    51→    51→    .replace(/^\- (.+)$/gm, '<li class="ml-5 list-disc text-zinc-300">$1</li>')
+    52→    52→    .replace(/^\d+\. (.+)$/gm, '<li class="ml-5 list-decimal text-zinc-300">$1</li>')
+    53→    53→    .replace(/\n\n/g, '</p><p class="mt-2">')
+    54→    54→    .replace(/\n/g, '<br/>')
+    55→    55→}
+    56→    56→
+    57→    57→// === Icons (inline SVG, LibreChat style) ===
+    58→    58→const Icon = {
+    59→    59→  menu: () => <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="18" x2="21" y2="18"/></svg>,
+    60→    60→  newChat: () => <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>,
+    61→    61→  chat: () => <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>,
+    62→    62→  folder: () => <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/></svg>,
+    63→    63→  doc: () => <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>,
+    64→    64→  settings: () => <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>,
+    65→    65→  send: () => <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>,
+    66→    66→  panel: () => <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="15" y1="3" x2="15" y2="21"/></svg>,
+    67→    67→  trash: () => <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>,
+    68→    68→  plus: () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>,
+    69→    69→  plug: () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 22v-5"/><path d="M9 8V2"/><path d="M15 8V2"/><path d="M18 8v5a4 4 0 01-4 4h-4a4 4 0 01-4-4V8z"/></svg>,
+    70→    70→}
+    71→    71→
+    72→    72→export default function Home() {
+    73→    73→  const [projects, setProjects] = useState<ProjectItem[]>([])
+    74→    74→  const [selectedProject, setSelectedProject] = useState<FullProject | null>(null)
+    75→    75→  const [showNewProject, setShowNewProject] = useState(false)
+    76→    76→  const [newProjectName, setNewProjectName] = useState('')
+    77→    77→  const [newProjectDesc, setNewProjectDesc] = useState('')
+    78→    78→  const [messages, setMessages] = useState<ChatMsg[]>([])
+    79→    79→  const [input, setInput] = useState('')
+    80→    80→  const [loading, setLoading] = useState(false)
+    81→    81→  const [sessionId, setSessionId] = useState('')
+    82→    82→  const [selectedModel, setSelectedModel] = useState('default')
+    83→    83→  const [sidebarOpen, setSidebarOpen] = useState(true)
+    84→    84→  const [rightPanelOpen, setRightPanelOpen] = useState(true)
+    85→    85→  const chatEndRef = useRef<HTMLDivElement>(null)
+    86→    86→
+    87→    87→  const [activeDocId, setActiveDocId] = useState<string | null>(null)
+    88→    88→  const [docName, setDocName] = useState('')
+    89→    89→  const [docType, setDocType] = useState<'code' | 'text' | 'instruction' | 'config'>('code')
+    90→    90→  const [docContent, setDocContent] = useState('')
+    91→    91→  const [docLanguage, setDocLanguage] = useState('typescript')
+    92→    92→  const [docDirty, setDocDirty] = useState(false)
+    93→    93→
+    94→    94→  const [mcpTools] = useState<McpTool[]>([
+    95→    95→    { name: 'file_read', description: 'Read a file from project' },
+    96→    96→    { name: 'file_write', description: 'Write a file to project' },
+    97→    97→    { name: 'web_search', description: 'Search the web' },
+    98→    98→    { name: 'run_code', description: 'Execute code in sandbox' },
+    99→    99→    { name: 'canva_create', description: 'Create Canva design via MCP' },
+   100→   100→  ])
+   101→   101→
+   102→   102→  const [canvaConnected, setCanvaConnected] = useState(false)
+   103→   103→  const [canvaConnecting, setCanvaConnecting] = useState(false)
+   104→   104→
+   105→   105→  const checkCanvaStatus = useCallback(async () => {
+   106→   106→    try { const res = await fetch('/api/mcp/canva?action=status'); const d = await res.json(); setCanvaConnected(d.connected && !d.expired) } catch {}
+   107→   107→  }, [])
+   108→   108→  useEffect(() => { checkCanvaStatus(); const p = new URLSearchParams(window.location.search); if (p.get('canva') === 'connected') { checkCanvaStatus(); window.history.replaceState({}, '', '/') } }, [checkCanvaStatus])
+   109→   109→
+   110→   110→  const fetchProjects = useCallback(async () => { try { const r = await fetch('/api/projects'); const d = await r.json(); setProjects(d.projects || []) } catch {} }, [])
+   111→   111→  useEffect(() => { fetchProjects() }, [fetchProjects])
+   112→   112→
+   113→   113→  const fetchProject = useCallback(async (id: string) => { try { const r = await fetch('/api/projects', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'get', id }) }); const d = await r.json(); if (d.project) { setSelectedProject(d.project); setActiveDocId(null); setMessages([]); setSessionId('') } } catch {} }, [])
+   114→   114→
+   115→   115→  const createProject = async () => { if (!newProjectName.trim()) return; try { const r = await fetch('/api/projects', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'create', name: newProjectName, description: newProjectDesc }) }); const d = await r.json(); if (d.success) { setNewProjectName(''); setNewProjectDesc(''); setShowNewProject(false); fetchProjects(); fetchProject(d.project.id) } } catch {} }
+   116→   116→  const deleteProject = async (id: string) => { try { await fetch('/api/projects', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'delete', id }) }); if (selectedProject?.id === id) { setSelectedProject(null); setMessages([]) } fetchProjects() } catch {} }
+   117→   117→  const addDocument = async () => { if (!selectedProject) return; try { const r = await fetch('/api/projects', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'addDocument', id: selectedProject.id, documentName: 'new-doc', documentType: 'code', documentContent: '', documentLanguage: 'typescript' }) }); const d = await r.json(); if (d.success) { fetchProject(selectedProject.id); fetchProjects() } } catch {} }
+   118→   118→  const saveDocument = async () => { if (!selectedProject || !activeDocId) return; try { await fetch('/api/projects', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'updateDocument', id: selectedProject.id, documentId: activeDocId, documentName: docName, documentType: docType, documentContent: docContent, documentLanguage: docLanguage }) }); setDocDirty(false); fetchProject(selectedProject.id); fetchProjects() } catch {} }
+   119→   119→  const deleteDocument = async (docId: string) => { if (!selectedProject) return; try { await fetch('/api/projects', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'deleteDocument', id: selectedProject.id, documentId: docId }) }); if (activeDocId === docId) setActiveDocId(null); fetchProject(selectedProject.id); fetchProjects() } catch {} }
+   120→   120→  const selectDoc = (d: DocItem) => { setActiveDocId(d.id); setDocName(d.name); setDocType(d.type); setDocContent(d.content); setDocLanguage(d.language || 'typescript'); setDocDirty(false) }
+   121→   121→  const saveInstructions = async () => { if (!selectedProject) return; try { await fetch('/api/projects', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'update', id: selectedProject.id, instructions: selectedProject.instructions }) }); fetchProject(selectedProject.id) } catch {} }
+   122→   122→
+   123→   123→  const sendChat = async () => {
+   124→   124→    if (!input.trim() || loading) return
+   125→   125→    setMessages(p => [...p, { role: 'user', content: input.trim() }]); setInput(''); setLoading(true)
+   126→   126→    try { const r = await fetch('/api/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message: input.trim(), sessionId, project: selectedProject, mcpTools, model: selectedModel }) }); const d = await r.json(); if (d.success) { setSessionId(d.sessionId); setMessages(p => [...p, { role: 'assistant', content: d.response, toolCall: d.toolCall }]) } else { setMessages(p => [...p, { role: 'assistant', content: `Error: ${d.error}` }]) } } catch (e) { setMessages(p => [...p, { role: 'assistant', content: `Connection error: ${e}` }]) } finally { setLoading(false) }
+   127→   127→  }
+   128→   128→  const clearChat = async () => { if (sessionId) await fetch(`/api/chat?sessionId=${sessionId}`, { method: 'DELETE' }); setMessages([]); setSessionId('') }
+   129→   129→  useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages])
+   130→   130→  const fmtTime = (ts: number) => new Date(ts).toLocaleString('en-US', { month: 'short', day: 'numeric' })
+   131→   131→
+   132→   132→  return (
+   133→   133→    <div className="flex h-screen w-screen overflow-hidden bg-zinc-950 text-zinc-100">
+   134→   134→      {/* === ICON RAIL (LibreChat: 48px, icons only) === */}
+   135→   135→      <div className="w-12 flex-shrink-0 bg-zinc-900 border-r border-zinc-800 flex flex-col items-center py-3 gap-2">
+   136→   136→        <button onClick={() => setSidebarOpen(!sidebarOpen)} className="p-2 rounded-lg hover:bg-zinc-800 text-zinc-400 hover:text-white transition-colors" title="Toggle sidebar"><Icon.menu /></button>
+   137→   137→        <button onClick={() => { setShowNewProject(true); if (!sidebarOpen) setSidebarOpen(true) }} className="p-2 rounded-lg hover:bg-zinc-800 text-zinc-400 hover:text-white transition-colors" title="New project"><Icon.newChat /></button>
+   138→   138→        <div className="w-6 h-px bg-zinc-800 my-1" />
+   139→   139→        <button className="p-2 rounded-lg bg-zinc-800 text-indigo-400" title="Chats"><Icon.chat /></button>
+   140→   140→        <button className="p-2 rounded-lg hover:bg-zinc-800 text-zinc-400 hover:text-white transition-colors" title="Documents"><Icon.doc /></button>
+   141→   141→        <button onClick={() => setRightPanelOpen(!rightPanelOpen)} className={`p-2 rounded-lg hover:bg-zinc-800 transition-colors ${rightPanelOpen ? 'text-indigo-400 bg-zinc-800' : 'text-zinc-400 hover:text-white'}`} title="Toggle right panel"><Icon.panel /></button>
+   142→   142→        <div className="flex-1" />
+   143→   143→        <div className="w-8 h-8 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-xs font-bold">U</div>
+   144→   144→      </div>
+   145→   145→
+   146→   146→      {/* === CONVERSATION SIDEBAR (LibreChat: 250px) === */}
+   147→   147→      {sidebarOpen && (
+   148→   148→        <aside className="w-60 flex-shrink-0 border-r border-zinc-800 flex flex-col bg-zinc-900/80">
+   149→   149→          <div className="p-3 flex items-center justify-between">
+   150→   150→            <h1 className="text-sm font-bold text-zinc-200">AI Workspace</h1>
+   151→   151→            <span className="text-[9px] text-zinc-600">Claude Opus 5.5</span>
+   152→   152→          </div>
+   153→   153→
+   154→   154→          {showNewProject && (
+   155→   155→            <div className="mx-2 mb-2 p-2.5 bg-zinc-800/60 rounded-xl space-y-2">
+   156→   156→              <input type="text" value={newProjectName} onChange={(e) => setNewProjectName(e.target.value)} placeholder="Project name" className="w-full bg-zinc-900 text-xs px-2.5 py-1.5 rounded-lg border border-zinc-700 focus:border-indigo-500 focus:outline-none" />
+   157→   157→              <input type="text" value={newProjectDesc} onChange={(e) => setNewProjectDesc(e.target.value)} placeholder="Description" className="w-full bg-zinc-900 text-xs px-2.5 py-1.5 rounded-lg border border-zinc-700 focus:border-indigo-500 focus:outline-none" />
+   158→   158→              <div className="flex gap-1.5">
+   159→   159→                <button onClick={createProject} className="flex-1 text-xs px-2 py-1.5 bg-indigo-600 hover:bg-indigo-500 rounded-lg font-medium">Create</button>
+   160→   160→                <button onClick={() => setShowNewProject(false)} className="text-xs px-2 py-1.5 bg-zinc-700 hover:bg-zinc-600 rounded-lg">Cancel</button>
+   161→   161→              </div>
+   162→   162→            </div>
+   163→   163→          )}
+   164→   164→
+   165→   165→          <div className="px-3 py-1.5">
+   166→   166→            <div className="flex items-center gap-1.5 text-[10px] font-bold text-zinc-500 uppercase tracking-wider">
+   167→   167→              <Icon.folder /><span>Projects</span>
+   168→   168→            </div>
+   169→   169→          </div>
+   170→   170→
+   171→   171→          <div className="flex-1 overflow-y-auto px-1.5">
+   172→   172→            {projects.length === 0 && !showNewProject && <p className="text-xs text-zinc-600 text-center mt-4 px-2">No projects yet</p>}
+   173→   173→            {projects.map(p => (
+   174→   174→              <div key={p.id} onClick={() => fetchProject(p.id)} className={`group p-2.5 rounded-xl cursor-pointer mb-0.5 transition-colors ${selectedProject?.id === p.id ? 'bg-zinc-800' : 'hover:bg-zinc-800/40'}`}>
+   175→   175→                <div className="flex items-center justify-between">
+   176→   176→                  <span className="text-xs font-medium truncate text-zinc-200">{p.name}</span>
+   177→   177→                  <button onClick={(e) => { e.stopPropagation(); deleteProject(p.id) }} className="opacity-0 group-hover:opacity-100 text-zinc-500 hover:text-red-400 ml-1"><Icon.trash /></button>
+   178→   178→                </div>
+   179→   179→                {p.description && <p className="text-[10px] text-zinc-500 truncate mt-0.5">{p.description}</p>}
+   180→   180→                <div className="text-[9px] text-zinc-600 mt-1">{p.documentCount} docs · {fmtTime(p.updatedAt)}</div>
+   181→   181→              </div>
+   182→   182→            ))}
+   183→   183→          </div>
+   184→   184→
+   185→   185→          {/* Canva MCP connection */}
+   186→   186→          <div className="border-t border-zinc-800 p-2.5">
+   187→   187→            <div className={`flex items-center justify-between p-2 rounded-lg ${canvaConnected ? 'bg-emerald-900/20' : 'bg-zinc-800/40'}`}>
+   188→   188→              <div className="flex items-center gap-1.5">
+   189→   189→                <Icon.plug />
+   190→   190→                <span className="text-[10px] font-medium text-zinc-300">Canva MCP</span>
+   191→   191→              </div>
+   192→   192→              <span className={`text-[9px] px-1.5 py-0.5 rounded-full ${canvaConnected ? 'bg-emerald-600 text-white' : 'bg-zinc-600 text-zinc-400'}`}>{canvaConnected ? 'On' : 'Off'}</span>
+   193→   193→            </div>
+   194→   194→            {!canvaConnected ? (
+   195→   195→              <button onClick={() => { setCanvaConnecting(true); window.location.href = '/api/mcp/canva' }} disabled={canvaConnecting} className="w-full mt-1.5 text-[10px] px-2 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 rounded-lg font-medium flex items-center justify-center gap-1">
+   196→   196→                <Icon.plug /> {canvaConnecting ? 'Connecting...' : 'Connect'}
+   197→   197→              </button>
+   198→   198→            ) : (
+   199→   199→              <button onClick={async () => { await fetch('/api/mcp/canva?action=disconnect'); setCanvaConnected(false) }} className="w-full mt-1.5 text-[10px] px-2 py-1.5 bg-zinc-700 hover:bg-zinc-600 rounded-lg text-zinc-400">Disconnect</button>
+   200→   200→            )}
+   201→   201→          </div>
+   202→   202→
+   203→   203→          {/* MCP tools */}
+   204→   204→          <div className="border-t border-zinc-800 p-2.5">
+   205→   205→            <details className="group">
+   206→   206→              <summary className="text-[10px] text-zinc-500 cursor-pointer font-medium flex items-center gap-1">
+   207→   207→                <span className="transition-transform group-open:rotate-90">{">"}</span> MCP Tools ({mcpTools.length})
+   208→   208→              </summary>
+   209→   209→              <div className="mt-1.5 space-y-1 pl-3">
+   210→   210→                {mcpTools.map((t, i) => (
+   211→   211→                  <div key={i} className="text-[10px]"><span className="font-mono text-indigo-400">{t.name}</span> <span className="text-zinc-600">{t.description}</span></div>
+   212→   212→                ))}
+   213→   213→              </div>
+   214→   214→            </details>
+   215→   215→          </div>
+   216→   216→        </aside>
+   217→   217→      )}
+   218→   218→
+   219→   219→      {/* === MAIN CHAT AREA (LibreChat: centered messages, input bar at bottom) === */}
+   220→   220→      <main className="flex-1 flex flex-col min-w-0 bg-zinc-950">
+   221→   221→        {/* Top bar */}
+   222→   222→        <header className="h-12 border-b border-zinc-800/50 flex items-center px-4 gap-3">
+   223→   223→          {selectedProject ? (
+   224→   224→            <>
+   225→   225→              <span className="text-sm font-semibold text-zinc-200">{selectedProject.name}</span>
+   226→   226→              {selectedProject.description && <span className="text-xs text-zinc-500 hidden sm:inline">— {selectedProject.description}</span>}
+   227→   227→            </>
+   228→   228→          ) : <span className="text-sm text-zinc-500">Select a project to begin</span>}
+   229→   229→          <div className="ml-auto flex items-center gap-2">
+   230→   230→            <select value={selectedModel} onChange={(e) => setSelectedModel(e.target.value)} className="bg-zinc-800/60 text-xs px-3 py-1.5 rounded-lg border border-zinc-700/50 focus:outline-none cursor-pointer hover:bg-zinc-800">
+   231→   231→              {MODELS.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+   232→   232→            </select>
+   233→   233→          </div>
+   234→   234→        </header>
+   235→   235→
+   236→   236→        {/* Messages — LibreChat style: no bubbles, avatar + text */}
+   237→   237→        <div className="flex-1 overflow-y-auto">
+   238→   238→          <div className="max-w-3xl mx-auto px-4 py-6">
+   239→   239→            {!selectedProject && (
+   240→   240→              <div className="text-center mt-24">
+   241→   241→                <div className="w-16 h-16 mx-auto mb-4 rounded-2xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-2xl font-bold text-white">AI</div>
+   242→   242→                <h2 className="text-xl font-semibold text-zinc-300 mb-1">AI Workspace</h2>
+   243→   243→                <p className="text-sm text-zinc-500">Create a project, add documents, chat with Claude Opus 5.5</p>
+   244→   244→                <p className="text-xs text-zinc-700 mt-4">MCP tools · Canva integration · Project context</p>
+   245→   245→              </div>
+   246→   246→            )}
+   247→   247→            {selectedProject && messages.length === 0 && (
+   248→   248→              <div className="text-center mt-24">
+   249→   249→                <p className="text-base text-zinc-400">Chat about &lsquo;{selectedProject.name}&rsquo;</p>
+   250→   250→                <p className="text-xs text-zinc-600 mt-2">{selectedProject.documents.length} docs in context · {MODELS.find(m => m.id === selectedModel)?.name}</p>
+   251→   251→              </div>
+   252→   252→            )}
+   253→   253→            <div className="space-y-6">
+   254→   254→              {messages.map((msg, i) => (
+   255→   255→                <div key={i} className="flex gap-3">
+   256→   256→                  {msg.role === 'assistant' ? (
+   257→   257→                    <div className="w-8 h-8 flex-shrink-0 rounded-lg bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-xs font-bold">AI</div>
+   258→   258→                  ) : (
+   259→   259→                    <div className="w-8 h-8 flex-shrink-0 rounded-lg bg-zinc-700 flex items-center justify-center text-xs font-bold">U</div>
+   260→   260→                  )}
+   261→   261→                  <div className="flex-1 min-w-0">
+   262→   262→                    {msg.toolCall && <div className="text-[10px] font-mono bg-amber-900/30 px-2 py-1 rounded mb-1.5 text-amber-300">Tool: {msg.toolCall.tool} | {JSON.stringify(msg.toolCall.args)}</div>}
+   263→   263→                    <div className="text-sm text-zinc-300 leading-relaxed [&_pre]:bg-zinc-800/80 [&_pre]:rounded-lg [&_pre]:p-3 [&_pre]:my-2 [&_pre]:overflow-x-auto [&_pre]:text-xs [&_pre]:font-mono [&_code]:text-indigo-300" dangerouslySetInnerHTML={{ __html: renderMarkdown(msg.content) }} />
+   264→   264→                  </div>
+   265→   265→                </div>
+   266→   266→              ))}
+   267→   267→              {loading && (
+   268→   268→                <div className="flex gap-3">
+   269→   269→                  <div className="w-8 h-8 flex-shrink-0 rounded-lg bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-xs font-bold">AI</div>
+   270→   270→                  <div className="flex gap-1 items-center pt-2">
+   271→   271→                    <span className="w-2 h-2 bg-zinc-600 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+   272→   272→                    <span className="w-2 h-2 bg-zinc-600 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+   273→   273→                    <span className="w-2 h-2 bg-zinc-600 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+   274→   274→                  </div>
+   275→   275→                </div>
+   276→   276→              )}
+   277→   277→              <div ref={chatEndRef} />
+   278→   278→            </div>
+   279→   279→          </div>
+   280→   280→        </div>
+   281→   281→
+   282→   282→        {/* Input bar — LibreChat style: rounded container, send button, model hint */}
+   283→   283→        <div className="border-t border-zinc-800/50 bg-zinc-950">
+   284→   284→          <div className="max-w-3xl mx-auto p-3">
+   285→   285→            <div className="flex items-end gap-2 bg-zinc-900 rounded-2xl border border-zinc-800 focus-within:border-indigo-600/50 transition-colors">
+   286→   286→              <textarea value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => { if (e.code === 'Enter' && !e.shiftKey) { e.preventDefault(); sendChat() } }} placeholder={selectedProject ? `Message AI...` : 'Select a project first...'} disabled={!selectedProject || loading} rows={1} className="flex-1 bg-transparent text-sm px-4 py-3 focus:outline-none disabled:opacity-40 resize-none" style={{ maxHeight: '120px' }} />
+   287→   287→              <div className="flex items-center gap-1.5 p-2">
+   288→   288→                <button onClick={clearChat} disabled={messages.length === 0} className="text-zinc-500 hover:text-zinc-300 disabled:opacity-30 text-xs px-2 py-1.5 rounded-lg hover:bg-zinc-800">Clear</button>
+   289→   289→                <button onClick={sendChat} disabled={!selectedProject || loading || !input.trim()} className="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-30 text-white p-2.5 rounded-xl transition-colors"><Icon.send /></button>
+   290→   290→              </div>
+   291→   291→            </div>
+   292→   292→            <p className="text-[10px] text-zinc-700 text-center mt-2">{MODELS.find(m => m.id === selectedModel)?.name} · {selectedProject?.documents.length || 0} docs · {mcpTools.length} MCP tools · Canva {canvaConnected ? 'connected' : 'off'}</p>
+   293→   293→          </div>
+   294→   294→        </div>
+   295→   295→      </main>
+   296→   296→
+   297→   297→      {/* === RIGHT PANEL: Documents === */}
+   298→   298→      {rightPanelOpen && (
+   299→   299→        <aside className="w-72 flex-shrink-0 border-l border-zinc-800 flex flex-col bg-zinc-900/80">
+   300→   300→          {selectedProject ? (
+   301→   301→            <>
+   302→   302→              <div className="h-12 border-b border-zinc-800 flex items-center justify-between px-4">
+   303→   303→                <span className="text-xs font-bold text-zinc-400 uppercase tracking-wide">Documents</span>
+   304→   304→                <button onClick={addDocument} className="text-xs px-2 py-1 bg-emerald-700/80 hover:bg-emerald-600 rounded-lg flex items-center gap-1"><Icon.plus /> Add</button>
+   305→   305→              </div>
+   306→   306→
+   307→   307→              <div className="max-h-32 overflow-y-auto border-b border-zinc-800/50">
+   308→   308→                {selectedProject.documents.length === 0 && <p className="text-xs text-zinc-600 text-center py-3">No documents</p>}
+   309→   309→                {selectedProject.documents.map(doc => (
+   310→   310→                  <div key={doc.id} onClick={() => selectDoc(doc)} className={`group flex items-center gap-2 p-2.5 cursor-pointer text-xs border-b border-zinc-800/30 transition-colors ${activeDocId === doc.id ? 'bg-zinc-800' : 'hover:bg-zinc-800/40'}`}>
+   311→   311→                    <span className={`px-1.5 py-0.5 rounded text-[9px] font-mono ${doc.type === 'code' ? 'bg-blue-900/50 text-blue-300' : doc.type === 'instruction' ? 'bg-amber-900/50 text-amber-300' : doc.type === 'config' ? 'bg-purple-900/50 text-purple-300' : 'bg-zinc-700 text-zinc-400'}`}>{doc.type}</span>
+   312→   312→                    <span className="truncate flex-1">{doc.name}</span>
+   313→   313→                    <button onClick={(e) => { e.stopPropagation(); deleteDocument(doc.id) }} className="opacity-0 group-hover:opacity-100 text-zinc-500 hover:text-red-400"><Icon.trash /></button>
+   314→   314→                  </div>
+   315→   315→                ))}
+   316→   316→              </div>
+   317→   317→
+   318→   318→              {activeDocId ? (
+   319→   319→                <div className="flex-1 flex flex-col p-3 gap-2 overflow-hidden">
+   320→   320→                  <div className="flex gap-1">
+   321→   321→                    <input type="text" value={docName} onChange={(e) => { setDocName(e.target.value); setDocDirty(true) }} className="flex-1 bg-zinc-900 text-xs px-2.5 py-1.5 rounded-lg border border-zinc-700 focus:border-indigo-500 focus:outline-none" placeholder="Name" />
+   322→   322→                    <select value={docType} onChange={(e) => { setDocType(e.target.value as 'code' | 'text' | 'instruction' | 'config'); setDocDirty(true) }} className="bg-zinc-900 text-xs px-1 py-1.5 rounded-lg border border-zinc-700 focus:outline-none">
+   323→   323→                      <option value="code">code</option><option value="text">text</option><option value="instruction">instruction</option><option value="config">config</option>
+   324→   324→                    </select>
+   325→   325→                  </div>
+   326→   326→                  {docType === 'code' && <input type="text" value={docLanguage} onChange={(e) => { setDocLanguage(e.target.value); setDocDirty(true) }} className="bg-zinc-900 text-xs px-2.5 py-1.5 rounded-lg border border-zinc-700 focus:outline-none" placeholder="language" />}
+   327→   327→                  <textarea value={docContent} onChange={(e) => { setDocContent(e.target.value); setDocDirty(true) }} className="flex-1 bg-zinc-950 text-xs font-mono px-3 py-2.5 rounded-lg border border-zinc-800 focus:border-indigo-500 focus:outline-none resize-none" placeholder="Content..." style={{ minHeight: '100px' }} />
+   328→   328→                  <button onClick={saveDocument} disabled={!docDirty} className="text-xs px-2.5 py-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-30 rounded-lg font-medium">{docDirty ? 'Save *' : 'Saved'}</button>
+   329→   329→                </div>
+   330→   330→              ) : <div className="flex-1 flex items-center justify-center text-xs text-zinc-600">Select a document to edit</div>}
+   331→   331→
+   332→   332→              <div className="border-t border-zinc-800 p-3">
+   333→   333→                <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-wide">Instructions</label>
+   334→   334→                <textarea value={selectedProject.instructions} onChange={(e) => setSelectedProject({ ...selectedProject, instructions: e.target.value })} onBlur={saveInstructions} className="w-full mt-1.5 bg-zinc-900 text-xs px-2.5 py-1.5 rounded-lg border border-zinc-700 focus:border-indigo-500 focus:outline-none resize-none" rows={3} placeholder="AI rules for this project..." />
+   335→   335→              </div>
+   336→   336→            </>
+   337→   337→          ) : <div className="flex-1 flex items-center justify-center text-xs text-zinc-600 px-4 text-center">Select a project</div>}
+   338→   338→        </aside>
+   339→   339→      )}
+   340→   340→    </div>
+   341→   341→  )
+   342→   342→}
+   343→   343→

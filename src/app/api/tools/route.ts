@@ -195,15 +195,53 @@ export async function POST(req: NextRequest) {
         const query = args.query as string;
         if (!query) return NextResponse.json({ error: 'query required' }, { status: 400 });
         try {
-          const zai = await ZAI.create();
-          const result = await zai.chat.completions.create({
-            messages: [
-              { role: 'assistant', content: 'You are a web search assistant. Provide factual, concise answers with sources when possible.' },
-              { role: 'user', content: query },
-            ],
-            thinking: { type: 'disabled' },
+          // REAL web search via the SDK's built-in function (replaces the old LLM-hallucinated version)
+          const wsRes = await fetch('http://localhost:3000/api/web/search', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ query, num: 6 }),
           });
-          return NextResponse.json({ success: true, query, result: result.choices[0]?.message?.content });
+          const data = await wsRes.json();
+          return NextResponse.json({ success: true, query, results: data.results || [] });
+        } catch (e) {
+          return NextResponse.json({ success: false, error: (e as Error).message }, { status: 500 });
+        }
+      }
+
+      // === IMAGE GENERATION (new) ===
+      case 'image_generate': {
+        const prompt = args.prompt as string;
+        const size = (args.size as string) || '1024x1024';
+        if (!prompt) return NextResponse.json({ error: 'prompt required' }, { status: 400 });
+        try {
+          const genRes = await fetch('http://localhost:3000/api/image/generate', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ prompt, size }),
+          });
+          const data = await genRes.json();
+          return NextResponse.json({
+            success: !!data.success,
+            prompt,
+            image: data.image || null,
+          });
+        } catch (e) {
+          return NextResponse.json({ success: false, error: (e as Error).message }, { status: 500 });
+        }
+      }
+
+      // === IMAGE SEARCH (new) ===
+      case 'image_search': {
+        const query = args.query as string;
+        if (!query) return NextResponse.json({ error: 'query required' }, { status: 400 });
+        try {
+          const isRes = await fetch('http://localhost:3000/api/image/search', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ query, count: 4 }),
+          });
+          const data = await isRes.json();
+          return NextResponse.json({ success: !!data.success, query, results: data.results || [] });
         } catch (e) {
           return NextResponse.json({ success: false, error: (e as Error).message }, { status: 500 });
         }
@@ -280,6 +318,6 @@ export async function POST(req: NextRequest) {
 export async function GET() {
   // Return tool definitions in Anthropic format
   return NextResponse.json({
-    tools: ['file_write', 'file_read', 'file_list', 'file_delete', 'code_run', 'shell_run', 'npm_install', 'web_search', 'knowledge_search', 'project_create', 'canva_mcp'],
+    tools: ['file_write', 'file_read', 'file_list', 'file_delete', 'code_run', 'shell_run', 'npm_install', 'web_search', 'image_generate', 'image_search', 'knowledge_search', 'project_create', 'canva_mcp'],
   });
 }
