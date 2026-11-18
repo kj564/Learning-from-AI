@@ -13,7 +13,7 @@
 
 import { useState } from 'react';
 import { useTheme } from 'next-themes';
-import { Sun, Moon, Monitor, Sparkles, Zap, Brain, Settings as SettingsIcon, Globe, KeyRound } from 'lucide-react';
+import { Sun, Moon, Monitor, Sparkles, Zap, Brain, Settings as SettingsIcon, Globe, Star } from 'lucide-react';
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
 } from '@/components/ui/dialog';
@@ -21,10 +21,13 @@ import { useStore } from '@/lib/store';
 import { toast } from 'sonner';
 
 const MODELS = [
-  { id: 'default', name: 'GLM-4.6', desc: 'Most capable — coding, agentic, reasoning', icon: Sparkles },
-  { id: 'vision', name: 'GLM-4.5V', desc: 'Vision model — image understanding', icon: Sparkles },
-  { id: 'fast', name: 'GLM-4-Flash', desc: 'Fast responses, lighter model', icon: Zap },
-  { id: 'smart', name: 'GLM-4-Plus', desc: 'Balanced quality and speed', icon: Brain },
+  { id: 'glm-5.3', name: 'GLM-5.3', desc: 'Most advanced — flagship model', icon: Star },
+  { id: 'glm-5.3-flash', name: 'GLM-5.3-Flash', desc: 'Fast & free — no daily limit', icon: Zap },
+  { id: 'glm-4.7', name: 'GLM-4.7', desc: 'Previous flagship — solid all-rounder', icon: Sparkles },
+  { id: 'glm-4.6', name: 'GLM-4.6', desc: 'Coding & agentic specialist', icon: Brain },
+  { id: 'glm-4.5v', name: 'GLM-4.5V', desc: 'Vision model — image understanding', icon: Sparkles },
+  { id: 'glm-4-plus', name: 'GLM-4-Plus', desc: 'Balanced quality and speed', icon: Sparkles },
+  { id: 'glm-4-flash', name: 'GLM-4-Flash', desc: 'Fast responses, lighter model', icon: Zap },
 ] as const;
 
 interface SettingsDialogProps {

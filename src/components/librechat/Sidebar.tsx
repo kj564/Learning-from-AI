@@ -97,7 +97,12 @@ function ConversationsPanel({ query }: { query: string }) {
   const setActive = useStore((s) => s.setActiveConversation);
   const del = useStore((s) => s.deleteConversation);
   const rename = useStore((s) => s.renameConversation);
+  const archivedConversations = useStore((s) => s.archivedConversations);
+  const archiveConversation = useStore((s) => s.archiveConversation);
+  const unarchiveConversation = useStore((s) => s.unarchiveConversation);
+  const projects = useStore((s) => s.projects);
   const [openChats, setOpenChats] = useState(true);
+  const [openArchived, setOpenArchived] = useState(false);
 
   // Merge local (in-progress) + server (persisted) conversations, dedup by id, sort by updatedAt
   const conversations = useMemo(() => {
@@ -145,6 +150,30 @@ function ConversationsPanel({ query }: { query: string }) {
     return Array.from(m.entries());
   }, [filtered]);
 
+  // Filter into active vs archived
+  const activeConvos = filtered.filter((c) => !archivedConversations.includes(c.id));
+  const archivedConvos = filtered.filter((c) => archivedConversations.includes(c.id));
+
+  const activeGroups = useMemo(() => {
+    const m = new Map<string, typeof activeConvos>();
+    for (const c of activeConvos) {
+      const g = dateGroup(c.updatedAt);
+      if (!m.has(g)) m.set(g, []);
+      m.get(g)!.push(c);
+    }
+    return Array.from(m.entries());
+  }, [activeConvos]);
+
+  const archivedGroups = useMemo(() => {
+    const m = new Map<string, typeof archivedConvos>();
+    for (const c of archivedConvos) {
+      const g = dateGroup(c.updatedAt);
+      if (!m.has(g)) m.set(g, []);
+      m.get(g)!.push(c);
+    }
+    return Array.from(m.entries());
+  }, [archivedConvos]);
+
   if (conversations.length === 0) {
     return (
       <div className="text-text-tertiary flex flex-1 items-center justify-center px-4 py-8 text-center text-sm">
@@ -185,7 +214,7 @@ function ConversationsPanel({ query }: { query: string }) {
       <SectionHeader label="Chats" open={openChats} onToggle={() => setOpenChats((v) => !v)} />
       <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
         {openChats &&
-          groups.map(([label, items]) => (
+          activeGroups.map(([label, items]) => (
             <div key={label} className="mb-1">
               <div className="text-text-tertiary px-2 py-1 text-xs font-medium">{label}</div>
               {items.map((c) => (
@@ -196,10 +225,63 @@ function ConversationsPanel({ query }: { query: string }) {
                   onSelect={() => handleSelect(c)}
                   onDelete={() => del(c.id)}
                   onRename={(t) => rename(c.id, t)}
+                  onArchive={() => archiveConversation(c.id)}
+                  onMoveToWorkspace={() => {
+                    // Simple: cycle through workspaces, prompt for which one.
+                    if (projects.length === 0) {
+                      import('sonner').then(({ toast }) => toast.error('No workspaces yet. Create one first.'));
+                      return;
+                    }
+                    const names = projects.map((p) => `${p.name} (${p.documents.length} docs)`).join('\n');
+                    const choice = prompt(`Move to which workspace?\n${names}\n\n(Enter workspace number, starting from 1)`);
+                    const idx = parseInt(choice || '0', 10) - 1;
+                    if (idx >= 0 && idx < projects.length) {
+                      import('@/lib/store').then(({ useStore: us }) => {
+                        us.setState((s) => ({
+                          conversations: s.conversations.map((cv) =>
+                            cv.id === c.id ? { ...cv, projectId: projects[idx].id } : cv
+                          ),
+                        }));
+                      });
+                      import('sonner').then(({ toast }) => toast.success(`Moved to ${projects[idx].name}`));
+                    }
+                  }}
                 />
               ))}
             </div>
           ))}
+
+        {/* Archived section */}
+        {archivedConvos.length > 0 && (
+          <div className="mt-4">
+            <SectionHeader
+              label={`Archived Chats (${archivedConvos.length})`}
+              open={openArchived}
+              onToggle={() => setOpenArchived((v) => !v)}
+            />
+            {openArchived && (
+              <div className="px-2">
+                {archivedGroups.map(([label, items]) => (
+                  <div key={label} className="mb-1">
+                    <div className="text-text-tertiary px-2 py-1 text-xs font-medium">{label}</div>
+                    {items.map((c) => (
+                      <ConversationRow
+                        key={c.id}
+                        conversation={c}
+                        active={c.id === activeId}
+                        onSelect={() => handleSelect(c)}
+                        onDelete={() => del(c.id)}
+                        onRename={(t) => rename(c.id, t)}
+                        isArchived
+                        onUnarchive={() => unarchiveConversation(c.id)}
+                      />
+                    ))}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );

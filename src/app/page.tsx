@@ -31,6 +31,7 @@ import ImageGenDialog from '@/components/librechat/ImageGenDialog';
 import ImageLightbox from '@/components/librechat/ImageLightbox';
 import CommandPalette from '@/components/librechat/CommandPalette';
 import KeyboardShortcutsHelp from '@/components/librechat/KeyboardShortcutsHelp';
+import SettingsDialog from '@/components/librechat/SettingsDialog';
 import type { GeneratedImageRef } from '@/lib/store';
 
 const genId = (prefix: string) => `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
@@ -80,6 +81,7 @@ export default function Page() {
   const [activePanel, setActivePanel] = useState<PanelId>('conversations');
   const [imageDialogOpen, setImageDialogOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   // Layout state
   const isMobile = useStore((s) => s.isMobile);
@@ -438,15 +440,18 @@ export default function Page() {
       }
       case 'model': {
         const m = (args || '').trim().toLowerCase();
-        const map: Record<string, 'default' | 'fast' | 'smart'> = {
-          opus: 'default', sonnet: 'smart', haiku: 'fast',
-          default: 'default', fast: 'fast', smart: 'smart',
+        const valid = ['glm-5.3', 'glm-5.3-flash', 'glm-4.7', 'glm-4.6', 'glm-4.5v', 'glm-4-plus', 'glm-4-flash', 'opus', 'sonnet', 'haiku'];
+        const map: Record<string, string> = {
+          opus: 'glm-5.3', sonnet: 'glm-4.7', haiku: 'glm-5.3-flash',
+          default: 'glm-5.3', fast: 'glm-5.3-flash', smart: 'glm-4.7', vision: 'glm-4.5v',
+          '5.3': 'glm-5.3', 'flash': 'glm-5.3-flash', '4.7': 'glm-4.7', '4.6': 'glm-4.6', '4.5v': 'glm-4.5v',
         };
-        if (map[m]) {
-          useStore.getState().setSelectedModel(map[m]);
+        const target = map[m] || (m.startsWith('glm-') ? m : '');
+        if (target && valid.includes(target)) {
+          useStore.getState().setSelectedModel(target);
           toast.success(`Model: ${args.trim()}`);
         } else {
-          toast.error('Unknown model. Try: /model opus | sonnet | haiku');
+          toast.error('Unknown model. Try: /model glm-5.3 | glm-5.3-flash | glm-4.7 | glm-4.6 | glm-4.5v');
         }
         break;
       }
@@ -532,14 +537,14 @@ export default function Page() {
       {/* Desktop sidebar (icon rail + expanded panel) */}
       {showSidebar && (
         <div className="flex h-full shrink-0">
-          <IconRail activePanel={activePanel} onPanelChange={setActivePanel} />
+          <IconRail activePanel={activePanel} onPanelChange={setActivePanel} onOpenSettings={() => setSettingsOpen(true)} />
           <Sidebar activePanel={activePanel} onPanelChange={setActivePanel} />
         </div>
       )}
 
       {/* Desktop collapsed rail (when sidebar is collapsed) */}
       {!isMobile && !sidebarExpanded && (
-        <IconRail activePanel={activePanel} onPanelChange={setActivePanel} />
+        <IconRail activePanel={activePanel} onPanelChange={setActivePanel} onOpenSettings={() => setSettingsOpen(true)} />
       )}
 
       {/* Mobile drawer: scrim + IconRail + Sidebar over the pane */}
@@ -551,7 +556,7 @@ export default function Page() {
             aria-hidden
           />
           <div className="absolute inset-y-0 start-0 z-50 flex drawer-transition">
-            <IconRail activePanel={activePanel} onPanelChange={setActivePanel} />
+            <IconRail activePanel={activePanel} onPanelChange={setActivePanel} onOpenSettings={() => setSettingsOpen(true)} />
             <Sidebar
               activePanel={activePanel}
               onPanelChange={setActivePanel}
@@ -600,6 +605,9 @@ export default function Page() {
 
       {/* Keyboard shortcuts help (⌘/) */}
       <KeyboardShortcutsHelp open={shortcutsOpen} onOpenChange={setShortcutsOpen} />
+
+      {/* Settings dialog */}
+      <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
     </div>
   );
 }

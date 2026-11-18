@@ -5,7 +5,7 @@
 
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import type { AiModelId, Project } from './api';
+import type { Project } from './api';
 
 export interface Conversation {
   id: string;
@@ -13,7 +13,7 @@ export interface Conversation {
   createdAt: number;
   updatedAt: number;
   projectId?: string | null;
-  model: AiModelId;
+  model: string;
   assistantId?: string | null;
 }
 
@@ -120,7 +120,7 @@ interface WorkspaceState {
 
   // === Composer ===
   composerText: string;
-  selectedModel: AiModelId;
+  selectedModel: string;
   isGenerating: boolean;
 
   // === Sidebar / layout ===
@@ -155,13 +155,18 @@ interface WorkspaceState {
   deleteConversation: (id: string) => void;
   renameConversation: (id: string, title: string) => void;
 
+  // Archive
+  archivedConversations: string[]; // conversation ids that are archived
+  archiveConversation: (id: string) => void;
+  unarchiveConversation: (id: string) => void;
+
   addMessage: (convoId: string, msg: ChatMessage) => void;
   updateMessage: (convoId: string, msgId: string, patch: Partial<ChatMessage> | ((prev: ChatMessage) => Partial<ChatMessage>)) => void;
   removeMessage: (convoId: string, msgId: string) => void;
   setSessionForConversation: (convoId: string, sessionId: string) => void;
 
   setComposerText: (text: string) => void;
-  setSelectedModel: (model: AiModelId) => void;
+  setSelectedModel: (model: string) => void;
   setIsGenerating: (b: boolean) => void;
 
   toggleSidebar: () => void;
@@ -206,7 +211,7 @@ export const useStore = create<WorkspaceState>()(
       messagesByConversation: {},
       sessionByConversation: {},
       composerText: '',
-      selectedModel: 'default',
+      selectedModel: 'glm-5.3',
       isGenerating: false,
       sidebarExpanded: true,
       showDocumentsPanel: false,
@@ -267,6 +272,15 @@ export const useStore = create<WorkspaceState>()(
           ),
         }));
       },
+
+      archivedConversations: [],
+      archiveConversation: (id) => set((s) => ({
+        archivedConversations: [...s.archivedConversations, id],
+        activeConversationId: s.activeConversationId === id ? null : s.activeConversationId,
+      })),
+      unarchiveConversation: (id) => set((s) => ({
+        archivedConversations: s.archivedConversations.filter((a) => a !== id),
+      })),
 
       addMessage: (convoId, msg) => {
         set((s) => {
@@ -391,6 +405,7 @@ export const useStore = create<WorkspaceState>()(
           activeAssistantId: s.activeAssistantId,
           webSearchEnabled: s.webSearchEnabled,
           thinkEnabled: s.thinkEnabled,
+          archivedConversations: s.archivedConversations,
           messagesByConversation: {},
         };
         // Strip base64 dataUrl from attachments before persisting (they're regenerated

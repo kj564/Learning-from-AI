@@ -34,7 +34,6 @@ import {
   CommandSeparator,
 } from '@/components/ui/command';
 import { useStore } from '@/lib/store';
-import type { AiModelId } from '@/lib/api';
 import { toast } from 'sonner';
 
 interface CommandPaletteProps {
@@ -42,11 +41,14 @@ interface CommandPaletteProps {
   onShowShortcuts?: () => void;
 }
 
-const MODELS: { id: AiModelId; name: string; desc: string }[] = [
-  { id: 'default', name: 'GLM-4.6', desc: 'Most capable' },
-  { id: 'vision', name: 'GLM-4.5V', desc: 'Vision' },
-  { id: 'fast', name: 'GLM-4-Flash', desc: 'Fast' },
-  { id: 'smart', name: 'GLM-4-Plus', desc: 'Balanced' },
+const MODELS: { id: string; name: string; desc: string }[] = [
+  { id: 'glm-5.3', name: 'GLM-5.3', desc: 'Flagship' },
+  { id: 'glm-5.3-flash', name: 'GLM-5.3-Flash', desc: 'Fast & free' },
+  { id: 'glm-4.7', name: 'GLM-4.7', desc: 'Previous flagship' },
+  { id: 'glm-4.6', name: 'GLM-4.6', desc: 'Coding specialist' },
+  { id: 'glm-4.5v', name: 'GLM-4.5V', desc: 'Vision' },
+  { id: 'glm-4-plus', name: 'GLM-4-Plus', desc: 'Balanced' },
+  { id: 'glm-4-flash', name: 'GLM-4-Flash', desc: 'Fast' },
 ];
 
 export default function CommandPalette({ onGenerateImage, onShowShortcuts }: CommandPaletteProps) {

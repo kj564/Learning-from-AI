@@ -1,0 +1,770 @@
+Unable to encode submission body
+Webpage Replication
+Deep Research
+X-WebUI-CSRF
+Generator is already executing.
+AvatarImage
+TooltipProvider
+TooltipTrigger
+TooltipPortal
+TooltipContent
+TooltipContentHoverable
+TooltipContentImpl
+TooltipArrow
+Upload a file
+Choose a file to upload
+Drag and drop to upload or
+Uploaded successfully!
+One-time code
+Mark all read
+No unread notifications
+ChatCompletionRequestError
+Verification code request limit reached.
+Verification code has not expired yet. Please try again later.
+Sending verification code too frequently
+Failed to send verification code
+Verification code is invalid
+Verification code has expired
+Verification code has become invalid, please request a new one
+This phone number is already registered
+BigModel session expired
+Your BigModel authorization has expired. Reconnect to keep using your BigModel plan.
+Switching you to our China site
+Failed to migrate selected models
+Failed to load models
+Link your BigModel account
+Sync your plan and continue on chat.z.ai
+Binding BigModel
+Enter your message
+Archived Chats
+Are you sure you want to unarchive all archived chats?
+Search Chats
+Unarchive Chat
+Delete Chat
+Unarchive All Archived Chats
+Export All Archived Chats
+You have no archived conversations.
+Move to project
+New project
+Remove from project
+A project with this name already exists
+Edit project
+Create project
+Failed to update project
+Failed to create project
+Project name
+Give your project a name
+Failed to move chat
+Share session
+Rename chat
+Copied shared chat URL to clipboard!
+Failed to share chat
+Update and Copy Link
+Delete chat?
+Failed to fetch WeChat QR code
+Failed to bind WeChat channel
+Failed to fetch Feishu QR code
+AgentChatList w-full
+Failed to delete project
+Delete project?
+Chats in this project will be moved to Recents.
+New chat in
+Meet Your AI Agents
+Code faster with ZCode. Automate more with AutoClaw.
+Contact Admin for WebUI Access
+Sign in to start chatting
+Clear Current Chat?
+Access Your Chat History.
+Ready To Share?
+To start a new chat, your current conversation will be discarded. Sign in to save chats
+Sign in to unlock chat history and revisit past conversations anytime
+Sign in to share your conversation and enjoy the full experience
+---
+=== System prompts in bundle ===
+' for the full message or use the non-minified dev environment for full errors and additional helpful warnings.'
+
+'+C,children:y,containerInfo:g,implementation:b}}var f=e.__CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE;function m(y,g){if(y==='
+
+' for the full message or use the non-minified dev environment for full errors and additional helpful warnings.'
+
+':return!0;default:return!1}}function Sv(n){return n=n.detail,typeof n=='
+
+':!0,email:!0,month:!0,number:!0,password:!0,range:!0,search:!0,tel:!0,text:!0,time:!0,url:!0,week:!0};function _v(n){var i=n&&n.nodeName&&n.nodeName.toLowerCase();return i==='
+
+'in n?n.contains(i):n.compareDocumentPosition?!!(n.compareDocumentPosition(i)&16):!1:!1}function kv(n){n=n!=null&&n.ownerDocument!=null&&n.ownerDocument.defaultView!=null?n.ownerDocument.defaultView:window;for(var i=I2(n.document);i instanceof n.HTMLIFrameElement;){try{var o=typeof i.contentWindow.lo'
+
+'||(i.state.loading&4)!==0)n.flags&=-16777217;else if(n.flags|=16777216,!G5(i))if(Wb())n.flags|=8192;else throw sl=g1,im}function D1(n,i){i!==null&&(n.flags|=4),n.flags&16384&&(i=n.tag!==22?He():536870912,n.lanes|=i,xc|=i)}function vd(n,i){if(!Et)switch(n.tailMode){case'
+
+'&&(vc(n,o,i,null,!1)||Ai(n.child,!1))}n=n.sibling}}function Km(n,i){if(n.tag===30){var o=n.stateNode,c=n.memoizedProps,h=es(c,o),p=ts(c.default,o.paired?c.share:c.enter);p!=='
+
+'&&(vc(n,c,p,null,!1)?(p=n.stateNode,h.paired=p,p.paired=h,Ec(n,o.onShare)):Ai(n.child,!1)),i.delete(c),i.size===0)break}}}Qm(n)}n=n.sibling}}}function Wm(n){if(n.tag===30){var i=n.memoizedProps,o=es(i,n.stateNode),c=Ca!==null?Ca.get(o):void 0,h=ts(i.default,c!==void 0?i.share:i.exit);h!=='
+
+'&&(vc(n,o,h,null,!1)?c!==void 0?(h=n.stateNode,c.paired=h,h.paired=c,Ca.delete(o),Ec(n,i.onShare)):Ec(n,i.onExit):Ai(n.child,!1)),Ca!==null&&Qm(n)}else if((n.subtreeFlags&33554432)!==0)for(n=n.child;n!==null;)Wm(n),n=n.sibling;else Ca!==null&&Qm(n)}function Tb(n){for(n=n.child;n!==null;){if(n.tag==='
+
+'?WeakSet:Set,mr=null,Li=!1,wd=!1,H1=!1,tp=!1;function kL(n,i,o){if(n=n.containerInfo,Ap=Dc,n=kv(n),H2(n)){if('
+
+'?n.ownerDocument.body:n,o.stateNode),$c(n)):S5(_n,o.stateNode));break;case 4:c=_n,h=ia,_n=o.stateNode.containerInfo,ia=!0,ai(n,i,o),_n=c,ia=h;break;case 0:case 11:case 14:case 15:no(2,o,i),Qt||no(4,o,i),ai(n,i,o);break;case 1:Qt||(xr(o,i),c=o.stateNode,typeof c.componentWillUnmount=='
+
+'})}n=i.containerInfo,n=n.nodeType===9?n.documentElement:n.ownerDocument.documentElement,n!==null&&n.style.viewTransitionName==='
+
+'abort canplay canplaythrough durationchange emptied encrypted ended error loadeddata loadedmetadata loadstart pause play playing progress ratechange resize seeked seeking stalled suspend timeupdate volumechange waiting'
+
+':kd.delete(i.pointerId)}}function Dd(n,i,o,c,h,p){return n===null||n.nativeEvent!==p?(n={blockedOn:i,domEventName:o,eventSystemFlags:c,nativeEvent:p,targetContainers:]},i!==null&&(i=gn(i),i!==null&&e9(i)),n):(n.eventSystemFlags|=c,i=n.targetContainers,h!==null&&i.indexOf(h)===-1&&i.push(h),n)}func'
+
+',meta:t.options.meta};return S($),$})(),j=await _(M),{maxPages:V}=t.options,z=O?xM:wM;return{pages:z(L.pages,j,V),pageParams:z(L.pageParams,R,V)}};if(s&&l.length){const L=s==='
+
+'}),a.abort()},onFail:(O,N)=>{Rt(this,ui,hs).call(this,{type:'
+
+',failureCount:O,error:N})},onPause:()=>{Rt(this,ui,hs).call(this,{type:'
+
+':return{...a,fetchFailureCount:t.failureCount,fetchFailureReason:t.error};case'
+
+',fetchFailureCount:0,fetchFailureReason:null}};return Re(this,fu,t.manual?s:void 0),s;case'
+
+':const l=t.error;return{...a,error:l,errorUpdateCount:a.errorUpdateCount+1,errorUpdatedAt:Date.now(),fetchFailureCount:a.fetchFailureCount+1,fetchFailureReason:l,fetchStatus:'
+
+',action:t})})},Bw);function lx(e,t){return{fetchFailureCount:0,fetchFailureReason:null,fetchStatus:ax(t.networkMode)?'
+
+'?e.initialDataUpdatedAt():e.initialDataUpdatedAt:0;return{data:t,dataUpdateCount:0,dataUpdatedAt:r?a??Date.now():0,error:null,errorUpdateCount:0,errorUpdatedAt:0,fetchFailureCount:0,fetchFailureReason:null,fetchMeta:null,isInvalidated:!1,status:r?'
+
+',failureCount:V,error:z})},onPause:()=>{Rt(this,Vi,vo).call(this,{type:'
+
+',variables:t,isPaused:u}),Y(this,Or).config.onMutate&&await Y(this,Or).config.onMutate(t,this,a);const z=await((f=(d=this.options).onMutate)==null?void 0:f.call(d,t,a));z!==this.state.context&&Rt(this,Vi,vo).call(this,{type:'
+
+':return{...a,failureCount:t.failureCount,failureReason:t.error};case'
+
+':return{...a,context:t.context,data:void 0,failureCount:0,failureReason:null,error:null,isPaused:t.isPaused,status:'
+
+':return{...a,data:t.data,failureCount:0,failureReason:null,error:null,status:'
+
+':return{...a,data:void 0,error:t.error,failureCount:a.failureCount+1,failureReason:t.error,isPaused:!1,status:'
+
+',action:t})})},Gw);function $M(){return{context:void 0,data:void 0,error:null,failureCount:0,failureReason:null,isPaused:!1,status:'
+
+'No window.location.(origin|href) available to create URL'
+
+'> contains an invalid URL which will probably break when clicked - please update to a valid URL path.`)}return{absoluteURL:a,isExternal:s,to:r}}var No=Symbol('
+
+',fetcherKey:u,...V9(e,f??{})}});s&&(s[No]=a,e.fetch=s)}return e}function Xc(e,t,r){return e.length===0?null:async(...a)=>{let s=await Ex(e,r(...a),()=>t(...a),e.length-1);if(s.type==='
+
+',error:void 0});try{await s(d,t)}catch(f){console.error('
+
+',proceed:void 0,reset:void 0,location:_e}),Wt(G,X)},reset(){let wt=new Map(j.blockers);wt.set(bt,zd),Qe({blockers:wt})}});return}await ot(He,_e,{submission:ve,pendingError:$e,preventScrollReset:Xe,replace:X&&X.replace,enableViewTransition:X&&X.viewTransition,flushSync:Pe,callSiteDefaultShouldRevalid'
+
+',error:Ya(405,{method:G.method,pathname:X.pathname,routeId:Xe.route.id})};else{let Pe=tu(l,u,G,X,ge,Xe,Ze?[]:a,$e),bt=await at(G,X,Pe,$e,null);if(He=bt[Xe.route.id],!He){for(let wt of ge)if(bt[wt.route.id]){He=bt[wt.route.id];break}}if(G.signal.aborted)return{shortCircuited:!0}}if(_l(He)){let Pe;ret'
+
+'),new URL(G.url),f,e.history)===j.location.pathname+j.location.search,await je(G,He,!0,{submission:ie,replace:Pe}),{shortCircuited:!0}}if(La(He)){let Pe=bo(ge,Xe.route.id);return(_e&&_e.replace)!==!0&&(V='
+
+'),{matches:ge,pendingActionResult:[Pe.route.id,He,Xe.route.id]}}return{matches:ge,pendingActionResult:[Xe.route.id,He]}}async function En(G,X,ie,ge,ve,$e,Me,Ze,_e,Fe,He,Xe,Pe,bt){let wt=Me||s3(X,ie,ge,Ze),ln=Ze||_e||W9(wt),_t=!D&&!He;if($e){if(_t){let Tn=ue(Pe);Qe({navigation:wt,...Tn!==void 0?{acti'
+
+',zr);let{loaderResults:Ft,fetcherResults:Bt}=await nt(Xt,Jt,G,X,ve);if(G.signal.aborted)return{shortCircuited:!0};F&&F.signal.removeEventListener('
+
+',pa);let{loaderResults:Pr,fetcherResults:ta}=await nt(cn,pn,Jt,Xt,ve);if(Xe.signal.aborted)return;Xe.signal.removeEventListener('
+
+',response:qR(He,G,_e,ie,f)}}else Me[_e]=await GR(Fe);return Me}async function nt(G,X,ie,ge,ve){let $e=at(ie,ge,G,ve,null),Me=Promise.all(X.map(async Fe=>{if(Fe.matches&&Fe.match&&Fe.request&&Fe.controller){let Xe=(await at(Fe.request,Fe.path,Fe.matches,ve,Fe.key))[Fe.match.route.id];return{[Fe.key]:'
+
+',matches:G};let ve=G;for(;;){let $e=u;try{await e.patchRoutesOnNavigation({signal:ie,path:X,matches:ve,fetcherKey:ge,patch:(Fe,He)=>{ie.aborted||H9(Fe,He,d,$e,l,!1)}})}catch(Fe){return{type:'
+
+' defined. The lazy property will be ignored.`);else{let b=await l();b!=null&&(Object.assign(s,{[e]:b}),Object.assign(s,a(s)))}typeof s.lazy=='
+
+');let b=await e.lazy(),C={};for(let T in b){let x=b[T];if(x===void 0)continue;let S=nR(T),E=l[T]!==void 0&&T!=='
+
+');try{return g={value:await kx(e,t,r,a,s,l,u+1)},g.value}catch(C){return g={value:await l(C,m,g)},g.value}};try{let C=await y(e,b),T=C!=null?a(C):void 0;return s(T)?T:g?T??g.value:(g={value:await b()},g.value)}catch(C){return await l(C,m,g)}}function Dx(e,t,r,a,s){let l=Ox({key:'
+
+')}}))}});try{await Promise.all(a.flatMap(y=>{var g,b;return[(g=y._lazyPromises)==null?void 0:g.handler,(b=y._lazyPromises)==null?void 0:b.route]}))}catch{}return m}async function BR({request:e,path:t,pattern:r,match:a,lazyHandlerPromise:s,lazyRoutePromise:l,handlerOverride:u,scopedContext:d}){let f,'
+
+',result:await(u?u(L=>S(L)):S())}}catch(E){return{type:'
+
+',result:E}}})();return Promise.race([_,x])};try{let C=y?a.route.action:a.route.loader;if(s||l)if(C){let T,[x]=await Promise.all([b(C).catch(S=>{T=S}),s,l]);if(T!==void 0)throw T;f=x}else{await s;let T=y?a.route.action:a.route.loader;if(T)[f]=await Promise.all([b(T),l]);else if(g==='
+
+',result:void 0}}else if(C)f=await b(C);else{let T=new URL(e.url),x=T.pathname+T.search;throw Ya(404,{pathname:x})}}catch(C){return{type:'
+
+');return t&&/\\bapplication\\/json\\b/.test(t)?e.body==null?null:e.json():e.text()}async function GR(e){var a,s,l,u,d;let{result:t,type:r}=e;if(b6(t)){let f;try{f=await ZR(t)}catch(m){return{type:'
+
+'?await e.navigate(s):await e.navigate(s,{fromRouteId:t,...l}))},[e,t])}var J9={};function qx(e,t,r){!t&&!J9[e]&&(J9[e]=!0,Vn(!1,r))}var e7={};function t7(e,t){!e&&!e7[t]&&(e7[t]=!0,console.warn(t))}var TO='
+
+'You provided the `viewTransition` option to a router update, but you do not appear to be running in a DOM environment as `window.startViewTransition` is not available.'
+
+'}async function KO(e,t,r){let a=await Promise.all(e.map(async s=>{let l=t.routes[s.route.id];if(l){let u=await qO(l,r);return u.links?u.links():[]}return[]}));return JO(a.flat(1).filter(YO).filter(s=>s.rel==='
+
+')),[d.pathname+d.search]},[l,s.v8_trailingSlashAwareDataRequests,e,a,t]);return w.createElement(w.Fragment,null,u.map(d=>w.createElement('
+
+'),[e,t,m,l,a]),b=w.useMemo(()=>{if(e===a.pathname+a.search+a.hash)return[];let x=new Set,S=!1;if(t.forEach(E=>{var R;let L=l.routes[E.route.id];!L||!L.hasLoader||(!y.some(O=>O.route.id===E.route.id)&&E.route.id in f&&((R=u[E.route.id])!=null&&R.shouldRevalidate)||L.hasClientLoader?S=!0:x.add(E.route'
+
+')),[_.pathname+_.search]},[d,s.v8_trailingSlashAwareDataRequests,f,a,l,y,t,e,u]),C=w.useMemo(()=>QO(g,l),[g,l]),T=rj(g);return w.createElement(w.Fragment,null,b.map(x=>w.createElement('
+
+'https://z-cdn.chatglm.cn/z-ai/frontend/prod-fe-1.2.20/'
+
+';Array.isArray(t)||(t=[String(t)]);const s=r.returnDetails!==void 0?r.returnDetails:this.options.returnDetails,l=r.keySeparator!==void 0?r.keySeparator:this.options.keySeparator,{key:u,namespaces:d}=this.extractFromKey(t[t.length-1],r),f=d[d.length-1],m=r.lng||this.language,y=r.appendNamespaceToCIMo'
+
+'This means something IS WRONG in your setup. You access the t function before i18next.init / i18next.loadNamespace / i18next.changeLanguage was done. Wait for the callback or Promise to resolve before accessing it!!!'
+
+')}getResource(t,r,a){let s=arguments.length>3&&arguments[3]!==void 0?arguments[3]:{};return this.i18nFormat&&this.i18nFormat.getResource?this.i18nFormat.getResource(t,r,a,s):this.resourceStore.getResource(t,r,a,s)}getUsedParamsDetails(){let t=arguments.length>0&&arguments[0]!==void 0?arguments[0]:{}'
+
+'This means something IS WRONG in your setup. You access the t function before i18next.init / i18next.loadNamespace / i18next.changeLanguage was done. Wait for the callback or Promise to resolve before accessing it!!!'
+
+'You are passing a wrong module! Please check the object you are passing to i18next.use()'
+
+'.concat(Math.floor(d))}if(s.domain){if(!v7.test(s.domain))throw new TypeError('
+
+'.concat(s.domain)}if(s.path){if(!v7.test(s.path))throw new TypeError('
+
+'};a&&(l.expires=new Date,l.expires.setTime(l.expires.getTime()+a*60*1e3)),s&&(l.domain=s),document.cookie=ek(t,encodeURIComponent(r),l)},read:function(t){for(var r='
+
+'&&y7.create(r.lookupCookie,t,r.cookieMinutes,r.cookieDomain,r.cookieOptions)}},nk={name:'
+
+',lookup:function(t){var r=typeof t.lookupFromSubdomainIndex=='
+
+'Z.ai - Advanced AI Chatbot & Agent powered by GLM-5.3-Flash'
+
+'https://chat.z.ai/legal-agreement/terms-of-service'
+
+',organizationId:null,projectId:null,subscriptionId:null,expiresAt:null,isFallback:!0,keyAvailable:!1},yk=()=>({selectedPlan:{...A7},allPlans:[{...A7}],version:0,syncedAt:'
+
+'],L],[/(kindle)\\/([\\w\\.]+)/i,/(lunascape|maxthon|netfront|jasmine|blazer)[\\/\\s]?([\\w\\.]*)/i,/(avant\\s|iemobile|slim|baidu)(?:browser)?[\\/\\s]?([\\w\\.]*)/i,/(?:ms|\\()(ie)\\s([\\w\\.]+)/i,/(rekonq)\\/([\\w\\.]*)/i,/(chromium|flock|rockmelt|midori|epiphany|silk|skyfire|ovibrowser|bolt|iron|vivaldi|iridium|phan'
+
+'],[_,M]],[/(sd|kf)ijorstuw]+\\sbuild\\/.+silk\\//i],[[x,F.str,U.device.amazon.model],[E,'
+
+'],[_,O]],[/(sprint\\s(\\w+))/i],[[E,F.str,U.device.sprint.vendor],[x,F.str,U.device.sprint.model],[_,N]],[/(lenovo)\\s?(S(?:5000|6000)+(?:[-][\\w+]))/i],[E,x,[_,M]],[/(htc)[;_\\s-]+([\\w\\s]+(?=\\))|\\w+)*/i,/(zte)-(\\w*)/i,/(alcatel|geeksphone|lenovo|nexian|panasonic|(?=;\\s)sony)[_\\s-]?([\\w-]*)/i],[E,[x,/_/g'
+
+'],L],[/(blackberry)\\w*\\/?([\\w\\.]*)/i,/(tizen)[\\/\\s]([\\w\\.]+)/i,/(android|webos|palm\\sos|qnx|bada|rim\\stablet\\sos|meego|contiki)[\\/\\s-]?([\\w\\.]*)/i,/linux;.+(sailfish);/i],[S,L],[/(symbian\\s?os|symbos|s60(?=;))[\\/\\s-]?([\\w\\.]*)/i],[[S,'
+
+'],L],[/\\s([frentopc-]{0,4}bsd|dragonfly)\\s?([\\w\\.]*)/i],[S,L],[/(haiku)\\s(\\w+)/i],[S,L],[/cfnetwork\\/.+darwin/i,/iponead]{2,4}(?:.*os\\s([\\w]+)\\slike\\smac|;\\sopera)/i],[[L,/_/g,'
+
+']],[/((?:open)?solaris)[\\/\\s-]?([\\w\\.]*)/i,/(aix)\\s((\\d)(?=\\.|\\)|\\s)[\\w\\.])*/i,/(plan\\s9|minix|beos|os\\/2|amigaos|morphos|risc\\sos|openvms)/i,/(unix)\\s?([\\w\\.]*)/i],[S,L]]},q=function(I,Q){if(typeof I=='
+
+'})),V7=tM(aD);/**\n * [js-sha256]{@link https://github.com/emn178/js-sha256}\n *\n * @version 0.10.1\n * @author Chen, Yi-Cyuan [emn178@gmail.com]\n * @copyright Chen, Yi-Cyuan 2014-2023\n * @license MIT\n */var z7;function iD(){return z7||(z7=1,(function(e){(function(){var t='
+
+').documentElement.textContent}const RW=e=>{const t={messages:{},currentId:null};let r=null,a=null;for(const s of e)a=Hl(),r!==null&&(t.messages[r].childrenIds=[...t.messages[r].childrenIds,a]),t.messages[a]={...s,id:a,parentId:r,childrenIds:[]},r=a;return t.currentId=a,t},OW=e=>{const t=e.lastIndexO'
+
+'),e+`\n</details>`):e},bD=()=>{const e=document.createElement('
+
+',a)}return document.body.removeChild(r),t}return t=await navigator.clipboard.writeText(e).then(()=>(console.log('
+
+',r),!1)),t},kW=e=>{const t=/\\{\\{([^}]+)\\}\\}/g,r=[];let a;for(;(a=t.exec(e))!==null;)r.push({word:a[1].trim(),startIndex:a.index,endIndex:t.lastIndex-1});return r},xD=async(e=!1)=>{const t=await new Promise((s,l)=>{navigator.geolocation.getCurrentPosition(s,l)}).catch(s=>{throw console.error('
+
+')=>{let a=e;for(const s of t)a=a.replace(new RegExp(`(\n\\\\s*)*<details\\\\s+type='
+
+')=>(e=e.replace(new RegExp(`(\n\\\\s*)*<glm_block\\\\s+[^>]*>.*?<\\\\/glm_block>(\n\\\\s*)*`,'
+
+'[chat] completion queue not drained in time, finishing anyway'
+
+',{detail:{event:e,mode:zn}})),typeof BroadcastChannel<'
+
+'?t.detail:{},a=r.retryable??r.retriable??t.retryable??t.retriable;return typeof a=='
+
+'?r.detail:{},s=Number(a.retry_after_seconds??r.retry_after_seconds);return Number.isFinite(s)&&s>0?Math.max(t,s*1e3):t},JD='
+
+',JD),t={...t??{},headers:s}}try{const s=await p0(e,t);if(!s.ok){const l=`HTTP status Error: ${s.status} ${s.statusText}`;vf(l,r,!0)}return s.status===403&&a&&dg&&s.clone().json().then(dg,()=>{}),s}catch(s){const l=s instanceof Error?s.message:'
+
+'[Analytics] Failed to destroy global fetch error tracking:'
+
+'?TC(e):d$(e)}else{const a=e.trim();if(!a||t.rejectNaiveIso&&!u$.test(a))return null;r=Date.parse(a)}return Number.isFinite(r)?new Date(r):null}function K7(e,t){const r=LC(e,{unit:t.unit,rejectNaiveIso:t.rejectNaiveIso??!0});if(!r||!Oo(t.timeZone))return'
+
+';const a=t.format??{...t.dateStyle?{dateStyle:t.dateStyle}:{},...t.timeStyle?{timeStyle:t.timeStyle}:{}};return new Intl.DateTimeFormat(t.locale,{timeZone:t.timeZone,...a}).format(r)}function fg(e,t){const r=LC(e,{unit:t.unit,rejectNaiveIso:!0});if(!r||!Oo(t.timeZone))return null;const a=new Intl.Da'
+
+',s=await fetch(`${We}/user-access/accessible?resource=${encodeURIComponent(e)}`,{method:'
+
+',...a&&{Authorization:`Bearer ${a}`}}});if(!s.ok)return!1;const l=await s.json().catch(()=>null);return!l||l.code!==0?!1:!!((t=l.data)!=null&&t.readable)&&!!((r=l.data)!=null&&r.writable)}catch{return!1}};var Kr=(e=>(e.Login='
+
+'],r=[Xd(e)],a=async(l,u)=>{const d=Xd(l),f=N$[`./locales/${d}/${u}.json`];if(!f)throw new Error(`Missing locale resource: ${d}/${u}`);return(await f()).default};Lt.use(dk(a)).use(nC).init({debug:!1,detection:{order:t,caches:['
+
+');var z$=Ra(e=>`${e} failed to slot onto its children. Expected a single React element child or \\`Slottable\\`.`,'
+
+'),P$=Ra(e=>`${e} failed to slot onto its \\`Slottable\\`. Expected \\`Slottable\\` to receive a single React element child.`,'
+
+');function T(L){if(!m.current)return;const R=L.target;R instanceof Node&&[...l].some(N=>N.contains(R))||y.current.set(L.type,!0),L.type==='
+
+');function K6(e,t,r,{discrete:a}){const s=r.originalEvent.target,l=new CustomEvent(e,{bubbles:!1,cancelable:!0,detail:r});t&&s.addEventListener(e,t,{once:!0}),a?W0(s,l):s.dispatchEvent(l)}or(K6,'
+
+',{value:t,configurable:!0}),t2=w.forwardRef(NV(function(t,r){var f;const{container:a,...s}=t,[l,u]=w.useState(!1);er(()=>u(!0),[]);const d=a||l&&((f=globalThis==null?void 0:globalThis.document)==null?void 0:f.body);return d?kl.createPortal(v.jsx(Ht.div,{...s,ref:r}),d):null},'
+
+').concat(a,`;\n  }\n  body[`).concat(au,`] {\n    overflow: hidden `).concat(a,`;\n    overscroll-behavior: contain;\n    `).concat([t&&'
+
+')return!1;var j=window.getSelection(),V=j&&j.anchorNode,z=V?V===N||V.contains(N):!1;if(z)return!1;var $=f8(M,N);if(!$)return!0;if($?O=M:(O=M==='
+
+')return null;var t=Array.isArray(e)?e[0]:e;return t.ownerDocument.body},Uc=new WeakMap,Eh=new WeakMap,Ah={},w3=0,_S=function(e){return e&&(e.host||_S(e.parentNode))},pz=function(e,t){return t.map(function(r){if(e.contains(r))return r;var a=_S(r);return a&&e.contains(a)?a:(console.error('
+
+',[wz,MS]=AS(NS,{forceMount:void 0}),a4=fa(e=>{const{__scopeDialog:t,forceMount:r,children:a,container:s}=e,l=wi(NS,t);return v.jsx(wz,{scope:t,forceMount:r,children:w.Children.map(a,u=>v.jsx(bi,{present:r||l.open,children:v.jsx(t2,{asChild:!0,container:s,children:u})}))})},'
+
+'&&(l.current=!0));const d=u.target;(y=a.triggerRef.current)!=null&&y.contains(d)&&u.preventDefault(),u.detail.originalEvent.type==='
+
+':g],_=x0(await l.getClippingRect({element:(r=await(l.isElement==null?void 0:l.isElement(S)))==null||r?S:S.contextElement||await(l.getDocumentElement==null?void 0:l.getDocumentElement(d.floating)),boundary:m,rootBoundary:y,strategy:f})),E=g==='
+
+'&&(N.placement&&(b=N.placement),N.rects&&(m=N.rects===!0?await u.getElementRects({reference:e,floating:t,strategy:s}):N.rects),{x:y,y:g}=v8(m,b,f)),x=-1)}return{x:y,y:g,placement:b,strategy:s,middlewareData:T}},dP=e=>({name:'
+
+',options:e,async fn(t){const{x:r,y:a,placement:s,rects:l,platform:u,elements:d,middlewareData:f}=t,{element:m,padding:y=0}=Ms(e,t)||{};if(m==null)return{};const g=HS(y),b={x:r,y:a},C=c4(s),T=l4(C),x=await u.getDimensions(m),S=C==='
+
+',options:e,async fn(t){var r,a;const{placement:s,middlewareData:l,rects:u,initialPlacement:d,platform:f,elements:m}=t,{mainAxis:y=!0,crossAxis:g=!0,fallbackPlacements:b,fallbackStrategy:C='
+
+',flipAlignment:x=!0,...S}=Ms(e,t);if((r=l.arrow)!=null&&r.alignmentOffset)return{};const _=Do(s),E=Ui(d),L=Do(d)===d,R=await(f.isRTL==null?void 0:f.isRTL(m.floating)),O=b||(L||!x?[w0(d)]:nP(d)),N=T!=='
+
+';!b&&N&&O.push(...sP(d,x,T,R));const M=[d,...O],j=await f.detectOverflow(t,S),V=[];let z=((a=l.flip)==null?void 0:a.overflows)||[];if(y&&V.push(j[_]),g){const H=tP(s,u,R);V.push(j[H[0]],j[H[1]])}if(z=[...z,{placement:s,overflows:V}],!V.every(H=>H<=0)){var $,F;const H=((($=l.flip)==null?void 0:$.inde'
+
+':{const u=await a.detectOverflow(t,{...l,elementContext:'
+
+':{const u=await a.detectOverflow(t,{...l,altBoundary:!0}),d=y8(u,r.floating);return{data:{escapedOffsets:d,escaped:b8(d)}}}default:return{}}}}},US=new Set(['
+
+']);async function mP(e,t){const{placement:r,platform:a,elements:s}=e,l=await(a.isRTL==null?void 0:a.isRTL(s.floating)),u=Do(r),d=Pu(r),f=Ui(r)==='
+
+',m=US.has(u)?-1:1,y=l&&f?-1:1,g=Ms(t,e);let{mainAxis:b,crossAxis:C,alignmentAxis:T}=typeof g=='
+
+'?{mainAxis:g,crossAxis:0,alignmentAxis:null}:{mainAxis:g.mainAxis||0,crossAxis:g.crossAxis||0,alignmentAxis:g.alignmentAxis};return d&&typeof T=='
+
+',options:e,async fn(t){var r,a;const{x:s,y:l,placement:u,middlewareData:d}=t,f=await mP(t,e);return u===((r=d.offset)==null?void 0:r.placement)&&(a=d.arrow)!=null&&a.alignmentOffset?{}:{x:s+f.x,y:l+f.y,data:{...f,placement:u}}}}},gP=function(e){return e===void 0&&(e={}),{name:'
+
+',options:e,async fn(t){const{x:r,y:a,placement:s,platform:l}=t,{mainAxis:u=!0,crossAxis:d=!1,limiter:f={fn:E=>{let{x:L,y:R}=E;return{x:L,y:R}}},...m}=Ms(e,t),y={x:r,y:a},g=await l.detectOverflow(t,m),b=Ui(s),C=o4(b);let T=y[C],x=y[b];const S=(E,L)=>IS(L+g[E==='
+
+']);u&&(T=S(C,T)),d&&(x=S(b,x));const _=f.fn({...t,[C]:T,[b]:x});return{..._,data:{x:_.x-r,y:_.y-a,enabled:{[C]:u,[b]:d}}}}}},vP=function(e){return e===void 0&&(e={}),{options:e,fn(t){var r,a;const{x:s,y:l,placement:u,rects:d,middlewareData:f}=t,{offset:m=0,mainAxis:y=!0,crossAxis:g=!0}=Ms(e,t),b={x:'
+
+'?{mainAxis:_,crossAxis:0}:{mainAxis:(r=_.mainAxis)!=null?r:0,crossAxis:(a=_.crossAxis)!=null?a:0};if(y){const O=T==='
+
+',N=d.reference[T]-d.floating[O]+E.mainAxis,M=d.reference[T]+d.reference[O]-E.mainAxis;x<N?x=N:x>M&&(x=M)}if(g){var L,R;const O=T==='
+
+',options:e,async fn(t){const{placement:r,rects:a,platform:s,elements:l}=t,{apply:u=()=>{},...d}=Ms(e,t),f=await s.detectOverflow(t,d),m=Do(r),y=Pu(r),g=Ui(r)==='
+
+'?(T=m,x=y===(await(s.isRTL==null?void 0:s.isRTL(l.floating))?'
+
+')}catch{return!1}}const wP=/transform|translate|scale|rotate|perspective|filter/,xP=/paint|layout|strict|content/,pl=e=>!!e&&e!=='
+
+'),elements:{reference:_.anchor},middleware:[WP({mainAxis:l+V,alignmentAxis:d}),m&&XP({mainAxis:!0,crossAxis:!1,...b===E8.Partial?{limiter:JP()}:{},...H}),m&&eI({...H}),tI({...H,apply:_s(({elements:zt,rects:ot,availableWidth:Ct,availableHeight:En})=>{const{width:ue,height:Ce}=ot.reference,Ee=zt.float'
+
+'},[SI,_I]=xI(h2),EI=w.forwardRef(Gl(function(t,r){return v.jsx(Rg.Provider,{scope:t.__scopeRovingFocusGroup,children:v.jsx(Rg.Slot,{scope:t.__scopeRovingFocusGroup,children:v.jsx(AI,{...t,ref:r})})})},'
+
+',[II,b_]=ql(y_,{forceMount:void 0}),HI=Vt(e=>{const{__scopeMenu:t,forceMount:r,children:a,container:s}=e,l=Ho(y_,t);return v.jsx(II,{scope:t,forceMount:r,children:v.jsx(bi,{present:r||l.open,children:v.jsx(t2,{asChild:!0,container:s,children:a})})})},'
+
+'&&le.preventDefault(),!De&&Ie&&P(le.key));const Se=j.current;if(le.target!==Se||!jI.includes(le.key))return;le.preventDefault();const Qe=O().filter(Ut=>!Ut.disabled).map(Ut=>Ut.ref.current);h_.includes(le.key)&&Qe.reverse(),E_(Qe)}),onBlur:Ye(t.onBlur,le=>{le.currentTarget.contains(le.target)||(wind'
+
+')}),onPointerMove:Ye(t.onPointerMove,Nu(le=>{const we=le.target,Oe=J.current!==le.clientX;if(le.currentTarget.contains(we)&&Oe){const De=le.clientX>J.current?'
+
+':l.triggerId,...u,...s,ref:r,onCloseAutoFocus:Ye(t.onCloseAutoFocus,f=>{var m;d.current||(m=l.triggerRef.current)==null||m.focus(),d.current=!1,f.preventDefault()}),onInteractOutside:Ye(t.onInteractOutside,f=>{const m=f.detail.originalEvent,y=m.button===0&&m.ctrlKey===!0,g=m.button===2||y;(!l.modal|'
+
+'),N=hn(()=>{_.contains(document.activeElement)||R()},'
+
+'},onFocus:d=>{var y;const f=d.relatedTarget;!((y=u.viewport)!=null&&y.contains(f))&&s()}})},'
+
+')}),onSwipeMove:Ye(t.onSwipeMove,y=>{const{x:g,y:b}=y.detail.delta;y.currentTarget.setAttribute('
+
+')}),onSwipeEnd:Ye(t.onSwipeEnd,y=>{const{x:g,y:b}=y.detail.delta;y.currentTarget.setAttribute('
+
+',children:q}),v.jsx($H,{scope:a,onClose:U,children:kl.createPortal(v.jsx(x4.ItemSlot,{scope:a,children:v.jsx(e2,{asChild:!0,onEscapeKeyDown:Ye(f,D=>{_().some(I=>{var Q;return(Q=I.ref.current)==null?void 0:Q.contains(D.target)})||U()}),children:v.jsx(Ht.li,{tabIndex:0,'
+
+')),PH=hn(e=>{const{__scopeToast:t,children:r,...a}=e,s=v2(y2,t),[l,u]=w.useState(!1),[d,f]=w.useState(!1);return U_(()=>u(!0)),w.useEffect(()=>{const m=window.setTimeout(()=>f(!0),1e3);return()=>window.clearTimeout(m)},[]),d?null:v.jsx(t2,{asChild:!0,container:s.announcerContainer||void 0,children:v'
+
+');function Jd(e,t,r,{discrete:a}){const s=r.originalEvent.currentTarget,l=new CustomEvent(e,{bubbles:!0,cancelable:!0,detail:r});t&&s.addEventListener(e,t,{once:!0}),a?W0(s,l):s.dispatchEvent(l)}hn(Jd,'
+
+',[QH,WH]=_4(Z_,{forceMount:void 0}),XH=Jn(e=>{const{__scopeTooltip:t,forceMount:r,children:a,container:s}=e,l=Gf(Z_,t);return v.jsx(QH,{scope:t,forceMount:r,children:v.jsx(bi,{present:r||l.open,children:v.jsx(t2,{asChild:!0,container:s,children:a})})})},'
+
+',S)}}},,g,T,C]),w.useEffect(()=>{if(d){const x=Jn(S=>{const _=S.target,E={x:S.clientX,y:S.clientY},L=(m==null?void 0:m.contains(_))||(g==null?void 0:g.contains(_)),R=!Q_(E,d);L?C():R&&(C(),y())},'
+
+':l,id:u,onEscapeKeyDown:d,onPointerDownOutside:f,...m}=t,y=Gf(Sf,a),g=b2(a),{onClose:b}=y,[C,T]=w.useState(null),x=qt(r,T);X6(C),w.useEffect(()=>(document.addEventListener(Vg,b),()=>document.removeEventListener(Vg,b)),[b]),w.useEffect(()=>{if(y.trigger){const _=Jn(E=>{E.target instanceof Node&&E.tar'
+
+');let Ee=Q.get(Ce);Ee===void 0&&(Ee=J.length,Q.set(Ce,Ee),J.push(ue.tails)),ue.set=Ee}for(const ue of J.flat())if(ue.includes('
+
+'})}function It({variant:e,size:t,shape:r,iconOnly:a=!1,leadingIcon:s,trailingIcon:l,loading:u=!1,asChild:d=!1,disabled:f,className:m,children:y,type:g,...b}){const C=d?Zl:'
+
+';if(!r&&!Ki())return null;const a=await fetch(`${We}/users/user/settings`,{method:'
+
+',Authorization:`Bearer ${r}`}}).then(async s=>{if(!s.ok)throw await s.json();return s.json()}).catch(s=>(console.log(s),t=s.detail,null));if(t)throw t;return a},SB=async(e,t)=>{let r=null;const a=await fetch(`${We}/users/user/settings/update`,{method:'
+
+',Authorization:`Bearer ${e}`},body:JSON.stringify({...t})}).then(async s=>{if(!s.ok)throw await s.json();return s.json()}).catch(s=>(console.log(s),r=s.detail,null));if(r)throw r;return a},_B=async(e,t)=>{const r=e||typeof localStorage<'
+
+',timezoneSource:u};if(a.timezone===d.timezone&&a.timezoneMode===d.timezoneMode&&a.timezoneSource===d.timezoneSource)return null;try{return await SB(r,{ui:{...a,...d}}),d}catch(f){return console.error('
+
+',f),null}},zJ=async(e,t)=>{let r=null;const a=await fetch(`${We}/users/${t}`,{method:'
+
+',Authorization:`Bearer ${e}`}}).then(async s=>{if(!s.ok)throw await s.json();return s.json()}).catch(s=>(console.log(s),r=s.detail,null));if(r)throw r;return a},EB=async(e,t)=>{let r=null;const a=await fetch(`${We}/users/user/info/update`,{method:'
+
+',Authorization:`Bearer ${e}`},body:JSON.stringify({...t})}).then(async s=>{if(!s.ok)throw await s.json();return s.json()}).catch(s=>(console.log(s),r=s.detail,null));if(r)throw r;return a},PJ=async e=>{const t=await xD().catch(r=>(console.log(r),null));return t?(await EB(e,{location:t}),t):(console.'
+
+'),null)},IJ=async(e,t)=>{let r=null;const a=await fetch(`${We}/users/user/destroy`,{method:'
+
+',Authorization:`Bearer ${e}`},body:t?JSON.stringify(t):void 0}).then(async s=>{if(!s.ok)throw await s.json();return s.json()}).catch(s=>(console.log(s),r=s.detail,null));if(r)throw r;return a},AB=async()=>{const e=await Vs.Get('
+
+'){const l=a,u=fs(l.detail)??fs(l.message),d=fs(l.code)??fs(l.error_code);if(u||d)return{message:u,code:d}}const s=fs(r.detail)??fs(a)??fs(r.message);return s?{message:s,code:fs(r.code)??fs(r.error_code)}:Qg(r.data,t+1)}function jB(e){try{return Qg(JSON.parse(e))}catch{}for(const t of e.split(`\n`)){i'
+
+'))try{const a=Qg(JSON.parse(r));if(a.message||a.code)return a}catch{}}return{}}async function kB(e){const t=await e.text().catch(()=>'
+
+'Oops, something went wrong. Please refresh the page or try again later. Error code: {{error}}'
+
+',...t&&{authorization:`Bearer ${t}`}}}).then(async s=>{if(!s.ok)throw await s.json();return s.json()}).catch(s=>{var l;return r=`OpenAI: ${((l=s==null?void 0:s.error)==null?void 0:l.message)??'
+
+',t,r=`${Yi}/api`,a,s={})=>{let l=null;const u={message_id:t};s.resumeProtocol&&(u.resume_protocol=s.resumeProtocol,s.chatId&&(u.chat_id=s.chatId),s.resumeClientId&&(u.resume_client_id=s.resumeClientId),s.have&&(u.have=s.have));const d=await fetch(`${r}/chat/continue`,{method:'
+
+'),onClick:()=>window.location.reload()},duration:1/0}),!f.ok)throw await f.json();if(!f.body)throw new Error('
+
+');return f}).catch(f=>(l=`${(f==null?void 0:f.detail)??f}`,null));if(l){const f=`${(l==null?void 0:l.detail)??l}`;throw vf(f,`${r}/chat/continue`),l}return d},BJ=async(e='
+
+')=>{let d=null;const f=u?{...t,captcha_verify_param:u}:t,m=await fetch(`${r}/chat/completions?${l}`,{method:'
+
+':s}),body:JSON.stringify(f),signal:a.signal}).then(async y=>{if(y.status===401&&fi.set(!0),!y.ok)throw await kB(y);if(!y.body)throw new Error('
+
+');return y}).catch(y=>(d=y instanceof Kg?y:`${(y==null?void 0:y.detail)??y}`,null));if(d){const y=d instanceof Kg&&d.code?`${d.code}: ${d.message}`:`${(d==null?void 0:d.detail)??d}`;throw vf(y,`${r}/chat/completions`),d}return m},R3=async(e='
+
+';let l=null;const u=await(a||fetch(`${Yi}/api/models${r?'
+
+',openai:{id:O},urlIdx:x}))};C.push((async()=>R)())}else C.push((async()=>await DB(S,g[x]).then(R=>R).catch(()=>({object:'
+
+':tt(Pn),...e&&{authorization:`Bearer ${e}`}},body:JSON.stringify(r)}).then(async l=>{if(!l.ok)throw await l.json();return l.json()}).catch(l=>(console.log(l),'
+
+'in l?a=l.detail:a=l,null));if(a)throw a;return s},GJ=async(e,t,r)=>{let a=null;const s=await fetch(`${Yi}/api/tasks/stop/${t}`,{method:'
+
+':tt(Pn),...e&&{authorization:`Bearer ${e}`}},body:JSON.stringify({reason:r})}).then(async l=>{if(!l.ok)throw await l.json();return l.json()}).catch(l=>(console.log(l),'
+
+'in l?a=l.detail:a=l,null));if(a)throw a;return s},qJ=async()=>{let e=null;const t=localStorage.getItem('
+
+',...t?{authorization:`Bearer ${t}`}:{}}}).then(async a=>{if(!a.ok)throw await a.json();return a.json()}).catch(a=>(console.log(a),e=a,null));if(e)throw e;return r},$B=async e=>{let t=null;const r=localStorage.getItem('
+
+',a=await fetch(`${Yi}/api/v1/completion-draft/${e}`,{method:'
+
+':tt(Pn),Authorization:`Bearer ${r}`}}).then(async s=>{if(s.status===401)throw{code:401};if(!s.ok)throw await s.json();return s.json()}).catch(s=>(console.log(s),t=s,null));if(t)throw t;return a},C2=(e,t)=>{if(!(e!=='
+
+'}},UE=async e=>{var s,l;let t=null;try{t=await e.json()}catch{}const r=Number((l=(s=e.headers)==null?void 0:s.get)==null?void 0:l.call(s,'
+
+'&&!Array.isArray(t)?{...a,...t}:{...a,...t==null?{}:{detail:t}}},VB=async e=>{let t=null;const r=await fetch(`${We}/auths/admin/details`,{method:'
+
+',Authorization:`Bearer ${e}`}}).then(async a=>{if(!a.ok)throw await a.json();return a.json()}).catch(a=>(console.log(a),t=a.detail,null));if(t)throw t;return r},zB=async(e,t)=>{const r=Uf(t),a=r==='
+
+'});if(!u.ok)throw a&&await UE(u),await u.json();const d=await u.json();return C2(r,d),a&&xC(d),d},YJ=async(e,t)=>{let r=null;const a=await fetch(`${We}/auths/ldap`,{method:'
+
+',body:JSON.stringify({user:e,password:t})}).then(async s=>{if(!s.ok)throw await s.json();return s.json()}).catch(s=>(console.log(s),r=s.detail,null));if(r)throw r;return a},KJ=async(e,t,r,a)=>{const s=Uf(a),l=s==='
+
+');const d=K0(`${We}/auths/signin`,s),f=await fetch(d,{method:'
+
+',body:JSON.stringify({email:e,password:t,captcha_verify_param:r})});if(!f.ok)throw await f.json();const m=await f.json();return C2(s,m),m},QJ=async(e,t)=>{const r=await fetch(`${We}/auths/phone/send-code`,{method:'
+
+',body:JSON.stringify({phone:e,captcha_verify_param:t})});if(!r.ok){let a=null;try{a=await r.json()}catch{a=null}throw{status:r.status,...a??{}}}return await r.json()},WJ=async(e,t,r)=>{const a=Uf(r),s=a==='
+
+');const u=K0(`${We}/auths/phone/verify`,a),d=await fetch(u,{method:'
+
+',body:JSON.stringify({phone:e,code:t})});if(!d.ok){let m={};try{m=await d.json()}catch{}throw{status:d.status,...m}}const f=await d.json();return C2(a,f==null?void 0:f.user),f},XJ=async(e,t,r)=>{let a=null;const s=await fetch(`${We}/auths/resend_email`,{method:'
+
+',body:JSON.stringify({name:t,email:e,sso_redirect:r})}).then(async l=>{if(!l.ok)throw await l.json();return l.json()}).catch(l=>(console.log(l),a=l.detail,null));if(a)throw a;return s},JJ=async(e,t,r)=>{let a=null;const s=await fetch(`${We}/auths/verify_email`,{method:'
+
+',body:JSON.stringify({username:t,email:e,token:r})}).then(async l=>{if(!l.ok)throw await l.json();return l.json()}).catch(l=>(console.log(l),a=l.detail,null));if(a)throw a;return s},eee=async(e,t,r,a,s,l,u)=>{const d=Uf(u),f=d==='
+
+');const y=K0(`${We}/auths/finish_signup`,d),g=await fetch(y,{method:'
+
+',body:JSON.stringify({username:t,email:e,token:r,password:a,profile_image_url:s,sso_redirect:l})});if(!g.ok)throw await g.json();const b=await g.json();return C2(d,b==null?void 0:b.user),b},tee=async(e,t,r,a,s,l)=>{let u=null;const d={name:e,email:t,password:r,profile_image_url:a,sso_redirect:s};l&&'
+
+',body:JSON.stringify(d)}).then(async m=>{if(!m.ok)throw await m.json();return m.json()}).catch(m=>(console.log(m),u=m.detail,null));if(u)throw u;return f},O4=async()=>{if(Uf()==='
+
+'),a=`${We}/auths/signout`,s=await fetch(a,{method:'
+
+'});s.ok||await UE(s),qD();return}let t=null;if(await fetch(`${We}/auths/signout`,{method:'
+
+'}).then(async r=>{if(!r.ok)throw await r.json();return r}).catch(r=>(console.log(r),t=r.detail,null)),t)throw t},nee=async(e,t,r)=>{let a=null;const s=await fetch(`${We}/auths/update/profile`,{method:'
+
+',...e&&{authorization:`Bearer ${e}`}},body:JSON.stringify({name:t,profile_image_url:r})}).then(async l=>{if(!l.ok)throw await l.json();return l.json()}).catch(l=>(console.log(l),a=l.detail,null));if(a)throw a;return s},ree=async(e,t)=>{let r=null;const a=await fetch(`${We}/auths/forgot-password`,{me'
+
+'},body:JSON.stringify({email:e,captcha_verify_param:t})}).then(async s=>{if(!s.ok)throw await s.json();return s.json()}).catch(s=>(console.log(s),r=s.detail,null));if(r)throw r;return a},aee=async(e,t,r)=>{let a=null;const s=await fetch(`${We}/auths/reset-password`,{method:'
+
+'},body:JSON.stringify({token:e,email:t,new_password:r})}).then(async l=>{if(!l.ok)throw await l.json();return l.json()}).catch(l=>(console.log(l),a=l.detail,null));if(a)throw a;return s},iee=e=>{if(!e)return null;try{const t=new URL(decodeURIComponent(e));if(t.protocol==='
+
+'&&e.detail?e.detail:null;return t&&typeof t.unblock_timestamp=='
+
+'&&e.detail?e.detail:null;return t&&typeof t.retry_after_seconds=='
+
+'?e.detail.status:null}function UB(e){return!e||typeof e!='
+
+'This email domain is not supported. Please use a permanent email address.'
+
+'Too many attempts. Please try again in {{seconds}}s.'
+
+'Too many sign-ups from your network. Please try again later, or switch networks. If you are on a corporate or campus network, contact support.'
+
+'Verification code request limit reached. Please try again in {{seconds}}s.'
+
+'Verification service is temporarily unavailable. Please try again.'
+
+'Verification code has not expired yet. Please try again later.'
+
+'Verification code has not expired yet. Please try again later.'
+
+'),z=f??V.okText,$=m??V.cancelText,F=S??V.closeLabel,[U,H]=Mu({value:e,defaultValue:t,onChange:r}),[q,D]=w.useState(!1),B=x||q,I=fe=>{!fe&&B||(fe||(g==null||g()),H(fe))},Q=async()=>{const fe=y==null?void 0:y();if(fe instanceof Promise){D(!0);try{await fe}catch{return}finally{D(!1)}}H(!1)},J=d===void '
+
+'}),l&&v.jsx(lZ,{children:l})]}),u!=null&&v.jsx(sZ,{className:M,children:u}),J!=null&&v.jsx(oZ,{className:j,children:J})]})]})}const cZ=async()=>{var t;return((t=(await Vs.Get('
+
+')=>(await Vs.Get(`/bindings/${e}/start`,{redirect_to:t,mode:r,response_mode:'
+
+';function dZ(){const e=lt(k4),t=w.useRef(!1),r=async()=>{if(!(t.current||!e)){t.current=!0;try{const a=await XE(su,e.redirectTo,'
+
+')),a}await new Promise(()=>{})}};return v.jsx(zs,{open:!!e,size:'
+
+'Your BigModel authorization has expired. Reconnect to keep using your BigModel plan.'
+
+'],initialData:null,refetchOnWindowFocus:!1,retry:!1,queryFn:async()=>{try{return await cZ()}catch(e){return console.error('
+
+',e??null],staleTime:300*1e3,refetchOnWindowFocus:!1,retry:!1,queryFn:async()=>{var t;try{return((t=await uZ())==null?void 0:t.can_bind)===!0}catch(r){return console.error('
+
+':hZ;function pee(){const e=eA(Vo(),lt(sn)),{data:t}=Gi({...P4(),enabled:e});return e&&t!=null&&!z4(t,su)}function gee(e){const t=lt(sn);Gi({...fZ(t==null?void 0:t.id),enabled:e&&!!(t!=null&&t.id)})}async function vee(e){if(!eA($u(),tt(sn)))return!1;const t=P4(),r=e.getQueryData(t.queryKey)??await e.'
+
+'))==null?void 0:r.parentElement;if(!t)return!1;if(t.contains(document.activeElement))return!0;try{return t.matches('
+
+')},C=async x=>{let S=x;for(const _ of tG){const E=XD(S,_);if(await new Promise(L=>setTimeout(L,E)),g||!G7())return;try{await zB(void 0,'
+
+'),onClick:()=>window.location.reload()}],duration:1/0})};return l$(),(async()=>{var O,N,M,j,V,z;let x;try{x=await((O=window.GLOBAL_FETCHES)==null?void 0:O.config),x&&ws.set(x)}catch($){if(console.error($),O3($)){const F=Y8($);m3.set({unblockTimestamp:F}),zo({bt:'
+
+',data:F!=null?{unblock_timestamp:F}:{}})}}await Promise.race([Qa.whenReady(),new Promise($=>setTimeout($,1500))]);const S=localStorage.token;R3(S??'
+
+',null,!1,((N=window.GLOBAL_FETCHES)==null?void 0:N.models)||void 0).then($=>vs.set($)).catch($=>console.warn('
+
+',$));const _=G7(),[E,L]=await Promise.allSettled([((M=window.GLOBAL_FETCHES)==null?void 0:M.session)??Promise.reject(new Error('
+
+'&&!localStorage.shouldSuggestModel&&(localStorage.shouldSuggestModel='
+
+'),Tr.getState()&&!localStorage.getItem(ht.LAST_SELECTED_AGENT_MODEL))try{const H=JSON.parse(localStorage.getItem(ht.SELECTED_MODELS)??'
+
+');Array.isArray(H)&&H[0]&&localStorage.setItem(ht.LAST_SELECTED_AGENT_MODEL,JSON.stringify([H[0]]))}catch(H){console.warn('
+
+'),localStorage.getItem(ht.LAST_SELECTED_AGENT_MODEL)||localStorage.setItem(ht.LAST_SELECTED_AGENT_MODEL,JSON.stringify(['
+
+');if(U)try{const H=await $B(U);if(H){if(localStorage.setItem(ht.LAST_MODE,'
+
+',JSON.stringify(q))}H.model_id&&localStorage.setItem(Tr.getState()?ht.LAST_SELECTED_AGENT_MODEL:'
+
+'&&Wg(E.reason)?(await K8(),R3().then(F=>{vs.set(F)}).catch(F=>{console.warn('
+
+'&&Wg(E.reason)&&(await K8(),R3().then($=>{vs.set($)}).catch($=>{console.warn('
+
+'&&L.value===!1&&Ki()){const[$]=await Promise.allSettled([CB()]);$.status==='
+
+'),__vite__mapDeps([0,1])),Ot(()=>Promise.resolve().then(()=>Rk),void 0)]).then(([{initMainTracker:H},{deviceDetect:q,isMobile:D}])=>{var ye,be;if(g)return;const B=sessionStorage.getItem('
+
+'})}function ys({asChild:e=!1,isActive:t=!1,inset:r=!1,icon:a,trailing:s,className:l,children:u,type:d,...f}){const m=e?Zl:'
+
+':tt(Pn),authorization:`Bearer ${e}`},body:JSON.stringify({chat:t,meta:r??{},pinned:a,folder_id:s})}).then(async d=>{if(!d.ok)throw await d.json();return d.json()}).catch(d=>(l=d,console.log(d),null));if(l)throw l;return u},Ru=async(e='
+
+',s);const d=await fetch(`${We}/chats/?${u.toString()}`,{method:'
+
+':tt(Pn),...e&&{authorization:`Bearer ${e}`}}}).then(async f=>{if(f.status===401&&fi.set(!0),!f.ok)throw await f.json();return f.json()}).then(f=>f).catch(f=>(l=f,console.log(f),null));if(l)throw l;return d.map(f=>({...f,time_range:Z0(f.updated_at)}))},J8=async(e='
+
+')=>{let t=null;const r=await fetch(`${We}/chats/archived`,{method:'
+
+':tt(Pn),...e&&{authorization:`Bearer ${e}`}}}).then(async a=>{if(!a.ok)throw await a.json();return a.json()}).then(a=>a).catch(a=>(t=a,console.log(a),null));if(t)throw t;return r},ew=async(e,t,r=1)=>{let a=null;const s=new URLSearchParams;s.append('
+
+',`${r}`);const l=await fetch(`${We}/chats/search?${s.toString()}`,{method:'
+
+':tt(Pn),...e&&{authorization:`Bearer ${e}`}}}).then(async u=>{if(!u.ok)throw await u.json();return u.json()}).then(u=>u).catch(u=>(a=u,console.log(u),null));if(a)throw a;return l.map(u=>({...u,time_range:Z0(u.updated_at)}))},gG=async e=>{let t=null;const r=await fetch(`${We}/chats/all/archived`,{met'
+
+':tt(Pn),...e&&{authorization:`Bearer ${e}`}}}).then(async a=>{if(!a.ok)throw await a.json();return a.json()}).then(a=>a).catch(a=>(t=a,console.log(a),null));if(t)throw t;return r},vA=async e=>{let t=null;const r=await fetch(`${We}/chats/all/tags`,{method:'
+
+':tt(Pn),...e&&{authorization:`Bearer ${e}`}}}).then(async a=>{if(!a.ok)throw await a.json();return a.json()}).then(a=>a).catch(a=>(t=a,console.log(a),null));if(t)throw t;return r},Jg=async(e='
+
+')=>{let t=null;const r=await fetch(`${We}/chats/pinned`,{method:'
+
+':tt(Pn),...e&&{authorization:`Bearer ${e}`}}}).then(async a=>{if(!a.ok)throw await a.json();return a.json()}).then(a=>a).catch(a=>(t=a,console.log(a),null));return t?[]:r.map(a=>({...a,time_range:Z0(a.updated_at)}))},of=async(e,t)=>{let r=null;const a=await fetch(`${We}/chats/${t}`,{method:'
+
+',...e&&{authorization:`Bearer ${e}`}}}).then(async s=>{if(s.status===401&&fi.set(!0),!s.ok)throw await s.json();return s.json()}).then(s=>s).catch(s=>(r=s.detail,console.log(s),null));if(r)throw r;return a},Mee=async(e,t)=>{let r=null;const a=await fetch(`${We}/chats/share/${t}`,{method:'
+
+',...e&&{authorization:`Bearer ${e}`}}}).then(async s=>{if(!s.ok)throw await s.json();return s.json()}).then(s=>s).catch(s=>(r=s,console.log(s),null));if(r)throw r;return a},vG=async(e,t)=>{let r=null;const a=await fetch(`${We}/chats/${t}/pinned`,{method:'
+
+',...e&&{authorization:`Bearer ${e}`}}}).then(async s=>{if(!s.ok)throw await s.json();return s.json()}).then(s=>s).catch(s=>(r=s,'
+
+'in s?r=s.detail:r=s,console.log(s),null));if(r)throw r;return a},yG=async(e,t)=>{let r=null;const a=await fetch(`${We}/chats/${t}/pin`,{method:'
+
+',...e&&{authorization:`Bearer ${e}`}}}).then(async s=>{if(!s.ok)throw await s.json();return s.json()}).then(s=>s).catch(s=>(r=s,'
+
+'in s?r=s.detail:r=s,console.log(s),null));if(r)throw r;return a},bG=async(e,t,r)=>{let a=null;const s=await fetch(`${We}/chats/${t}/clone`,{method:'
+
+',...e&&{authorization:`Bearer ${e}`}},body:JSON.stringify({...r&&{title:r}})}).then(async l=>{if(!l.ok)throw await l.json();return l.json()}).then(l=>l).catch(l=>(a=l,'
+
+'in l?a=l.detail:a=l,console.log(l),null));if(a)throw a;return s},Ree=async(e,t)=>{let r=null;const a=await fetch(`${We}/chats/${t}/clone/shared`,{method:'
+
+',...e&&{authorization:`Bearer ${e}`}}}).then(async s=>{if(!s.ok)throw await s.json();return s.json()}).then(s=>s).catch(s=>(r=s,'
+
+'in s?r=s.detail:r=s,console.log(s),null));if(r)throw r;return a},tw=async(e,t,r)=>{let a=null;const s=r===void 0?void 0:JSON.stringify({deploy:r}),l=await fetch(`${We}/chats/${t}/share`,{method:'
+
+':tt(Pn),...e&&{authorization:`Bearer ${e}`}},...s?{body:s}:{}}).then(async u=>{if(u.status===429)return await u.json();if(!u.ok)throw await u.json();return u.json()}).then(u=>u).catch(u=>(a=u,console.log(u),null));if(a)throw a;return l},wG=async(e,t,r)=>{let a=null;const s=await fetch(`${We}/chats/$'
+
+',...e&&{authorization:`Bearer ${e}`}},body:JSON.stringify({project_id:r})}).then(async l=>{if(!l.ok)throw await l.json();return l.json()}).catch(l=>(a=l,console.log(l),null));if(a)throw a;return s},e6=async(e,t)=>{let r=null;const a=await fetch(`${We}/chats/${t}/archive`,{method:'
+
+',...e&&{authorization:`Bearer ${e}`}}}).then(async s=>{if(!s.ok)throw await s.json();return s.json()}).then(s=>s).catch(s=>(r=s,console.log(s),null));if(r)throw r;return a},xG=async(e,t)=>{let r=null;const a=await fetch(`${We}/chats/${t}/share`,{method:'
+
+',...e&&{authorization:`Bearer ${e}`}}}).then(async s=>{if(!s.ok)throw await s.json();return s.json()}).then(s=>s).catch(s=>(r=s,console.log(s),null));if(r)throw r;return a},CG=async(e,t,r)=>await fetch(`${We}/chats/${t}`,{method:'
+
+');if(!s.ok)throw await s.json();return s.json()}).then(s=>s),yA=async(e,t)=>{let r=null;const a=await fetch(`${We}/chats/${t}`,{method:'
+
+',...e&&{authorization:`Bearer ${e}`}}}).then(async s=>{if(!s.ok)throw await s.json();return s.json()}).then(s=>s).catch(s=>(r=s.detail,console.log(s),null));if(r)throw r;return a},Oee=async(e,t)=>{let r=null;const a=await fetch(`${We}/chats/${t}/tags`,{method:'
+
+',...e&&{authorization:`Bearer ${e}`}}}).then(async s=>{if(!s.ok)throw await s.json();return s.json()}).then(s=>s).catch(s=>(r=s,console.log(s),null));if(r)throw r;return a},jee=async e=>{let t=null;const r=await fetch(`${We}/chats/`,{method:'
+
+',...e&&{authorization:`Bearer ${e}`}}}).then(async a=>{if(!a.ok)throw await a.json();return a.json()}).then(a=>a).catch(a=>(t=a.detail,console.log(a),null));if(t)throw t;return r},kee=async e=>{let t=null;const r=await fetch(`${We}/chats/archive/all`,{method:'
+
+',...e&&{authorization:`Bearer ${e}`}}}).then(async a=>{if(!a.ok)throw await a.json();return a.json()}).then(a=>a).catch(a=>(t=a.detail,console.log(a),null));if(t)throw t;return r},Dee=async(e,t)=>{const r=localStorage.getItem('
+
+',a=await fetch(`${We}/chats/${e}/messages/batch`,{method:'
+
+',...r&&{authorization:`Bearer ${r}`}},body:JSON.stringify({ids:t})});if(a.ok){const s=await a.json();if(s.data)return Object.values(s.data).forEach(l=>{l.content_blocks&&$D(l.content_blocks)}),s.data}throw new Error('
+
+',s=new URLSearchParams({chat_id:e}),l=await fetch(`${We}/chats/subagents?${s.toString()}`,{method:'
+
+')=>{let t=null;const r=await fetch(`${We}/folders/`,{method:'
+
+',authorization:`Bearer ${e}`}}).then(async a=>{if(!a.ok)throw await a.json();return a.json()}).then(a=>a).catch(a=>(t=a.detail,console.log(a),null));if(t)throw t;return r},_G=5,EG=({wanted:e,current:t,dismissedFor:r,chatId:a,attempts:s})=>e?r===a||t!=='
+
+'?e(t):e&&(e.current=t)}const wA=()=>{try{const e=JSON.parse(localStorage.getItem(ht.BIGMODEL_SIDEBAR_BINDING_DISMISSED_USERS)??'
+
+'):[]}catch{return[]}},RG=e=>wA().includes(e),OG=e=>{const t=wA();t.includes(e)||localStorage.setItem(ht.BIGMODEL_SIDEBAR_BINDING_DISMISSED_USERS,JSON.stringify([...t,e]))};function jG(){const[e,t]=w.useState(!1),[r,a]=w.useState(null),s=lt(sn),l=(s==null?void 0:s.id)??null,u=!!l&&(r===l||RG(l)),d=Vo'
+
+');try{const x=await XE(su,JE());if(!(x!=null&&x.auth_url))throw new Error('
+
+',leadingIcon:r,trailingIcon:a,leadingAddon:s,className:l,inputClassName:u,groupRef:d,ref:f,type:m,dir:y,id:g,disabled:b,required:C,'
+
+',show:m=!1,onConfirm:y=()=>{},onCancel:g=()=>{},onShowChange:b,onInputValueChange:C,children:T}){const[x,S]=w.useState(f);w.useEffect(()=>{S(f)},[f]);const _=R=>{S(R),C==null||C(R)},E=async()=>{b==null||b(!1),await y(x)},L=()=>{b==null||b(!1),g()};return w.useEffect(()=>{const R=O=>{m&&O.key==='
+
+')}-${Date.now()}.json`,O.click(),URL.revokeObjectURL(R)},S=async()=>{for(const E of l)await e6(localStorage.token,E.id);await b(),t()},_=l.filter(E=>d==='
+
+'max-h-(--radix-dropdown-menu-content-available-height) max-w-(--radix-dropdown-menu-content-available-width)'
+
+'),a=await fetch(`${We}${e}`,{...t,headers:{Accept:'
+
+':tt(Pn),...r&&{authorization:`Bearer ${r}`}}}).catch(s=>{throw{status:0,detail:`${s}`}});if(!a.ok){const s=await a.json().catch(()=>null);throw{status:a.status,detail:(s==null?void 0:s.detail)??a.statusText}}return a.json()},Rs=e=>typeof e=='
+
+')=>{const a=new URLSearchParams({page:`${t}`,type:r});return(await Uu(`/projects/${e}/chats?${a.toString()}`)).map(l=>({...l,time_range:Z0(l.updated_at)}))},uw=50,dw=5e3,fw=5,DY=60,Yne=6,vi={list:['
+
+',{project_name:x,has_instruction:$,source:s}),T(!0);try{const F=t?await OY(t.id,z):await NY({...z,name:x});t?$t('
+
+',project_id:F.id,source:s}),O(!1),t||u.setQueryData(vi.list,U=>U!=null&&U.some(H=>H.id===F.id)?U:U&&[{...F,chat_count:0,last_chat_at:0},...U]),u.setQueryData(vi.detail(F.id),F),Ef(u),a==null||a(F)}catch(F){const U=QA(F);t?$t('
+
+',error_code:U,source:s}),Rs(F)&&F.status===409?b(!0):ur.error(Rs(F)&&F.detail||l(t?'
+
+',projectId:f=null,showPinMenuItem:m=!0,showArchiveMenuItem:y=!0,showShareMenuItem:g=!0,onChange:b=()=>{},children:C,menuLabel:T}){const{t:x}=tr(),S=lt(V6),[_,E]=w.useState(!1),[L,R]=w.useState(!1),O=zl(),[N,M]=w.useState(!1),[j,V]=w.useState(!1),z=async U=>{try{await wG(localStorage.token,d,U)}catch'
+
+')),Ef(O);return}U&&rv(U),d===sr.getState()&&v0.set(U),await Ef(O,{projectIds:[f,U],recents:!0})},$=async()=>{await yG(localStorage.token,d),b()},F=async()=>{R(await vG(localStorage.token,d))};return w.useEffect(()=>{_&&F()},[_]),v.jsxs(v.Fragment,{children:[v.jsxs(X4,{open:_,onOpenChange:U=>{E(U),U|'
+
+'),[f,m]=w.useState(!1),y=u.trim(),g=!!y&&!f;w.useEffect(()=>{e&&(d(t),m(!1))},[e]);const b=async()=>{if(g){if(y===t){a(!1);return}m(!0);try{await s(y)!==!1&&a(!1)}finally{m(!1)}}};return v.jsx(D4,{open:e,onOpenChange:a,children:v.jsx($4,{size:'
+
+'The current usage exceeds the personal limit. Please try again 1 hour later.'
+
+'},i6=e=>{e.autoThink=fK(),e.reasoningEffort=hK()},ore=(e,t,r,a,s)=>{if(e.selectedModels=t,!a||(i6(e),r!=='
+
+'?ht.LAST_SELECTED_AGENT_MODEL:ht.SELECTED_MODELS;localStorage.setItem(l,JSON.stringify(t.slice(0,1)))},lre=(e,t,r)=>{e.autoThink=t,r&&localStorage.setItem(ht.LAST_AUTO_THINK,String(t))},cre=(e,t,r)=>{e.reasoningEffort=t,r&&localStorage.setItem(ht.LAST_REASONING_EFFORT,t)},ure=w.createContext({chat:n'
+
+')=>({loading:!1,processing:!1,autoScroll:!0,previousChatId:null,chatIdUnsubscriber:void 0,selectedModels:['
+
+'],atSelectedModel:void 0,selectedToolIds:[],imageGenerationEnabled:!1,webSearchEnabled:!1,runAbortControllers:new Map,runGeneration:0,inputFeatures:void 0,currentScene:'
+
+'))==null?void 0:e.focus()},0)};function mre(e){const{core:t,bump:r,chatIdProp:a,submitPromptRef:s,modelRecommendRef:l}=e,u=w.useCallback(x=>{var _,E,L;const S=t.current;if(localStorage.getItem(ht.ADVANCED_SEARCH_OPEN)==='
+
+'];if(M.length===1)if(O.find(V=>V.id===M[0]))S.selectedModels=M;else{const V=document.getElementById('
+
+');if(V){V.click(),await Bc();const z=document.getElementById('
+
+'),{replaceState:!0}),R.autoScroll=!0,R.adoptedChatId=null,await sr.set('
+
+'),v0.set(null),await Bc(),R.history={messages:{},currentId:null},R.chatFiles=[],R.params={},R.agentSceneValues={},R.selectedAgentScene=null,R.selectedPPTTemplate=null,R.selectedSceneTemplate=null,R.showInitPlaceholder=x,R.initPlaceholderChannel=S,xw(),Ar.set('
+
+'),wl.set(AG(L??null)??[]);const O=vs.getState(),N=M=>{var j,V,z;return!!((z=(V=(j=M==null?void 0:M.info)==null?void 0:j.meta)==null?void 0:V.capabilities)!=null&&z.agent_mode)};if(Tr.getState())if(localStorage.getItem(ht.LAST_SELECTED_AGENT_MODEL)){const M=JSON.parse(localStorage.getItem(ht.LAST_SEL'
+
+');R.selectedModels[0]!==M[0]&&(R.selectedModels=M.slice(0,1))}else{const M=O.find(N);M&&(R.selectedModels=[M.id])}else{const M=localStorage.getItem(ht.LAST_SELECTED_AGENT_MODEL)?JSON.parse(localStorage.getItem(ht.LAST_SELECTED_AGENT_MODEL)??'
+
+'):[],j=O.length===0?M:M.filter(V=>N(O.find(z=>z.id===V)));if(j.length>0)R.selectedModels[0]!==j[0]&&(R.selectedModels=j);else{const V=O.find(N);V&&(R.selectedModels=[V.id])}}f(),Qr.getState().emit($n.RUNNING_TASKS_UPDATE),R.initDone=!0,r()},[]),y=w.useCallback(async()=>{var E;const x=t.current,S=new'
+
+');else{const M=nu.getState();M!=null&&M.models?x.selectedModels=M==null?void 0:M.models:(L=ws.getState())!=null&&L.default_models&&(x.selectedModels=(R=ws.getState())==null?void 0:R.default_models.split('
+
+'))}N!==x.selectedModels[0]&&(wl.set([]),x.inputFeatures=[])}const _=vs.getState();x.selectedModels=x.selectedModels.filter(N=>_.map(M=>M.id).includes(N)).slice(0,1),(x.selectedModels.length===0||x.selectedModels.length===1&&x.selectedModels[0]==='
+
+')&&(_.length>0?x.selectedModels=[_[0].id]:x.selectedModels=['
+
+',x.prompt&&(await Bc(),(O=s.current)==null||O.call(s,x.prompt))),x.selectedModels=x.selectedModels.map(N=>_.map(M=>M.id).includes(N)?N:'
+
+'),u(x.selectedModels),xw(),x.initDone=!0,r()},[y,d,u]),b=w.useCallback(async(x='
+
+'?await m():await g()},,g]),C=w.useCallback(async()=>{var _;await Bc();const x=t.current,S=Ar.getState();if(x.projectId||(_=l==null?void 0:l.current)==null||_.trigger(),S==='
+
+',N=await tw(localStorage.token,e,O?!0:void 0);if(N.id)E=`${window.location.origin}/s/${N.id}`;else if(((L=N.detail)==null?void 0:L.error_type)==='
+
+'){C.current=Cw(),b(!0),await C.current.promise;const M=await tw(localStorage.token,e,O?!0:void 0);E=`${window.location.origin}/s/${M.id}`}else if(((R=N.detail)==null?void 0:R.error_type)==='
+
+'));return console.log(E),d(await of(localStorage.token,e)),E}finally{y(!1)}},_=E=>{const L=f.current;return L?E?L.id!==E.id||L.share_id!==E.share_id:!1:!0};return w.useEffect(()=>{t&&(async()=>{if(e){const E=await of(localStorage.token,e);_(E)&&d(E)}else d(null),console.log(null)})()},[t,e]),v.jsxs('
+
+',onClick:async()=>{await xG(localStorage.token,e)&&d(await of(localStorage.token,e))},children:qe('
+
+');const V=async()=>{const z=await S();return new Blob([z],{type:'
+
+'})})},[t,E]);const j=D=>{R(!0),D.currentTarget.contains(D.target)&&(M.current||N.current||(N.current=setTimeout(()=>{N.current=null,M.current=!0,hY(localStorage.token,t).catch(()=>{})},150)))},V=()=>{R(!1),N.current&&(clearTimeout(N.current),N.current=null)};w.useEffect(()=>(M.current=!1,()=>{N.curr'
+
+');try{return await CG(localStorage.token,D,{title:B}),D3(D),D===sr.getState()&&hg.set(B),Tr.getState()?b||Qr.getState().emit($n.REFRESH_AGENT_CHAT_LIST):(Na.set(1),await wo.set(await Ru(localStorage.token,Na.getState())),await mg.set(await Jg(localStorage.token))),b&&C(),!0}catch(I){return ur.error('
+
+')),C())},U=async D=>{await e6(localStorage.token,D),D3(D),C()},H=()=>{_.openDelete({chatId:t,title:r,onConfirm:()=>{F(t)}})},q=()=>{$t('
+
+',...e&&{Authorization:`Bearer ${e}`}}},Wl=(e,t)=>(e==null?void 0:e.error)||(e==null?void 0:e.detail)||t,xK=async({bizType:e})=>{const t=new URLSearchParams({biz_type:e}),r=await fetch(`${Il}/bot/channel?${t.toString()}`,{method:'
+
+',headers:Ql()}),a=await r.json().catch(()=>null);if(!r.ok||!(a!=null&&a.success))throw new Error(Wl(a,ua('
+
+')));return a.channels??[]},pre=async({channelType:e,config:t,userId:r,bizType:a})=>{const s=await fetch(`${Il}/bot/channel/bind`,{method:'
+
+',headers:Ql(),body:JSON.stringify({channel_type:e,config:t,user_id:r,biz_type:a})}),l=await s.json().catch(()=>null);if(!s.ok||!(l!=null&&l.success))throw new Error(Wl(l,ua('
+
+')));return l},gre=async e=>{const t=await fetch(`${Il}/bot/channel/unbind`,{method:'
+
+',headers:Ql(),body:JSON.stringify({channel_id:e})}),r=await t.json().catch(()=>null);if(!t.ok||!(r!=null&&r.success))throw new Error(Wl(r,ua('
+
+')));return r},vre=async({force:e=!0}={})=>{const t=await fetch(`${Il}/bot/channel/weixin/qrcode`,{method:'
+
+',headers:Ql(),body:JSON.stringify({force:e})}),r=await t.json().catch(()=>null);if(!t.ok||!(r!=null&&r.success))throw new Error(Wl(r,ua('
+
+')));return r},yre=async({sessionKey:e,signal:t,bizType:r})=>{const a=await fetch(`${Il}/bot/channel/weixin/try_bind`,{method:'
+
+',headers:Ql(),signal:t,body:JSON.stringify({session_key:e,biz_type:r})}),s=await a.json().catch(()=>null);if(!a.ok||!s||typeof s.success!='
+
+')));return s},bre=async({force:e=!0,bizType:t})=>{const r=await fetch(`${Il}/bot/channel/feishu/qrcode`,{method:'
+
+',headers:Ql(),body:JSON.stringify({force:e,biz_type:t})}),a=await r.json().catch(()=>null);if(!r.ok||!(a!=null&&a.success))throw new Error(Wl(a,ua('
+
+')));return a},wre=async({sessionKey:e,bizType:t,signal:r})=>{const a=await fetch(`${Il}/bot/channel/feishu/try_bind`,{method:'
+
+',headers:Ql(),signal:r,body:JSON.stringify({session_key:e,biz_type:t})}),s=await a.json().catch(()=>null);if(!a.ok||!s||typeof s.success!='
+
+':tt(Pn),...e&&{Authorization:`Bearer ${e}`}}},SK=(e,t)=>(e==null?void 0:e.error)||(e==null?void 0:e.detail)||t,_K=e=>{const t=e.trim().toLowerCase();return t?t==='
+
+')=>({chatId:e,channels:[],resolvedChannels:[],availableChannels:null,loading:!1,saving:!1,loaded:!1,error:'
+
+',requestId:0}),cT=(e,t,r)=>({...e,chatId:t.chat_id,channels:Es(t.channels??[]),resolvedChannels:Es(t.resolved_channels??[]),availableChannels:t.available_channels?Es(t.available_channels):e.availableChannels,loaded:!0,error:'
+
+');try{const l=await xK({bizType:e.bizType});return Zc[a]!==s||OK(e,l),l}catch(l){const u=lv(l,t);throw Zc[a]===s&&Nw(e,u),r&&ur.error(u),l}finally{Zc[a]===s&&Lw(e,!1)}},Lre=async(e,{fallbackError:t,showErrorToast:r=!0})=>{if(!e||e==='
+
+',a);try{const s=await AK(e),l=Ii(tt(Wn));return kh!==a||l.chatId!==e?l:(Fu(u=>u.chatId===e?cT(u,s,a):u),Ii(tt(Wn)))}catch(s){const l=lv(s,t),u=Ii(tt(Wn));throw kh===a&&u.chatId===e&&O0(e,l,a),r&&ur.error(l),s}finally{const s=Ii(tt(Wn));kh===a&&s.chatId===e&&Mw(e,!1,a)}},jK=async(e,t,r)=>{if(!r.chann'
+
+';return await Ru(C,b,l,e,u)},initialPageParam:1,getNextPageParam:(b,C)=>{if(b&&b.length>0)return C.length+1}}),m=((g=f.data)==null?void 0:g.pages.flatMap(b=>b))??[];w.useEffect(()=>{f.data&&b$.set(m)},[f.data]);const y=w.useCallback(async()=>{await t.invalidateQueries({queryKey:['
+
+',project_id:b,error_code:QA(C)}),ur.error(Rs(C)&&C.detail||l('
+
+'),u.removeQueries({queryKey:vi.detail(b)}),u.removeQueries({queryKey:vi.chats(b)}),Ef(u,{recents:!0}),a==null||a(b)};return v.jsx(zY,{open:e,onOpenChange:b=>{!b&&!m.current&&y('
+
+'https://z-cdn.chatglm.cn/z-ai/static/auto_claw.png'
+
+')})}const yT=()=>{try{localStorage.removeItem(ht.BIGMODEL_QUICK_BIND_PROMPT_SHOWN_USERS)}catch{}};async function uQ(){if(Tr.getState()){Qr.getState().emit($n.REFRESH_AGENT_CHAT_LIST);return}Na.set(1),await wo.set(await Ru(localStorage.token,Na.getState())),pg.set(!0)}const dQ=async()=>await Vs.Get('
+
+'],initialData:null,refetchOnWindowFocus:!1,queryFn:async()=>{try{return(await dQ()).data}catch(d){return console.log(d),null}}}).data)==null?void 0:l.items)==null?void 0:u.find(d=>d.feature==='
+
+')?r.remaining:null,s=E2();return qZ(s?s.user_tier:null,()=>{s&&$t('
+
+'],initialData:null,refetchOnWindowFocus:!1,retry:!1,queryFn:async()=>{try{return await TB(t)}catch(y){return console.log(y),null}}}),a=((m=r.data)==null?void 0:m.limits)??[],s=pQ(a),l=gQ(s==null?void 0:s.percentage),u=s!=null&&s.nextResetTime?jo(s.nextResetTime).format('
+
+')]})}),v.jsx(Ou,{}),v.jsxs(Dn,{onSelect:async()=>{try{await O4()}catch(b){if(console.warn('
+
+'),localStorage.removeItem(ht.LAST_MODE),localStorage.removeItem(ht.SELECTED_MODELS),localStorage.removeItem(ht.LAST_SELECTED_AGENT_MODEL),localStorage.removeItem(ht.LAST_AUTO_THINK),localStorage.removeItem(ht.LAST_REASONING_EFFORT),yT(),location.href='
+
+',l=await fetch(`${We}/plugins${t}`,{method:e,headers:{Accept:'
+
+'}:{},...s?{Authorization:`Bearer ${s}`}:{}},...r!==void 0?{body:JSON.stringify(r)}:{},signal:a}),u=await l.json().catch(()=>null);if(!l.ok){const d=(u==null?void 0:u.detail)??(u==null?void 0:u.error)??l.statusText;throw new LQ(l.status,typeof d=='
+
+'?d:JSON.stringify(d))}return u},Kf=e=>`/${encodeURIComponent(e)}`,NQ=async({allRegions:e=!1,signal:t}={})=>{const r=await Bu('
+
+',{children:`\n\t\t\t\t@keyframes sidebarItemFadeIn {\n\t\t\t\t\tfrom { opacity: 0; transform: translateY(-4px); }\n\t\t\t\t\tto { opacity: 1; transform: translateY(0); }\n\t\t\t\t}\n\t\t\t`}),v.jsx(VA,{show:g,onChange:async()=>{await Oe()}}),r&&v.jsx('
+
+'} fixed md:hidden z-40 top-0 right-0 left-0 bottom-0 bg-[#1E1E1E] w-full min-h-screen h-screen flex justify-center overflow-hidden overscroll-contain`,onMouseDown:()=>{an.set(!an.getState())}}),v.jsx('
+
+')})]})]})}):null]})]})})})]})}function jQ(){const[e,t]=w.useState(null);return w.useEffect(()=>{(async()=>{const r=await VB(localStorage.token).catch(a=>(console.error(a),null));t(r)})()},[]),v.jsx('
+
+'Once logged in, you can begin your journey of visual reasoning. Our model will help you deeply understand your visual content and easily uncover key insights.'
+
+'})})}function zQ(){const e=lt(fi),t=lt(_f),[r,a]=w.useState(5),s=w.useRef(5),l=w.useRef(null),u=w.useRef(!1),d=async()=>{if(l.current&&window.clearInterval(l.current),l.current=null,!u.current){u.current=!0;try{await Promise.race([O4(),new Promise(f=>setTimeout(f,1500))])}catch(f){console.warn('
+
+');l||(u.current=`${r}${a}${s}`);const d={settingsReturnTo:u.current};return w.useEffect(()=>{var g;v$.set(document.documentElement.classList.contains('
+
+',largest_contentful_paint:f,url:m,times:1,referrer:y})})},[]),v.jsxs(v.Fragment,{children:[v.jsx($Q,{}),v.jsx(zQ,{}),v.jsx('
+
+'The network may be unstable, or a new version was just released. Please refresh and try again.'

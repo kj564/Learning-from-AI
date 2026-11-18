@@ -7,22 +7,28 @@
  */
 
 import { useState, useRef, useEffect } from 'react';
-import { ChevronDown, Check, Search, Sparkles, Zap, Brain } from 'lucide-react';
+import { ChevronDown, Check, Search, Sparkles, Zap, Brain, Star, Eye } from 'lucide-react';
 import { useStore } from '@/lib/store';
-import type { AiModel, AiModelId } from '@/lib/api';
+import type { AiModel } from '@/lib/api';
 
 const DEFAULT_MODELS: AiModel[] = [
-  { id: 'default', name: 'GLM-4.6', description: 'Most capable — coding, agentic, reasoning' },
-  { id: 'vision', name: 'GLM-4.5V', description: 'Vision model — image understanding' },
-  { id: 'fast', name: 'GLM-4-Flash', description: 'Fast responses, lighter model' },
-  { id: 'smart', name: 'GLM-4-Plus', description: 'Balanced quality and speed' },
+  { id: 'glm-5.3', name: 'GLM-5.3', description: 'Most advanced — flagship model' },
+  { id: 'glm-5.3-flash', name: 'GLM-5.3-Flash', description: 'Fast & free — no daily limit' },
+  { id: 'glm-4.7', name: 'GLM-4.7', description: 'Previous flagship — solid all-rounder' },
+  { id: 'glm-4.6', name: 'GLM-4.6', description: 'Coding & agentic specialist' },
+  { id: 'glm-4.5v', name: 'GLM-4.5V', description: 'Vision model — image understanding' },
+  { id: 'glm-4-plus', name: 'GLM-4-Plus', description: 'Balanced quality and speed' },
+  { id: 'glm-4-flash', name: 'GLM-4-Flash', description: 'Fast responses, lighter model' },
 ];
 
 const MODEL_ICONS: Record<string, typeof Sparkles> = {
-  default: Sparkles,
-  vision: Sparkles,
-  fast: Zap,
-  smart: Brain,
+  'glm-5.3': Star,
+  'glm-5.3-flash': Zap,
+  'glm-4.7': Sparkles,
+  'glm-4.6': Brain,
+  'glm-4.5v': Eye,
+  'glm-4-plus': Sparkles,
+  'glm-4-flash': Zap,
 };
 
 export default function ModelSelector() {

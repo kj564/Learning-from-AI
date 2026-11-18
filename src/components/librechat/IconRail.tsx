@@ -27,6 +27,7 @@ import {
   SlidersHorizontal,
   BarChart3,
   BookOpen,
+  Settings as SettingsIcon,
 } from 'lucide-react';
 import { useStore } from '@/lib/store';
 import ThemeToggle from './ThemeToggle';
@@ -36,6 +37,7 @@ export type PanelId = 'conversations' | 'projects' | 'prompts' | 'bookmarks' | '
 interface IconRailProps {
   activePanel: PanelId;
   onPanelChange: (p: PanelId) => void;
+  onOpenSettings?: () => void;
 }
 
 interface RailButtonProps {
@@ -63,7 +65,7 @@ function RailButton({ icon: Icon, label, onClick, active }: RailButtonProps) {
   );
 }
 
-export default function IconRail({ activePanel, onPanelChange }: IconRailProps) {
+export default function IconRail({ activePanel, onPanelChange, onOpenSettings }: IconRailProps) {
   const toggleSidebar = useStore((s) => s.toggleSidebar);
   const newConversation = useStore((s) => s.newConversation);
   const sidebarExpanded = useStore((s) => s.sidebarExpanded);
@@ -140,9 +142,17 @@ export default function IconRail({ activePanel, onPanelChange }: IconRailProps) 
         />
       </div>
 
-      {/* Bottom: theme + account */}
+      {/* Bottom: theme + settings + account */}
       <div className="flex flex-col items-center gap-1">
         <ThemeToggle compact />
+        <button
+          onClick={() => onOpenSettings?.()}
+          title="Settings"
+          aria-label="Settings"
+          className="text-text-secondary hover:bg-surface-nav-hover hover:text-text-primary flex h-9 w-9 items-center justify-center rounded-lg transition"
+        >
+          <SettingsIcon size={18} />
+        </button>
         <button
           title="Account"
           className="bg-surface-tertiary text-text-primary hover:bg-surface-active flex h-9 w-9 items-center justify-center rounded-full transition"

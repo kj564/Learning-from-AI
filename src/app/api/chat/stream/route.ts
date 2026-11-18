@@ -26,17 +26,20 @@ import { db } from '@/lib/db';
 import { TOOL_DEFINITIONS, toolsToSystemPrompt } from '@/lib/tool-definitions';
 
 export const AI_MODELS = [
-  { id: 'default', name: 'GLM-4.6', description: 'Most capable — coding, agentic, reasoning', glmModel: undefined },
-  { id: 'vision', name: 'GLM-4.5V', description: 'Vision model — image understanding', glmModel: 'glm-4.5v' },
-  { id: 'fast', name: 'GLM-4-Flash', description: 'Fast responses, lighter model', glmModel: 'glm-4-flash' },
-  { id: 'smart', name: 'GLM-4-Plus', description: 'Balanced quality and speed', glmModel: 'glm-4-plus' },
+  { id: 'glm-5.3', name: 'GLM-5.3', description: 'Most advanced — flagship model', glmModel: 'glm-5.3' },
+  { id: 'glm-5.3-flash', name: 'GLM-5.3-Flash', description: 'Fast & free — no daily limit', glmModel: 'glm-5.3-flash' },
+  { id: 'glm-4.7', name: 'GLM-4.7', description: 'Previous flagship — solid all-rounder', glmModel: 'glm-4.7' },
+  { id: 'glm-4.6', name: 'GLM-4.6', description: 'Coding & agentic specialist', glmModel: 'glm-4.6' },
+  { id: 'glm-4.5v', name: 'GLM-4.5V', description: 'Vision model — image understanding', glmModel: 'glm-4.5v' },
+  { id: 'glm-4-plus', name: 'GLM-4-Plus', description: 'Balanced quality and speed', glmModel: 'glm-4-plus' },
+  { id: 'glm-4-flash', name: 'GLM-4-Flash', description: 'Fast responses, lighter model', glmModel: 'glm-4-flash' },
 ] as const;
 
-/** Map our internal model id → SDK model string (undefined = SDK default = GLM-4.6). */
+/** Map our internal model id → SDK model string. */
 function resolveModel(id?: string): string | undefined {
-  if (!id) return undefined;
+  if (!id) return 'glm-5.3';
   const m = AI_MODELS.find((x) => x.id === id);
-  return m?.glmModel ?? undefined; // 'default' → undefined (SDK picks GLM-4.6)
+  return m?.glmModel ?? 'glm-5.3';
 }
 
 // In-memory session history (per conversationId) — used to drive the agentic tool loop.

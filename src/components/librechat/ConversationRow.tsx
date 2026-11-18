@@ -1,17 +1,16 @@
 'use client';
 
 /**
- * Single conversation row — LibreChat Convo.tsx inspired.
+ * Single conversation row — chat.z.ai style.
  *
- *   - h-12 mobile, md:h-9 desktop
- *   - Active: bg-surface-nav-selected + accent vertical bar on start edge
- *   - Hover: bg-surface-nav-hover
- *   - Title: truncate with mask fade; double-click to rename
- *   - Right action: ellipsis menu (Pin/Unpin, Rename, Delete)
+ *   - Active: bg-surface-nav-selected + accent vertical bar
+ *   - Hover: bg-surface-nav-hover + reveal action buttons (Pin, Archive, Rename, Delete)
+ *   - Double-click title to rename inline
+ *   - Right-click for full menu (Move to workspace, etc.)
  */
 
 import { useState, useRef, useEffect } from 'react';
-import { Ellipsis, Pin, Pen, Trash2, X } from 'lucide-react';
+import { Ellipsis, Pin, Pen, Trash2, X, Archive, ArchiveRestore, FolderInput } from 'lucide-react';
 import type { Conversation } from '@/lib/store';
 
 interface ConversationRowProps {
@@ -20,14 +19,14 @@ interface ConversationRowProps {
   onSelect: () => void;
   onDelete: () => void;
   onRename: (newTitle: string) => void;
+  onArchive?: () => void;
+  onUnarchive?: () => void;
+  isArchived?: boolean;
+  onMoveToWorkspace?: () => void;
 }
 
 export default function ConversationRow({
-  conversation,
-  active,
-  onSelect,
-  onDelete,
-  onRename,
+  conversation, active, onSelect, onDelete, onRename, onArchive, onUnarchive, isArchived, onMoveToWorkspace,
 }: ConversationRowProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [renaming, setRenaming] = useState(false);
@@ -51,6 +50,11 @@ export default function ConversationRow({
     }
   }, [renaming]);
 
+  // Keep draft in sync with conversation.title when not actively renaming
+  useEffect(() => {
+    if (!renaming) setDraft(conversation.title);
+  }, [conversation.title, renaming]);
+
   const commitRename = () => {
     const t = draft.trim();
     if (t) onRename(t);
@@ -61,7 +65,7 @@ export default function ConversationRow({
     <div
       className={`group relative flex h-12 items-center rounded-lg outline-none transition md:h-9 ${
         active ? 'bg-surface-nav-selected nav-active-bar' : 'hover:bg-surface-nav-hover'
-      }`}
+      } ${isArchived ? 'opacity-60' : ''}`}
       onClick={onSelect}
       onDoubleClick={() => {
         setRenaming(true);
@@ -92,9 +96,7 @@ export default function ConversationRow({
       {!renaming && (
         <div
           className={`me-1 flex shrink-0 items-center transition ${
-            active || menuOpen
-              ? 'opacity-100'
-              : 'opacity-0 group-hover:opacity-100'
+            active || menuOpen ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
           }`}
           onClick={(e) => e.stopPropagation()}
         >
@@ -108,21 +110,42 @@ export default function ConversationRow({
             </button>
 
             {menuOpen && (
-              <div className="bg-surface-popover border-border-light text-text-primary absolute end-0 top-full z-50 mt-1 w-44 overflow-hidden rounded-lg border shadow-xl">
+              <div className="bg-surface-popover border-border-light text-text-primary absolute end-0 top-full z-50 mt-1 w-48 overflow-hidden rounded-lg border shadow-xl">
                 <button
-                  onClick={() => {
-                    setRenaming(true);
-                    setMenuOpen(false);
-                  }}
+                  onClick={() => { setRenaming(true); setMenuOpen(false); }}
                   className="hover:bg-surface-hover flex w-full items-center gap-2 px-3 py-2 text-start text-sm"
                 >
                   <Pen size={14} /> Rename
                 </button>
+                {onMoveToWorkspace && (
+                  <button
+                    onClick={() => { onMoveToWorkspace(); setMenuOpen(false); }}
+                    className="hover:bg-surface-hover flex w-full items-center gap-2 px-3 py-2 text-start text-sm"
+                  >
+                    <FolderInput size={14} /> Move to workspace
+                  </button>
+                )}
+                {isArchived ? (
+                  onUnarchive && (
+                    <button
+                      onClick={() => { onUnarchive(); setMenuOpen(false); }}
+                      className="hover:bg-surface-hover flex w-full items-center gap-2 px-3 py-2 text-start text-sm"
+                    >
+                      <ArchiveRestore size={14} /> Unarchive
+                    </button>
+                  )
+                ) : (
+                  onArchive && (
+                    <button
+                      onClick={() => { onArchive(); setMenuOpen(false); }}
+                      className="hover:bg-surface-hover flex w-full items-center gap-2 px-3 py-2 text-start text-sm"
+                    >
+                      <Archive size={14} /> Archive
+                    </button>
+                  )
+                )}
                 <button
-                  onClick={() => {
-                    onDelete();
-                    setMenuOpen(false);
-                  }}
+                  onClick={() => { onDelete(); setMenuOpen(false); }}
                   className="text-status-error hover:bg-surface-hover flex w-full items-center gap-2 px-3 py-2 text-start text-sm"
                 >
                   <Trash2 size={14} /> Delete
@@ -133,27 +156,5 @@ export default function ConversationRow({
         </div>
       )}
     </div>
-  );
-}
-
-/** Pinned section row (for the future) — kept simple for now. */
-export function PinnedRow({ label }: { label: string }) {
-  return (
-    <div className="text-text-tertiary flex h-9 items-center gap-2 px-3 text-xs">
-      <Pin size={12} /> {label}
-    </div>
-  );
-}
-
-/** Optional close button (mobile drawer). */
-export function CloseDrawerButton({ onClick }: { onClick: () => void }) {
-  return (
-    <button
-      onClick={onClick}
-      aria-label="Close drawer"
-      className="text-text-secondary hover:bg-surface-nav-hover hover:text-text-primary flex h-9 w-9 items-center justify-center rounded-lg"
-    >
-      <X size={18} />
-    </button>
   );
 }
