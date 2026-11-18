@@ -73,6 +73,18 @@ export interface WebSearchSource {
   favicon?: string;
 }
 
+/** A conversation as the server returns it from GET /api/conversations. */
+export interface ServerConversation {
+  id: string;
+  title: string;
+  model: string;
+  assistantId: string | null;
+  projectId: string | null;
+  createdAt: number;
+  updatedAt: number;
+  messageCount: number;
+}
+
 export interface Assistant {
   id: string;
   name: string;
@@ -161,6 +173,10 @@ interface WorkspaceState {
   setProjects: (projects: Project[]) => void;
   setActiveProject: (p: Project | null) => void;
 
+  // Server-side conversations (loaded from /api/conversations, NOT localStorage)
+  serverConversations: ServerConversation[];
+  setServerConversations: (list: ServerConversation[]) => void;
+
   setAssistants: (a: Assistant[]) => void;
   setActiveAssistant: (id: string | null) => void;
 
@@ -196,6 +212,7 @@ export const useStore = create<WorkspaceState>()(
       drawerOpen: false,
       projects: [],
       activeProject: null,
+      serverConversations: [],
       assistants: [],
       activeAssistantId: null,
       knowledgeDocs: [],
@@ -316,6 +333,8 @@ export const useStore = create<WorkspaceState>()(
 
       setProjects: (projects) => set({ projects }),
       setActiveProject: (p) => set({ activeProject: p }),
+
+      setServerConversations: (list) => set({ serverConversations: list }),
 
       setAssistants: (assistants) => set({ assistants }),
       setActiveAssistant: (id) => set({ activeAssistantId: id }),

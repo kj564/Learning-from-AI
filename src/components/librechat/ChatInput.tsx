@@ -11,21 +11,23 @@
  *   - Enter to send (Shift+Enter for newline)
  */
 
-import { useRef, useEffect, useCallback } from 'react';
+import { useRef, useEffect, useCallback, useState } from 'react';
 import { Send, Square } from 'lucide-react';
 import { useStore } from '@/lib/store';
 import ComposerAttachmentsBar from './ComposerAttachmentsBar';
 import PlusMenu from './PlusMenu';
 import WebSearchToggle from './WebSearchToggle';
 import VoiceInputButton from './VoiceInputButton';
+import SlashCommands from './SlashCommands';
 
 interface ChatInputProps {
   onSend: (text: string) => void;
   onStop: () => void;
   onGenerateImage?: () => void;
+  onSlashCommand?: (cmd: string, args: string) => void;
 }
 
-export default function ChatInput({ onSend, onStop, onGenerateImage }: ChatInputProps) {
+export default function ChatInput({ onSend, onStop, onGenerateImage, onSlashCommand }: ChatInputProps) {
   const text = useStore((s) => s.composerText);
   const setText = useStore((s) => s.setComposerText);
   const isGenerating = useStore((s) => s.isGenerating);
@@ -33,6 +35,7 @@ export default function ChatInput({ onSend, onStop, onGenerateImage }: ChatInput
   const activeConversationId = useStore((s) => s.activeConversationId);
   const addAttachment = useStore((s) => s.addAttachment);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const [slashOpen, setSlashOpen] = useState(false);
 
   // Ensure there's an active conversation when user starts typing
   useEffect(() => {
@@ -53,15 +56,46 @@ export default function ChatInput({ onSend, onStop, onGenerateImage }: ChatInput
     el.style.height = Math.min(el.scrollHeight, maxPx) + 'px';
   }, [text]);
 
+  // Slash command detection: open popover when text starts with "/"
+  useEffect(() => {
+    const m = text.match(/^\/(\w*)\s?(.*)$/);
+    if (m) {
+      setSlashOpen(true);
+    } else {
+      setSlashOpen(false);
+    }
+  }, [text]);
+
+  const slashQuery = (() => {
+    const m = text.match(/^\/(\w*)/);
+    return m ? m[1] : '';
+  })();
+
   const handleSend = useCallback(() => {
     const t = text.trim();
     if (!t || isGenerating) return;
+    // If it's a slash command, route it to the handler instead of sending.
+    const m = t.match(/^\/(\w+)\s?(.*)$/);
+    if (m && onSlashCommand) {
+      onSlashCommand(m[1], m[2] || '');
+      setText('');
+      return;
+    }
     onSend(t);
     setText('');
     requestAnimationFrame(() => {
       if (textareaRef.current) textareaRef.current.style.height = 'auto';
     });
-  }, [text, isGenerating, onSend, setText]);
+  }, [text, isGenerating, onSend, setText, onSlashCommand]);
+
+  const handleSlashPick = (cmd: string) => {
+    // Insert the full command text so user can see what they picked, then send immediately.
+    const fullCmd = `/${cmd}`;
+    setText(fullCmd + ' ');
+    setSlashOpen(false);
+    // Focus back to textarea for user to type args
+    requestAnimationFrame(() => textareaRef.current?.focus());
+  };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
@@ -97,6 +131,13 @@ export default function ChatInput({ onSend, onStop, onGenerateImage }: ChatInput
   return (
     <div className="mx-auto flex w-full flex-row gap-3 px-2 sm:px-2">
       <div className="relative flex w-full min-w-0 flex-1 flex-col">
+        {slashOpen && (
+          <SlashCommands
+            query={slashQuery}
+            onPick={handleSlashPick}
+            onClose={() => setSlashOpen(false)}
+          />
+        )}
         <div
           className="bg-surface-composer border-border-light composer-shadow-blurred focus-within:composer-shadow-focused flex w-full flex-col overflow-hidden rounded-2xl border sm:rounded-2xl"
         >

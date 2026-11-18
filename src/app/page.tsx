@@ -31,7 +31,6 @@ import ImageGenDialog from '@/components/librechat/ImageGenDialog';
 import ImageLightbox from '@/components/librechat/ImageLightbox';
 import CommandPalette from '@/components/librechat/CommandPalette';
 import KeyboardShortcutsHelp from '@/components/librechat/KeyboardShortcutsHelp';
-import ThoughtCanvas from '@/components/librechat/ThoughtCanvas';
 import type { GeneratedImageRef } from '@/lib/store';
 
 const genId = (prefix: string) => `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
@@ -81,7 +80,6 @@ export default function Page() {
   const [activePanel, setActivePanel] = useState<PanelId>('conversations');
   const [imageDialogOpen, setImageDialogOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
-  const [canvasOpen, setCanvasOpen] = useState(false);
 
   // Layout state
   const isMobile = useStore((s) => s.isMobile);
@@ -419,6 +417,53 @@ export default function Page() {
     }
   }, [activeConversationId, messagesByConversation, updateMessage, setIsGenerating]);
 
+  // === Slash commands handler (/new, /clear, /model, /image, /web, /help) ===
+  const handleSlashCommand = useCallback((cmd: string, args: string) => {
+    switch (cmd) {
+      case 'new':
+        newConversation();
+        toast.success('New chat started');
+        break;
+      case 'clear': {
+        if (!activeConversationId) return;
+        const msgs = messagesByConversation[activeConversationId] || [];
+        // Remove all messages from current conversation
+        useStore.setState((s) => {
+          const { [activeConversationId]: _m, ...rest } = s.messagesByConversation;
+          return { messagesByConversation: { ...rest, [activeConversationId]: [] } };
+        });
+        toast.success('Conversation cleared');
+        break;
+      }
+      case 'model': {
+        const m = (args || '').trim().toLowerCase();
+        const map: Record<string, 'default' | 'fast' | 'smart'> = {
+          opus: 'default', sonnet: 'smart', haiku: 'fast',
+          default: 'default', fast: 'fast', smart: 'smart',
+        };
+        if (map[m]) {
+          useStore.getState().setSelectedModel(map[m]);
+          toast.success(`Model: ${args.trim()}`);
+        } else {
+          toast.error('Unknown model. Try: /model opus | sonnet | haiku');
+        }
+        break;
+      }
+      case 'image':
+        setImageDialogOpen(true);
+        break;
+      case 'web':
+        useStore.getState().toggleWebSearch();
+        toast.success(useStore.getState().webSearchEnabled ? 'Web search ON' : 'Web search OFF');
+        break;
+      case 'help':
+        setShortcutsOpen(true);
+        break;
+      default:
+        toast.error(`Unknown command: /${cmd}`);
+    }
+  }, [activeConversationId, newConversation, messagesByConversation]);
+
   // === Image generation (manual flow from ImageGenDialog) ===
   const handleImageGenerated = useCallback(
     (image: GeneratedImage) => {
@@ -443,7 +488,6 @@ export default function Page() {
     [activeConversationId, addMessage]
   );
 
-  // === Image regeneration (from GeneratedImageCard) ===
   const handleRegenerateImage = useCallback(
     async (img: GeneratedImageRef) => {
       toast.loading('Regenerating image…', { id: 'img-regen' });
@@ -522,10 +566,15 @@ export default function Page() {
         className="relative isolate flex h-full min-w-0 flex-1 flex-col overflow-hidden"
         inert={showDrawer ? '' : undefined}
       >
-        <ChatHeader onOpenCanvas={() => setCanvasOpen(true)} />
+        <ChatHeader />
         <MessagesView onRegenerate={handleRegenerate} onRegenerateImage={handleRegenerateImage} />
         <div className="relative z-30 shrink-0 pb-3 pt-1">
-          <ChatInput onSend={handleSend} onStop={handleStop} onGenerateImage={() => setImageDialogOpen(true)} />
+          <ChatInput
+            onSend={handleSend}
+            onStop={handleStop}
+            onGenerateImage={() => setImageDialogOpen(true)}
+            onSlashCommand={handleSlashCommand}
+          />
         </div>
       </div>
 
@@ -550,9 +599,6 @@ export default function Page() {
 
       {/* Keyboard shortcuts help (⌘/) */}
       <KeyboardShortcutsHelp open={shortcutsOpen} onOpenChange={setShortcutsOpen} />
-
-      {/* Thought Canvas — spatial alternative to linear chat */}
-      {canvasOpen && <ThoughtCanvas onClose={() => setCanvasOpen(false)} />}
     </div>
   );
 }

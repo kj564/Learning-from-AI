@@ -81,7 +81,9 @@ function convoToDTO(c: {
     createdAt: c.createdAt.getTime(),
     updatedAt: c.updatedAt.getTime(),
   };
-  if (Array.isArray(c.messages)) {
+  // Only attach messages if they're full message objects (have createdAt).
+  // The list endpoint selects only { id: true }, so we skip mapping there.
+  if (Array.isArray(c.messages) && c.messages.length > 0 && (c.messages[0] as any)?.createdAt) {
     dto.messages = (c.messages as any[]).map(msgToDTO);
     dto.messageCount = dto.messages.length;
   }

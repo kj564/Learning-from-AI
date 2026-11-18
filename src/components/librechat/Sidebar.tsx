@@ -91,12 +91,42 @@ function SectionHeader({ label, open, onToggle, action }: { label: string; open:
 }
 
 function ConversationsPanel({ query }: { query: string }) {
-  const conversations = useStore((s) => s.conversations);
+  const localConversations = useStore((s) => s.conversations);
+  const serverConversations = useStore((s) => s.serverConversations);
   const activeId = useStore((s) => s.activeConversationId);
   const setActive = useStore((s) => s.setActiveConversation);
   const del = useStore((s) => s.deleteConversation);
   const rename = useStore((s) => s.renameConversation);
   const [openChats, setOpenChats] = useState(true);
+
+  // Merge local (in-progress) + server (persisted) conversations, dedup by id, sort by updatedAt
+  const conversations = useMemo(() => {
+    const map = new Map<string, typeof localConversations[number]>();
+    for (const c of localConversations) {
+      map.set(c.id, { ...c, updatedAt: c.updatedAt });
+    }
+    for (const sc of serverConversations) {
+      if (!map.has(sc.id)) {
+        // Add server convo as a local-shaped conversation (no messages yet — loaded on click)
+        map.set(sc.id, {
+          id: sc.id,
+          title: sc.title,
+          createdAt: sc.createdAt,
+          updatedAt: sc.updatedAt,
+          projectId: sc.projectId,
+          model: sc.model as any,
+          assistantId: sc.assistantId,
+        });
+      } else {
+        // Update existing local with server metadata (title might have changed)
+        const existing = map.get(sc.id)!;
+        if (existing.title === 'New Chat' && sc.title !== 'New Chat') {
+          map.set(sc.id, { ...existing, title: sc.title });
+        }
+      }
+    }
+    return Array.from(map.values()).sort((a, b) => b.updatedAt - a.updatedAt);
+  }, [localConversations, serverConversations]);
 
   const filtered = useMemo(() => {
     if (!query.trim()) return conversations;
@@ -123,6 +153,33 @@ function ConversationsPanel({ query }: { query: string }) {
     );
   }
 
+  // Lazy-load messages when a server conversation is clicked (if not already loaded).
+  const handleSelect = async (c: typeof conversations[number]) => {
+    setActive(c.id);
+    // If this conversation has no local messages yet, fetch from server.
+    const existing = useStore.getState().messagesByConversation[c.id];
+    if (!existing || existing.length === 0) {
+      try {
+        const { getConversation } = await import('@/lib/api');
+        const detail = await getConversation(c.id);
+        if (detail?.messages && detail.messages.length > 0) {
+          useStore.setState((s) => ({
+            messagesByConversation: {
+              ...s.messagesByConversation,
+              [c.id]: detail.messages.map((m) => ({
+                id: m.id,
+                role: m.role,
+                content: m.content,
+                createdAt: m.createdAt,
+                toolExecutions: m.toolExecutions,
+              })) as any,
+            },
+          }));
+        }
+      } catch { /* ignore — empty chat is fine */ }
+    }
+  };
+
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
       <SectionHeader label="Chats" open={openChats} onToggle={() => setOpenChats((v) => !v)} />
@@ -136,7 +193,7 @@ function ConversationsPanel({ query }: { query: string }) {
                   key={c.id}
                   conversation={c}
                   active={c.id === activeId}
-                  onSelect={() => setActive(c.id)}
+                  onSelect={() => handleSelect(c)}
                   onDelete={() => del(c.id)}
                   onRename={(t) => rename(c.id, t)}
                 />
@@ -168,7 +225,7 @@ function ProjectsPanel({ onOpenProject }: { onOpenProject: (p: Project) => void 
   };
 
   const handleDelete = async (id: string) => {
-    if (!confirm('Delete this project and all its documents?')) return;
+    if (!confirm('Delete this workspace and all its documents?')) return;
     const ok = await deleteProject(id);
     if (ok) setProjects(projects.filter((p) => p.id !== id));
   };
@@ -182,7 +239,7 @@ function ProjectsPanel({ onOpenProject }: { onOpenProject: (p: Project) => void 
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
       <div className="flex items-center justify-between px-3 py-2">
         <div className="text-text-primary flex items-center gap-2 text-sm font-semibold">
-          <FolderOpen size={16} /> Projects
+          <FolderOpen size={16} /> Workspaces
         </div>
       </div>
       <div className="px-3 pb-2">
@@ -191,7 +248,7 @@ function ProjectsPanel({ onOpenProject }: { onOpenProject: (p: Project) => void 
             value={name}
             onChange={(e) => setName(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && handleCreate()}
-            placeholder="New project name"
+            placeholder="New workspace name"
             className="bg-surface-search border-border-light text-text-primary placeholder:text-text-tertiary w-full rounded-md border px-2.5 py-1.5 text-sm outline-none"
           />
           <button
@@ -206,7 +263,7 @@ function ProjectsPanel({ onOpenProject }: { onOpenProject: (p: Project) => void 
       <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
         {projects.length === 0 && (
           <div className="text-text-tertiary px-3 py-8 text-center text-sm">
-            No projects yet. Create one above.
+            No workspaces yet. Create one above.
           </div>
         )}
         {projects.map((p) => (
@@ -252,6 +309,7 @@ export default function Sidebar({ activePanel, onPanelChange, isDrawer, onCloseD
   const projects = useStore((s) => s.projects);
   const setActiveProject = useStore((s) => s.setActiveProject);
   const setShowDocumentsPanel = useStore((s) => s.setShowDocumentsPanel);
+  const setServerConversations = useStore((s) => s.setServerConversations);
 
   // Auto-fetch projects on mount
   useEffect(() => {
@@ -272,6 +330,19 @@ export default function Sidebar({ activePanel, onPanelChange, isDrawer, onCloseD
       })
     );
   }, []);
+
+  // Auto-fetch server-side conversations on mount (replaces localStorage-only list).
+  // These are the persisted conversations from SQLite — survives across
+  // browsers and devices (when we add auth).
+  useEffect(() => {
+    let cancelled = false;
+    import('@/lib/api').then(({ listConversations }) =>
+      listConversations().then((list) => {
+        if (!cancelled && list.length > 0) setServerConversations(list);
+      })
+    );
+    return () => { cancelled = true; };
+  }, [setServerConversations]);
 
   const openProjectFromSidebar = (p: Project) => {
     setActiveProject(p);
@@ -305,16 +376,16 @@ export default function Sidebar({ activePanel, onPanelChange, isDrawer, onCloseD
       {activePanel === 'conversations' && (
         <>
           <SearchBar value={query} onChange={setQuery} />
-          {/* Inline projects shortcut */}
+          {/* Inline workspaces shortcut */}
           <div className="px-2">
             <SectionHeader
-              label="Projects"
+              label="Workspaces"
               open={openProjects}
               onToggle={() => setOpenProjects((v) => !v)}
               action={
                 <button
                   onClick={() => onPanelChange('projects')}
-                  title="Manage projects"
+                  title="Manage workspaces"
                   className="text-text-tertiary hover:bg-surface-nav-hover hover:text-text-primary flex h-7 w-7 items-center justify-center rounded-md"
                 >
                   <FolderPlus size={14} />
@@ -328,7 +399,7 @@ export default function Sidebar({ activePanel, onPanelChange, isDrawer, onCloseD
                     onClick={() => onPanelChange('projects')}
                     className="text-text-tertiary hover:text-text-primary flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-start text-xs"
                   >
-                    <Plus size={12} /> Create a project
+                    <Plus size={12} /> Create a workspace
                   </button>
                 ) : (
                   projects.slice(0, 4).map((p) => (

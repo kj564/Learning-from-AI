@@ -104,7 +104,7 @@ export default function IconRail({ activePanel, onPanelChange }: IconRailProps) 
         />
         <RailButton
           icon={FolderOpen}
-          label="Projects"
+          label="Workspaces"
           active={activePanel === 'projects'}
           onClick={() => onPanelChange('projects')}
         />
