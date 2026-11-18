@@ -213,6 +213,7 @@ export default function Page() {
           assistant: activeAssistant
             ? { id: activeAssistant.id, name: activeAssistant.name, systemPrompt: activeAssistant.systemPrompt }
             : null,
+          think: useStore.getState().thinkEnabled,
         },
         {
           onTextDelta: (text) => {

@@ -17,6 +17,7 @@ import { useStore } from '@/lib/store';
 import ComposerAttachmentsBar from './ComposerAttachmentsBar';
 import PlusMenu from './PlusMenu';
 import WebSearchToggle from './WebSearchToggle';
+import ThinkToggle from './ThinkToggle';
 import VoiceInputButton from './VoiceInputButton';
 import SlashCommands from './SlashCommands';
 
@@ -158,6 +159,7 @@ export default function ChatInput({ onSend, onStop, onGenerateImage, onSlashComm
           <div className="flex items-center gap-1.5 px-2 pb-2">
             <PlusMenu onGenerateImage={onGenerateImage} />
             <WebSearchToggle />
+            <ThinkToggle />
             <div className="flex min-w-0 flex-1 items-center" />
             <VoiceInputButton />
             {isGenerating ? (

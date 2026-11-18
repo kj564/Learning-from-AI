@@ -26,10 +26,18 @@ import { db } from '@/lib/db';
 import { TOOL_DEFINITIONS, toolsToSystemPrompt } from '@/lib/tool-definitions';
 
 export const AI_MODELS = [
-  { id: 'default', name: 'Claude Opus 5.5', description: 'Most powerful model for complex challenges' },
-  { id: 'fast', name: 'Claude Haiku', description: 'Fast responses, lighter model' },
-  { id: 'smart', name: 'Claude Sonnet 5', description: 'Balanced quality and speed' },
+  { id: 'default', name: 'GLM-4.6', description: 'Most capable — coding, agentic, reasoning', glmModel: undefined },
+  { id: 'vision', name: 'GLM-4.5V', description: 'Vision model — image understanding', glmModel: 'glm-4.5v' },
+  { id: 'fast', name: 'GLM-4-Flash', description: 'Fast responses, lighter model', glmModel: 'glm-4-flash' },
+  { id: 'smart', name: 'GLM-4-Plus', description: 'Balanced quality and speed', glmModel: 'glm-4-plus' },
 ] as const;
+
+/** Map our internal model id → SDK model string (undefined = SDK default = GLM-4.6). */
+function resolveModel(id?: string): string | undefined {
+  if (!id) return undefined;
+  const m = AI_MODELS.find((x) => x.id === id);
+  return m?.glmModel ?? undefined; // 'default' → undefined (SDK picks GLM-4.6)
+}
 
 // In-memory session history (per conversationId) — used to drive the agentic tool loop.
 // Messages are ALSO persisted to SQLite for cross-session continuity.
@@ -66,20 +74,20 @@ function sweepExpired() {
   }
 }
 
-const BASE_SYSTEM_PROMPT = `# claude_behavior
+const BASE_SYSTEM_PROMPT = `# glm_behavior
 
 ## product_information
 
-The currently selected version of Claude is Claude Opus 5.5. Claude Opus 5.5 is a powerful model for complex challenges.
+You are GLM-4.6, Z.ai's most capable model for coding, agentic tasks, and reasoning. You are running on chat.z.ai.
 
-## tone_and_formating
+## tone_and_formatting
 
-Claude uses a warm tone. Claude avoids over-formatting with bold emphasis, headers, lists, and bullet points, using the minimum formatting needed for clarity. In typical conversation Claude keeps a natural tone and responds in prose rather than lists unless asked; casual responses can be short.
+GLM uses a warm tone, treating people with kindness. GLM avoids over-formatting with bold emphasis, headers, lists, and bullet points, using the minimum formatting needed for clarity. In typical conversation GLM keeps a natural tone and responds in prose rather than lists unless asked; casual responses can be short.
 
 ## behavioral_guardrails
 
-Claude doesn't help with creating malware, planning cyberattacks, or content that sexualizes minors.
-Claude DOES help with legitimate security research, code generation, creative writing, technical explanations, and building full-stack web applications.
+GLM doesn't help with creating malware, planning cyberattacks, or content that sexualizes minors.
+GLM DOES help with legitimate security research, code generation, creative writing, technical explanations, and building full-stack web applications.
 
 # Tool Use — CRITICAL
 
@@ -217,7 +225,8 @@ async function streamFromLLM(
   messages: { role: string; content: string }[],
   model: string | undefined,
   controller: ReadableStreamDefaultController,
-  abortSignal?: AbortSignal
+  abortSignal?: AbortSignal,
+  think?: boolean
 ): Promise<string> {
   let full = '';
   let buf = ''; // accumulator for partial SSE events split across chunks
@@ -225,8 +234,10 @@ async function streamFromLLM(
     const stream: any = await zai.chat.completions.create({
       messages,
       stream: true,
-      thinking: { type: 'disabled' },
-      ...(model ? { model } : {}),
+      // thinking mode: 'enabled' lets the model reason (visible as part of content
+      // since SDK doesn't expose separate reasoning_content field for these models).
+      thinking: { type: think ? 'enabled' : 'disabled' },
+      ...(resolveModel(model) ? { model: resolveModel(model) } : {}),
       ...(abortSignal ? { signal: abortSignal } : {}),
     });
 
@@ -299,6 +310,7 @@ export async function POST(req: NextRequest) {
     project,
     model,
     assistant,
+    think, // NEW: boolean — when true, SDK enables reasoning mode
   } = body as {
     message: string;
     sessionId?: string;
@@ -306,6 +318,7 @@ export async function POST(req: NextRequest) {
     project?: any;
     model?: string;
     assistant?: { id: string; name: string; systemPrompt: string } | null;
+    think?: boolean;
   };
 
   if (!message || typeof message !== 'string') {
@@ -373,7 +386,7 @@ export async function POST(req: NextRequest) {
         for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
           if (upstreamAbort.signal.aborted) break;
           // Real LLM streaming — emits text-delta events as tokens arrive
-          const raw = await streamFromLLM(zai, history, model, controller, upstreamAbort.signal);
+          const raw = await streamFromLLM(zai, history, model, controller, upstreamAbort.signal, think);
           if (!raw && round === 0) {
             // streaming already emitted an error
             break;

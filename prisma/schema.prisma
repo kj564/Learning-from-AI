@@ -125,3 +125,15 @@ model Asset {
   size      Int      @default(0)
   createdAt DateTime @default(now())
 }
+
+// === Shared conversations (public read-only links) ===
+model SharedConversation {
+  id             String   @id @default(cuid())
+  shareId        String   @unique // short public id in the URL
+  conversationId String
+  title          String
+  messages       String   @default("[]") // JSON snapshot of messages at share time
+  createdAt      DateTime @default(now())
+
+  @@index([shareId])
+}

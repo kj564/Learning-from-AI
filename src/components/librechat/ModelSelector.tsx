@@ -12,19 +12,21 @@ import { useStore } from '@/lib/store';
 import type { AiModel, AiModelId } from '@/lib/api';
 
 const DEFAULT_MODELS: AiModel[] = [
-  { id: 'default', name: 'Claude Opus 5.5', description: 'Most powerful model for complex challenges' },
-  { id: 'fast', name: 'Claude Haiku', description: 'Fast responses, lighter model' },
-  { id: 'smart', name: 'Claude Sonnet 5', description: 'Balanced quality and speed' },
+  { id: 'default', name: 'GLM-4.6', description: 'Most capable — coding, agentic, reasoning' },
+  { id: 'vision', name: 'GLM-4.5V', description: 'Vision model — image understanding' },
+  { id: 'fast', name: 'GLM-4-Flash', description: 'Fast responses, lighter model' },
+  { id: 'smart', name: 'GLM-4-Plus', description: 'Balanced quality and speed' },
 ];
 
-const MODEL_ICONS: Record<AiModelId, typeof Sparkles> = {
+const MODEL_ICONS: Record<string, typeof Sparkles> = {
   default: Sparkles,
+  vision: Sparkles,
   fast: Zap,
   smart: Brain,
 };
 
 export default function ModelSelector() {
-  const selectedModel = useStore((s) => s.selectedModel);
+  const selectedModel = useStore((s) => s.selectedModel) as string;
   const setSelectedModel = useStore((s) => s.setSelectedModel);
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
@@ -40,7 +42,7 @@ export default function ModelSelector() {
   }, [open]);
 
   const current = DEFAULT_MODELS.find((m) => m.id === selectedModel) || DEFAULT_MODELS[0];
-  const CurrentIcon = MODEL_ICONS[current.id];
+  const CurrentIcon = MODEL_ICONS[current.id] || Sparkles;
   const filtered = DEFAULT_MODELS.filter(
     (m) => m.name.toLowerCase().includes(query.toLowerCase()) || m.description.toLowerCase().includes(query.toLowerCase())
   );
@@ -75,7 +77,7 @@ export default function ModelSelector() {
               <div className="text-text-tertiary px-3 py-4 text-center text-sm">No models found</div>
             )}
             {filtered.map((m) => {
-              const Icon = MODEL_ICONS[m.id];
+              const Icon = MODEL_ICONS[m.id] || Sparkles;
               const active = m.id === selectedModel;
               return (
                 <button

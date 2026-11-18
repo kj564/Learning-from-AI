@@ -14,11 +14,12 @@
 import { useStore } from '@/lib/store';
 import {
   SquarePen, BookCopy, Bookmark, PanelRightOpen, PanelRightClose,
-  MoreVertical,
+  MoreVertical, Share2,
 } from 'lucide-react';
 import { useState, useRef, useEffect } from 'react';
 import ModelSelector from './ModelSelector';
 import AssistantsMenu from './AssistantsMenu';
+import { toast } from 'sonner';
 
 export default function ChatHeader() {
   const isMobile = useStore((s) => s.isMobile);
@@ -82,6 +83,35 @@ export default function ChatHeader() {
 
       {/* Right: actions */}
       <div className="pointer-events-auto flex shrink-0 items-center gap-2">
+        {/* Share conversation */}
+        <button
+          onClick={async () => {
+            const convoId = useStore.getState().activeConversationId;
+            if (!convoId) { toast.error('No active conversation to share'); return; }
+            toast.loading('Creating share link…', { id: 'share' });
+            try {
+              const res = await fetch('/api/share', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ action: 'create', conversationId: convoId }),
+              });
+              const data = await res.json();
+              if (data.success && data.url) {
+                await navigator.clipboard.writeText(data.url);
+                toast.success('Share link copied to clipboard', { id: 'share', description: data.url });
+              } else {
+                toast.error('Failed to create share link', { id: 'share' });
+              }
+            } catch (e) {
+              toast.error('Share failed', { id: 'share', description: e instanceof Error ? e.message : String(e) });
+            }
+          }}
+          title="Share conversation (public link)"
+          className="text-text-secondary hover:bg-surface-nav-hover hover:text-text-primary flex h-9 w-9 items-center justify-center rounded-lg transition"
+        >
+          <Share2 size={18} />
+        </button>
+
         {/* Documents panel toggle */}
         <button
           onClick={toggleDocumentsPanel}

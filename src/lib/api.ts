@@ -236,6 +236,7 @@ export function streamChat(
     model?: AiModelId;
     project?: Project;
     assistant?: { id: string; name: string; systemPrompt: string } | null;
+    think?: boolean;
   },
   cb: StreamChatCallbacks
 ): AbortController {
@@ -253,6 +254,7 @@ export function streamChat(
           model: opts.model,
           project: opts.project,
           assistant: opts.assistant,
+          think: opts.think,
         }),
         signal: controller.signal,
       });

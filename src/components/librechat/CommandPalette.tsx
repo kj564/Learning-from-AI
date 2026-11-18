@@ -43,9 +43,10 @@ interface CommandPaletteProps {
 }
 
 const MODELS: { id: AiModelId; name: string; desc: string }[] = [
-  { id: 'default', name: 'Claude Opus 5.5', desc: 'Most powerful' },
-  { id: 'fast', name: 'Claude Haiku', desc: 'Fast' },
-  { id: 'smart', name: 'Claude Sonnet 5', desc: 'Balanced' },
+  { id: 'default', name: 'GLM-4.6', desc: 'Most capable' },
+  { id: 'vision', name: 'GLM-4.5V', desc: 'Vision' },
+  { id: 'fast', name: 'GLM-4-Flash', desc: 'Fast' },
+  { id: 'smart', name: 'GLM-4-Plus', desc: 'Balanced' },
 ];
 
 export default function CommandPalette({ onGenerateImage, onShowShortcuts }: CommandPaletteProps) {

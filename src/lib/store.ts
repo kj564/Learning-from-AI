@@ -143,6 +143,7 @@ interface WorkspaceState {
   // === Composer multimodal state ===
   composerAttachments: Attachment[];
   webSearchEnabled: boolean;
+  thinkEnabled: boolean; // NEW: reasoning mode toggle (chat.z.ai style)
   voiceRecording: { isRecording: boolean; seconds: number } | null;
   readAloud: { messageId: string; audioUrl: string; playing: boolean } | null;
   imageLightbox: { url: string; prompt?: string } | null;
@@ -187,6 +188,7 @@ interface WorkspaceState {
   removeAttachment: (id: string) => void;
   clearAttachments: () => void;
   toggleWebSearch: () => void;
+  toggleThink: () => void;
   setVoiceRecording: (state: { isRecording: boolean; seconds: number } | null) => void;
   setReadAloud: (state: { messageId: string; audioUrl: string; playing: boolean } | null) => void;
   openImageLightbox: (url: string, prompt?: string) => void;
@@ -218,6 +220,7 @@ export const useStore = create<WorkspaceState>()(
       knowledgeDocs: [],
       composerAttachments: [],
       webSearchEnabled: false,
+      thinkEnabled: false,
       voiceRecording: null,
       readAloud: null,
       imageLightbox: null,
@@ -345,6 +348,7 @@ export const useStore = create<WorkspaceState>()(
       removeAttachment: (id) => set((s) => ({ composerAttachments: s.composerAttachments.filter((a) => a.id !== id) })),
       clearAttachments: () => set({ composerAttachments: [] }),
       toggleWebSearch: () => set((s) => ({ webSearchEnabled: !s.webSearchEnabled })),
+      toggleThink: () => set((s) => ({ thinkEnabled: !s.thinkEnabled })),
       setVoiceRecording: (state) => set({ voiceRecording: state }),
       setReadAloud: (state) => set({ readAloud: state }),
       openImageLightbox: (url, prompt) => set({ imageLightbox: { url, prompt } }),
@@ -386,6 +390,7 @@ export const useStore = create<WorkspaceState>()(
           activeProject: s.activeProject,
           activeAssistantId: s.activeAssistantId,
           webSearchEnabled: s.webSearchEnabled,
+          thinkEnabled: s.thinkEnabled,
           messagesByConversation: {},
         };
         // Strip base64 dataUrl from attachments before persisting (they're regenerated
