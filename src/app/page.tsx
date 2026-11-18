@@ -32,6 +32,7 @@ import ImageLightbox from '@/components/librechat/ImageLightbox';
 import CommandPalette from '@/components/librechat/CommandPalette';
 import KeyboardShortcutsHelp from '@/components/librechat/KeyboardShortcutsHelp';
 import SettingsDialog from '@/components/librechat/SettingsDialog';
+import CodeWorkspace from '@/components/librechat/CodeWorkspace';
 import type { GeneratedImageRef } from '@/lib/store';
 
 const genId = (prefix: string) => `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
@@ -90,6 +91,10 @@ export default function Page() {
   const drawerOpen = useStore((s) => s.drawerOpen);
   const setDrawerOpen = useStore((s) => s.setDrawerOpen);
   const showDocumentsPanel = useStore((s) => s.showDocumentsPanel);
+  const showWorkspace = useStore((s) => s.showWorkspace);
+  const workspaceFiles = useStore((s) => s.workspaceFiles);
+  const setShowWorkspace = useStore((s) => s.setShowWorkspace);
+  const addWorkspaceFile = useStore((s) => s.addWorkspaceFile);
   const activeProject = useStore((s) => s.activeProject);
 
   // Composer multimodal state
@@ -236,6 +241,14 @@ export default function Page() {
                 { tool: event.name, args: event.input, success: false },
               ],
             }));
+            // === Capture file_write calls → populate the Code Workspace ===
+            if (event.name === 'file_write') {
+              const filePath = (event.input.path as string) || '';
+              const fileContent = (event.input.content as string) || '';
+              if (filePath) {
+                addWorkspaceFile({ path: filePath, content: fileContent });
+              }
+            }
             // Optimistic placeholder for image_generate / image_edit
             if (event.name === 'image_generate' || event.name === 'image_edit') {
               const prompt = (event.input.prompt as string) || '';
@@ -586,6 +599,11 @@ export default function Page() {
 
       {/* Right-side documents panel */}
       {showDocumentsPanel && activeProject && <DocumentsPanel />}
+
+      {/* Code Workspace — inline IDE (chat.z.ai style) */}
+      {showWorkspace && workspaceFiles.length > 0 && (
+        <CodeWorkspace files={workspaceFiles} onClose={() => setShowWorkspace(false)} />
+      )}
 
       {/* Image generation dialog */}
       <ImageGenDialog
