@@ -89,7 +89,10 @@ export default function VoiceInputButton() {
 
       const text = await asr(b64);
       if (text) {
-        setComposerText((prev) => (prev ? prev + ' ' : '') + text);
+        // setComposerText takes a string (not a function updater) — read current
+        // value from the store directly to append correctly.
+        const current = useStore.getState().composerText;
+        setComposerText((current ? current + ' ' : '') + text);
         toast.success('Transcribed', { description: text.slice(0, 80) + (text.length > 80 ? '…' : '') });
       } else {
         toast.error('Could not transcribe audio');

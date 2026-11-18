@@ -15,13 +15,40 @@ import { NextRequest, NextResponse } from 'next/server';
 import { writeFile, readFile, readdir, mkdir, unlink } from 'fs/promises';
 import { existsSync } from 'fs';
 import path from 'path';
-import { exec } from 'child_process';
+import { exec, execFile } from 'child_process';
 import { promisify } from 'util';
+import { randomUUID } from 'crypto';
 import ZAI from 'z-ai-web-dev-sdk';
 import { TOOL_BY_NAME } from '@/lib/tool-definitions';
 
 const execAsync = promisify(exec);
+const execFileAsync = promisify(execFile);
 const WORKSPACE = '/home/z/my-project';
+
+/** Resolve a relative path against WORKSPACE and reject path traversal / absolute paths. */
+function safePath(relPath: string): string | null {
+  if (!relPath || typeof relPath !== 'string') return null;
+  // Reject absolute paths (which path.join would happily accept as the new root)
+  if (path.isAbsolute(relPath)) return null;
+  const full = path.resolve(WORKSPACE, relPath);
+  // Ensure the resolved path is still inside WORKSPACE
+  if (full !== WORKSPACE && !full.startsWith(WORKSPACE + path.sep)) return null;
+  // Reject any segment that is `..` (defense in depth)
+  if (relPath.split(/[\\/]/).some((seg) => seg === '..')) return null;
+  return full;
+}
+
+/** Validate an npm package name (with optional @version) — reject shell metacharacters. */
+const PKG_RE = /^@?[a-zA-Z0-9][a-zA-Z0-9._/-]*(@[a-zA-Z0-9._^+:-]+)?$/;
+function validPackageNames(pkgs: string[]): boolean {
+  return pkgs.every((p) => typeof p === 'string' && PKG_RE.test(p) && p.length < 200);
+}
+
+/** Validate a project name (kebab-case) for project_create. */
+const NAME_RE = /^[a-z0-9][a-z0-9-]{0,63}$/;
+function validProjectName(name: string): boolean {
+  return typeof name === 'string' && NAME_RE.test(name);
+}
 
 /** Call the knowledge search endpoint internally. */
 async function knowledgeSearch(query: string, topK = 4): Promise<{ query: string; snippets: { source: string; content: string; score: number }[] }> {
@@ -56,7 +83,8 @@ export async function POST(req: NextRequest) {
         const content = args.content as string;
         if (!filePath || content === undefined)
           return NextResponse.json({ error: 'path + content required' }, { status: 400 });
-        const fullPath = path.join(WORKSPACE, filePath);
+        const fullPath = safePath(filePath);
+        if (!fullPath) return NextResponse.json({ error: 'Invalid path (path traversal blocked)' }, { status: 400 });
         const dir = path.dirname(fullPath);
         if (!existsSync(dir)) await mkdir(dir, { recursive: true });
         await writeFile(fullPath, content, 'utf-8');
@@ -66,7 +94,8 @@ export async function POST(req: NextRequest) {
       case 'file_read': {
         const filePath = args.path as string;
         if (!filePath) return NextResponse.json({ error: 'path required' }, { status: 400 });
-        const fullPath = path.join(WORKSPACE, filePath);
+        const fullPath = safePath(filePath);
+        if (!fullPath) return NextResponse.json({ error: 'Invalid path (path traversal blocked)' }, { status: 400 });
         if (!existsSync(fullPath)) return NextResponse.json({ error: 'File not found' }, { status: 404 });
         const content = await readFile(fullPath, 'utf-8');
         return NextResponse.json({ success: true, path: filePath, content });
@@ -74,7 +103,8 @@ export async function POST(req: NextRequest) {
 
       case 'file_list': {
         const dirPath = (args.dir as string) || '.';
-        const fullPath = path.join(WORKSPACE, dirPath);
+        const fullPath = safePath(dirPath);
+        if (!fullPath) return NextResponse.json({ error: 'Invalid path (path traversal blocked)' }, { status: 400 });
         if (!existsSync(fullPath)) return NextResponse.json({ error: 'Directory not found' }, { status: 404 });
         const entries = await readdir(fullPath, { withFileTypes: true });
         const items = entries
@@ -86,7 +116,8 @@ export async function POST(req: NextRequest) {
       case 'file_delete': {
         const filePath = args.path as string;
         if (!filePath) return NextResponse.json({ error: 'path required' }, { status: 400 });
-        const fullPath = path.join(WORKSPACE, filePath);
+        const fullPath = safePath(filePath);
+        if (!fullPath) return NextResponse.json({ error: 'Invalid path (path traversal blocked)' }, { status: 400 });
         if (!existsSync(fullPath)) return NextResponse.json({ error: 'File not found' }, { status: 404 });
         await unlink(fullPath);
         return NextResponse.json({ success: true, deleted: filePath });
@@ -98,16 +129,42 @@ export async function POST(req: NextRequest) {
         const language = (args.language as string) || 'javascript';
         if (!code) return NextResponse.json({ error: 'code required' }, { status: 400 });
 
-        if (language === 'javascript' || language === 'typescript') {
-          const tmpFile = path.join(WORKSPACE, '.tmp-exec.js');
+        // Use a unique temp file per request to avoid concurrent overwrites.
+        const tmpDir = path.join(WORKSPACE, '.tmp-exec');
+        if (!existsSync(tmpDir)) await mkdir(tmpDir, { recursive: true });
+
+        if (language === 'javascript') {
+          const tmpFile = path.join(tmpDir, `${randomUUID()}.js`);
           await writeFile(tmpFile, code, 'utf-8');
           try {
-            const { stdout, stderr } = await execAsync(`node ${tmpFile}`, {
+            const { stdout, stderr } = await execFileAsync('node', [tmpFile], {
               cwd: WORKSPACE,
               timeout: 10000,
               maxBuffer: 1024 * 1024,
             });
-            await unlink(tmpFile);
+            await unlink(tmpFile).catch(() => {});
+            return NextResponse.json({ success: true, stdout, stderr: stderr || undefined });
+          } catch (e) {
+            await unlink(tmpFile).catch(() => {});
+            const err = e as Error & { stdout?: string; stderr?: string };
+            return NextResponse.json(
+              { success: false, error: err.message, stdout: err.stdout, stderr: err.stderr },
+              { status: 500 }
+            );
+          }
+        }
+
+        if (language === 'typescript') {
+          // Use bun (which has built-in TS support) to run TS code.
+          const tmpFile = path.join(tmpDir, `${randomUUID()}.ts`);
+          await writeFile(tmpFile, code, 'utf-8');
+          try {
+            const { stdout, stderr } = await execFileAsync('bun', ['run', tmpFile], {
+              cwd: WORKSPACE,
+              timeout: 10000,
+              maxBuffer: 1024 * 1024,
+            });
+            await unlink(tmpFile).catch(() => {});
             return NextResponse.json({ success: true, stdout, stderr: stderr || undefined });
           } catch (e) {
             await unlink(tmpFile).catch(() => {});
@@ -120,15 +177,15 @@ export async function POST(req: NextRequest) {
         }
 
         if (language === 'python' || language === 'python3') {
-          const tmpFile = path.join(WORKSPACE, '.tmp-exec.py');
+          const tmpFile = path.join(tmpDir, `${randomUUID()}.py`);
           await writeFile(tmpFile, code, 'utf-8');
           try {
-            const { stdout, stderr } = await execAsync(`python3 ${tmpFile}`, {
+            const { stdout, stderr } = await execFileAsync('python3', [tmpFile], {
               cwd: WORKSPACE,
               timeout: 10000,
               maxBuffer: 1024 * 1024,
             });
-            await unlink(tmpFile);
+            await unlink(tmpFile).catch(() => {});
             return NextResponse.json({ success: true, stdout, stderr: stderr || undefined });
           } catch (e) {
             await unlink(tmpFile).catch(() => {});
@@ -138,6 +195,7 @@ export async function POST(req: NextRequest) {
 
         if (language === 'bash' || language === 'sh') {
           try {
+            // shell_run is intentionally shell — commands can use pipes/redirects.
             const { stdout, stderr } = await execAsync(code, {
               cwd: WORKSPACE,
               timeout: 10000,
@@ -176,11 +234,12 @@ export async function POST(req: NextRequest) {
       // === PACKAGE INSTALL ===
       case 'npm_install': {
         const packages = args.packages as string[];
-        if (!packages || !Array.isArray(packages))
-          return NextResponse.json({ error: 'packages array required' }, { status: 400 });
-        const pkgStr = packages.join(' ');
+        if (!packages || !Array.isArray(packages) || !validPackageNames(packages))
+          return NextResponse.json({ error: 'packages array of valid names required' }, { status: 400 });
         try {
-          const { stdout } = await execAsync(`cd ${WORKSPACE} && bun add ${pkgStr}`, {
+          // Use execFile (no shell) to prevent command injection via package names.
+          const { stdout } = await execFileAsync('bun', ['add', ...packages], {
+            cwd: WORKSPACE,
             timeout: 60000,
             maxBuffer: 1024 * 1024,
           });
@@ -310,16 +369,19 @@ export async function POST(req: NextRequest) {
       case 'project_create': {
         const name = args.name as string;
         const type = (args.type as string) || 'nextjs';
-        if (!name) return NextResponse.json({ error: 'name required' }, { status: 400 });
+        if (!name || !validProjectName(name))
+          return NextResponse.json({ error: 'valid name required (kebab-case)' }, { status: 400 });
         const projectPath = path.join(WORKSPACE, name);
         if (existsSync(projectPath))
           return NextResponse.json({ error: 'Project already exists' }, { status: 400 });
 
         if (type === 'nextjs') {
           try {
-            const { stdout } = await execAsync(
-              `cd ${WORKSPACE} && npx create-next-app@latest ${name} --ts --tailwind --app --no-eslint --no-src-dir --use-bun --yes`,
-              { timeout: 120000, maxBuffer: 1024 * 1024 * 2 }
+            // Use execFile (no shell) to prevent command injection via project name.
+            const { stdout } = await execFileAsync(
+              'npx',
+              ['create-next-app@latest', name, '--ts', '--tailwind', '--app', '--no-eslint', '--no-src-dir', '--use-bun', '--yes'],
+              { cwd: WORKSPACE, timeout: 120000, maxBuffer: 1024 * 1024 * 2 }
             );
             return NextResponse.json({ success: true, name, path: name, stdout: stdout.slice(0, 500) });
           } catch {

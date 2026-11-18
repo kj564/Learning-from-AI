@@ -68,6 +68,25 @@ export default function AudioMessageWidget({ audioUrl, messageId, title }: Audio
     }
   }, [isCurrent, playing]);
 
+  // Respond to global play/pause commands from ReadAloudButton
+  useEffect(() => {
+    if (isCurrent && readAloud?.playing && !playing) {
+      // Start playback
+      const audio = audioRef.current;
+      if (audio) {
+        audio.play().catch(() => { /* ignore */ });
+        setPlaying(true);
+      }
+    } else if (isCurrent && !readAloud?.playing && playing) {
+      // Pause playback
+      const audio = audioRef.current;
+      if (audio) {
+        audio.pause();
+        setPlaying(false);
+      }
+    }
+  }, [isCurrent, readAloud?.playing, playing]);
+
   const toggle = () => {
     const audio = audioRef.current;
     if (!audio) return;

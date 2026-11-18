@@ -46,9 +46,11 @@ export default function ChatInput({ onSend, onStop, onGenerateImage }: ChatInput
     const el = textareaRef.current;
     if (!el) return;
     el.style.height = 'auto';
-    const maxHeight = window.innerHeight < 768 ? '40vh' : '55vh';
-    el.style.maxHeight = maxHeight;
-    el.style.height = Math.min(el.scrollHeight, parseInt(maxHeight)) + 'px';
+    // Compute the max height in pixels (was parseInt('40vh') = 40, a bug).
+    const ratio = window.innerHeight < 768 ? 0.4 : 0.55;
+    const maxPx = window.innerHeight * ratio;
+    el.style.maxHeight = `${maxPx}px`;
+    el.style.height = Math.min(el.scrollHeight, maxPx) + 'px';
   }, [text]);
 
   const handleSend = useCallback(() => {

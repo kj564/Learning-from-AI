@@ -116,15 +116,9 @@ export default function IconRail({ activePanel, onPanelChange }: IconRailProps) 
         />
         <RailButton
           icon={ScrollText}
-          label="Skills"
+          label="Prompts"
           active={activePanel === 'prompts'}
           onClick={() => onPanelChange('prompts')}
-        />
-        <RailButton
-          icon={NotebookPen}
-          label="Prompts"
-          active={activePanel === 'bookmarks'}
-          onClick={() => onPanelChange('bookmarks')}
         />
         <RailButton
           icon={Bookmark}

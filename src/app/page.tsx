@@ -207,6 +207,7 @@ export default function Page() {
         {
           message: augmentedText,
           sessionId,
+          conversationId: convoId,
           model: selectedModel,
           project: activeProject || undefined,
           assistant: activeAssistant

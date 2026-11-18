@@ -87,9 +87,49 @@ function buildSystemPrompt(project: any, assistant: any, tools = TOOL_DEFINITION
   return p;
 }
 
-/** Extract a tool call JSON block from the model's response. */
+/** Find the first balanced `{...}` substring that parses as a tool call. */
+function findBalancedJson(text: string): { start: number; end: number; json: string } | null {
+  let i = 0;
+  while (i < text.length) {
+    if (text[i] !== '{') { i++; continue; }
+    // Walk forward matching braces, respecting strings + escapes
+    let depth = 0;
+    let inStr = false;
+    let escape = false;
+    let j = i;
+    for (; j < text.length; j++) {
+      const c = text[j];
+      if (inStr) {
+        if (escape) escape = false;
+        else if (c === '\\') escape = true;
+        else if (c === '"') inStr = false;
+      } else {
+        if (c === '"') inStr = true;
+        else if (c === '{') depth++;
+        else if (c === '}') {
+          depth--;
+          if (depth === 0) {
+            const json = text.slice(i, j + 1);
+            try {
+              const parsed = JSON.parse(json);
+              if (parsed && typeof parsed === 'object' && typeof parsed.tool === 'string') {
+                return { start: i, end: j + 1, json };
+              }
+            } catch { /* not valid JSON, keep scanning */ }
+            break; // move to next `{`
+          }
+        }
+      }
+    }
+    i++;
+  }
+  return null;
+}
+
+/** Extract a tool call JSON block from the model's response (handles nested objects). */
 function extractToolCall(text: string): { tool: string; args: Record<string, unknown> } | null {
   try {
+    // Strict: entire response is a JSON object with tool+args
     const trimmed = text.trim();
     if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
       const parsed = JSON.parse(trimmed);
@@ -97,9 +137,10 @@ function extractToolCall(text: string): { tool: string; args: Record<string, unk
         return { tool: parsed.tool, args: parsed.args };
       }
     }
-    const m = text.match(/\{[\s\S]*?"tool"[\s\S]*?"args"[\s\S]*?\}/);
-    if (m) {
-      const parsed = JSON.parse(m[0]);
+    // Balanced-brace scan: find first `{...}` that parses as a tool call
+    const found = findBalancedJson(text);
+    if (found) {
+      const parsed = JSON.parse(found.json);
       if (parsed.tool && typeof parsed.tool === 'string') {
         return { tool: parsed.tool, args: parsed.args || {} };
       }
@@ -316,10 +357,10 @@ export async function POST(req: NextRequest) {
             // Entire output was the tool call JSON → no visible prose
             visibleText = '';
           } else {
-            // Tool call embedded mid-text → keep the prose before the JSON block
-            const m = raw.match(/\{[\s\S]*?"tool"[\s\S]*?"args"[\s\S]*?\}/);
-            if (m && m.index !== undefined) {
-              visibleText = raw.slice(0, m.index).trim();
+            // Tool call embedded mid-text → use balanced-brace scan to find it
+            const found = findBalancedJson(raw);
+            if (found) {
+              visibleText = (raw.slice(0, found.start) + raw.slice(found.end)).trim();
             }
           }
           sseEmit(controller, 'text-replace', { text: visibleText });

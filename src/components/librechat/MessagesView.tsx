@@ -85,6 +85,14 @@ export default function MessagesView({ onRegenerate, onRegenerateImage }: { onRe
     }
   }, [messages, isGenerating, atBottom]);
 
+  // Reset atBottom + scroll to bottom when switching conversations
+  useEffect(() => {
+    setAtBottom(true);
+    if (scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }
+  }, [activeConversationId]);
+
   // Track whether user is at bottom
   useEffect(() => {
     const el = scrollRef.current;

@@ -232,6 +232,7 @@ export function streamChat(
   opts: {
     message: string;
     sessionId?: string;
+    conversationId?: string;
     model?: AiModelId;
     project?: Project;
     assistant?: { id: string; name: string; systemPrompt: string } | null;
@@ -248,6 +249,7 @@ export function streamChat(
         body: JSON.stringify({
           message: opts.message,
           sessionId: opts.sessionId,
+          conversationId: opts.conversationId,
           model: opts.model,
           project: opts.project,
           assistant: opts.assistant,
