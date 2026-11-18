@@ -24,16 +24,24 @@ export default function Markdown({ content, streaming }: MarkdownProps) {
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         components={{
+          // react-markdown v10 removed the `inline` prop on `code`. Detect
+          // fenced (block) code by the `className` containing `language-` OR
+          // the text containing a newline. Anything else is inline code.
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           code(props: any) {
-            const { inline, className, children, ...rest } = props;
+            const { className, children, node, ...rest } = props;
             const text = String(children ?? '');
-            // Multi-line code block (fenced) → use CodeBlock
-            if (!inline && text.includes('\n')) {
+            // A fenced code block has either a `language-xxx` className (from
+            // a ```lang fence) OR is wrapped in a <pre> (node.position.start
+            // line differs from end line) OR contains a newline.
+            const isBlock =
+              (typeof className === 'string' && /language-/.test(className)) ||
+              (node?.position && node.position.start.line !== node.position.end.line) ||
+              text.includes('\n');
+            if (isBlock) {
               const langMatch = /language-(\w+)/.exec(className || '');
               return <CodeBlock code={text.replace(/\n$/, '')} language={langMatch?.[1]} />;
             }
-            // Inline code (single line, even if fenced with no newlines)
             return (
               <code className={className} {...rest}>
                 {children}

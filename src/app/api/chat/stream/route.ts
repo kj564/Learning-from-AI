@@ -33,9 +33,38 @@ export const AI_MODELS = [
 
 // In-memory session history (per conversationId) — used to drive the agentic tool loop.
 // Messages are ALSO persisted to SQLite for cross-session continuity.
-const sessions = new Map<string, { role: string; content: string }[]>();
-const MAX_MESSAGES = 100; // was 40 — relaxed
-const MAX_TOOL_ROUNDS = 10; // was 5 — relaxed for complex agentic tasks
+// TTL: entries are evicted 30 min after the last write to bound memory growth.
+interface SessionEntry {
+  history: { role: string; content: string }[];
+  expiresAt: number;
+}
+const sessions = new Map<string, SessionEntry>();
+const SESSION_TTL_MS = 30 * 60 * 1000;
+const MAX_MESSAGES = 100;
+const MAX_TOOL_ROUNDS = 10;
+
+function saveSession(sid: string, history: { role: string; content: string }[]) {
+  sessions.set(sid, { history, expiresAt: Date.now() + SESSION_TTL_MS });
+}
+function getSession(sid: string): { role: string; content: string }[] | null {
+  const e = sessions.get(sid);
+  if (!e) return null;
+  if (e.expiresAt < Date.now()) {
+    sessions.delete(sid);
+    return null;
+  }
+  return e.history;
+}
+// Lazy cleaner — sweep expired entries every ~5 minutes.
+let lastSweep = 0;
+function sweepExpired() {
+  const now = Date.now();
+  if (now - lastSweep < 5 * 60 * 1000) return;
+  lastSweep = now;
+  for (const [k, v] of sessions) {
+    if (v.expiresAt < now) sessions.delete(k);
+  }
+}
 
 const BASE_SYSTEM_PROMPT = `# claude_behavior
 
@@ -187,7 +216,8 @@ async function streamFromLLM(
   zai: any,
   messages: { role: string; content: string }[],
   model: string | undefined,
-  controller: ReadableStreamDefaultController
+  controller: ReadableStreamDefaultController,
+  abortSignal?: AbortSignal
 ): Promise<string> {
   let full = '';
   let buf = ''; // accumulator for partial SSE events split across chunks
@@ -197,10 +227,12 @@ async function streamFromLLM(
       stream: true,
       thinking: { type: 'disabled' },
       ...(model ? { model } : {}),
+      ...(abortSignal ? { signal: abortSignal } : {}),
     });
 
     if (stream && typeof stream[Symbol.asyncIterator] === 'function') {
       for await (const chunk of stream) {
+        if (abortSignal?.aborted) break;
         // Decode chunk bytes to string
         let text: string;
         if (chunk instanceof Uint8Array || ArrayBuffer.isView(chunk)) {
@@ -319,11 +351,17 @@ export async function POST(req: NextRequest) {
   const systemPrompt = buildSystemPrompt(project, assistant);
 
   // Get or create the session's in-memory history
-  let history = sessions.get(sid) || [{ role: 'assistant', content: systemPrompt }];
+  sweepExpired();
+  let history = getSession(sid) || [{ role: 'assistant', content: systemPrompt }];
   history.push({ role: 'user', content: message });
   if (history.length > MAX_MESSAGES) {
     history = [history[0], ...history.slice(-(MAX_MESSAGES - 1))];
   }
+
+  // Abort controller shared with the ReadableStream's cancel() — if the client
+  // disconnects (clicks Stop), we abort the upstream SDK stream so we stop
+  // paying for tokens nobody will read.
+  const upstreamAbort = new AbortController();
 
   const stream = new ReadableStream({
     async start(controller) {
@@ -333,8 +371,9 @@ export async function POST(req: NextRequest) {
 
       try {
         for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
+          if (upstreamAbort.signal.aborted) break;
           // Real LLM streaming — emits text-delta events as tokens arrive
-          const raw = await streamFromLLM(zai, history, model, controller);
+          const raw = await streamFromLLM(zai, history, model, controller, upstreamAbort.signal);
           if (!raw && round === 0) {
             // streaming already emitted an error
             break;
@@ -388,7 +427,8 @@ export async function POST(req: NextRequest) {
           finalText = raw;
         }
 
-        sessions.set(sid, history);
+        sessions.size; // touch for sweep
+        saveSession(sid, history);
 
         // Persist the assistant's response to SQLite (best-effort)
         if (convoId && finalText) {
@@ -434,6 +474,11 @@ export async function POST(req: NextRequest) {
       } finally {
         controller.close();
       }
+    },
+    // Client disconnected (closed tab, clicked Stop) → abort upstream SDK call
+    // so we stop consuming tokens that nobody will read.
+    cancel() {
+      upstreamAbort.abort();
     },
   });
 

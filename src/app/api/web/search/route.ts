@@ -24,7 +24,7 @@ export interface WebSearchResult {
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { query, num = 8, recency_days } = body as {
+    const { query, num, recency_days } = body as {
       query: string;
       num?: number;
       recency_days?: number;
@@ -32,12 +32,14 @@ export async function POST(req: NextRequest) {
     if (!query || typeof query !== 'string') {
       return NextResponse.json({ error: 'query required' }, { status: 400 });
     }
+    // Type-check num (string → NaN with Math.max would silently pass NaN to SDK).
+    const safeNum = typeof num === 'number' && isFinite(num) ? Math.max(1, Math.min(20, Math.floor(num))) : 8;
 
     const zai = await ZAI.create();
     const results = await zai.functions.invoke('web_search', {
       query,
-      num: Math.max(1, Math.min(20, num)),
-      ...(recency_days ? { recency_days } : {}),
+      num: safeNum,
+      ...(recency_days && typeof recency_days === 'number' ? { recency_days } : {}),
     });
 
     return NextResponse.json({

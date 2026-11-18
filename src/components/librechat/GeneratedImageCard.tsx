@@ -29,7 +29,8 @@ export default function GeneratedImageCard({ image, onRegenerate }: GeneratedIma
       a.href = url;
       a.download = `${image.prompt.slice(0, 40).replace(/[^a-z0-9]+/gi, '_') || 'image'}_${image.size}.png`;
       a.click();
-      URL.revokeObjectURL(url);
+      // Defer revoke — some browsers fetch the blob async after click().
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
     } catch {
       // ignore
     }

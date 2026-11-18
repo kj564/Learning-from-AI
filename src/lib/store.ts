@@ -334,19 +334,58 @@ export const useStore = create<WorkspaceState>()(
     }),
     {
       name: 'librechat-workspace-v1',
-      // Persist only what should survive reload — NOT transient flags like isGenerating/drawerOpen
-      partialize: (s) => ({
-        conversations: s.conversations,
-        activeConversationId: s.activeConversationId,
-        messagesByConversation: s.messagesByConversation,
-        sessionByConversation: s.sessionByConversation,
-        selectedModel: s.selectedModel,
-        sidebarExpanded: s.sidebarExpanded,
-        showDocumentsPanel: s.showDocumentsPanel,
-        activeProject: s.activeProject,
-        activeAssistantId: s.activeAssistantId,
-        webSearchEnabled: s.webSearchEnabled,
-      }),
+      version: 2,
+      // Migrate older persisted state to current shape.
+      migrate: (persisted: any, version: number) => {
+        if (!persisted || typeof persisted !== 'object') return persisted;
+        // v1 → v2: strip base64 dataUrl from message attachments (localStorage quota)
+        if (version < 2 && persisted.messagesByConversation) {
+          for (const convoId of Object.keys(persisted.messagesByConversation)) {
+            const msgs = persisted.messagesByConversation[convoId];
+            if (!Array.isArray(msgs)) continue;
+            persisted.messagesByConversation[convoId] = msgs.map((m: any) => {
+              if (m.attachments && Array.isArray(m.attachments)) {
+                m.attachments = m.attachments.map((a: any) => ({ ...a, dataUrl: undefined }));
+              }
+              return m;
+            });
+          }
+        }
+        return persisted;
+      },
+      // Persist only what should survive reload — NOT transient flags like isGenerating/drawerOpen.
+      // Strip base64 dataUrl from attachments before persisting (localStorage quota is 5-10MB;
+      // base64 thumbnails blow it quickly).
+      partialize: (s) => {
+        const trimmed: any = {
+          conversations: s.conversations,
+          activeConversationId: s.activeConversationId,
+          sessionByConversation: s.sessionByConversation,
+          selectedModel: s.selectedModel,
+          sidebarExpanded: s.sidebarExpanded,
+          showDocumentsPanel: s.showDocumentsPanel,
+          activeProject: s.activeProject,
+          activeAssistantId: s.activeAssistantId,
+          webSearchEnabled: s.webSearchEnabled,
+          messagesByConversation: {},
+        };
+        // Strip base64 dataUrl from attachments before persisting (they're regenerated
+        // from the asset URL on reload; keeping them would exhaust localStorage).
+        for (const convoId of Object.keys(s.messagesByConversation)) {
+          const msgs = s.messagesByConversation[convoId];
+          if (!Array.isArray(msgs)) continue;
+          trimmed.messagesByConversation[convoId] = msgs.map((m) => {
+            if (m.attachments && m.attachments.length > 0) {
+              return {
+                ...m,
+                attachments: m.attachments.map((a) => ({ ...a, dataUrl: undefined })),
+              };
+            }
+            return m;
+          });
+        }
+        return trimmed;
+      },
     }
   )
 );

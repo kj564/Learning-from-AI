@@ -58,8 +58,11 @@ export async function saveUploadedFile(
 ): Promise<{ id: string; url: string; path: string; size: number }> {
   await ensureAssetsDir();
   const id = `upl_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-  const ext = name.includes('.') ? name.split('.').pop()!.toLowerCase() : 'bin';
-  const filename = `${id}.${ext}`;
+  // Sanitize the extension: strip everything except [a-z0-9], lowercase, fallback to bin.
+  // Prevents path traversal via names like "evil.png/../../foo" or "evil.PHP".
+  const rawExt = (name.split('.').pop() || 'bin').toLowerCase();
+  const safeExt = rawExt.replace(/[^a-z0-9]/g, '').slice(0, 8) || 'bin';
+  const filename = `${id}.${safeExt}`;
   const fullPath = path.join(ASSETS_DIR, filename);
   await writeFile(fullPath, buf);
   const kind = mime.startsWith('image/') ? 'image' : mime.startsWith('audio/') ? 'audio' : 'file';

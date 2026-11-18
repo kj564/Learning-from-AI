@@ -47,6 +47,15 @@ export async function POST(req: NextRequest) {
       ...(duration ? { duration } : {}),
     });
 
+    // Validate the SDK actually returned a taskId — some error envelopes
+    // succeed at HTTP level but don't contain an id.
+    if (!result?.id) {
+      return NextResponse.json(
+        { error: 'Video generation failed: no taskId returned', raw: JSON.stringify(result).slice(0, 500) },
+        { status: 502 }
+      );
+    }
+
     return NextResponse.json({
       success: true,
       taskId: result.id,

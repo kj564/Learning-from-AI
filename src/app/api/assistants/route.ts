@@ -51,7 +51,7 @@ function toDTO(a: {
   };
 }
 
-/** Seed default assistants if the table is empty (runs once on first request). */
+/** Seed default assistants if the table is empty (uses upsert to avoid race conditions). */
 let seeded = false;
 async function ensureSeed() {
   if (seeded) return;
@@ -91,9 +91,11 @@ async function ensureSeed() {
       knowledgeIds: [],
     },
   ];
+  // Use upsert to avoid unique-constraint errors on concurrent first-requests.
   for (const d of defaults) {
-    await db.assistant.create({
-      data: {
+    await db.assistant.upsert({
+      where: { id: d.id },
+      create: {
         id: d.id,
         name: d.name,
         description: d.description,
@@ -102,6 +104,7 @@ async function ensureSeed() {
         tools: JSON.stringify(d.tools),
         knowledgeIds: JSON.stringify(d.knowledgeIds),
       },
+      update: {},
     });
   }
 }

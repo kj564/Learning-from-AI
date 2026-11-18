@@ -12,10 +12,9 @@
  */
 
 import { useStore } from '@/lib/store';
-import { useTheme } from 'next-themes';
 import {
   SquarePen, BookCopy, Bookmark, PanelRightOpen, PanelRightClose,
-  MoreVertical, Sparkles, Clock, Sun, Moon, Monitor, Check,
+  MoreVertical,
 } from 'lucide-react';
 import { useState, useRef, useEffect } from 'react';
 import ModelSelector from './ModelSelector';

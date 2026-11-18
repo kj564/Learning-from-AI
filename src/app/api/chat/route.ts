@@ -11,7 +11,16 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import ZAI from 'z-ai-web-dev-sdk';
-import type { Project } from '../projects/route';
+
+// Lightweight local interface — avoids importing from a route file (which
+// breaks under `tsc` strict mode and creates a circular dependency).
+interface ProjectShape {
+  id?: string;
+  name: string;
+  description?: string;
+  instructions?: string;
+  documents?: { name: string; type: string; language?: string; content: string }[];
+}
 
 export const AI_MODELS = [
   { id: 'default', name: 'Claude Opus 5.5', description: 'Most powerful model for complex challenges' },
@@ -19,9 +28,19 @@ export const AI_MODELS = [
   { id: 'smart', name: 'Claude Sonnet 5', description: 'Balanced quality and speed' },
 ] as const;
 
-const conversations = new Map<string, { role: string; content: string }[]>();
-const MAX_MESSAGES = 40;
-const MAX_TOOL_ROUNDS = 5; // Max tool call loops per user message
+// In-memory sessions with TTL eviction (30 min idle).
+interface ConvEntry { history: { role: string; content: string }[]; expiresAt: number; }
+const conversations = new Map<string, ConvEntry>();
+const CONV_TTL_MS = 30 * 60 * 1000;
+const MAX_MESSAGES = 100;
+const MAX_TOOL_ROUNDS = 10;
+let lastSweepConv = 0;
+function sweepConversations() {
+  const now = Date.now();
+  if (now - lastSweepConv < 5 * 60 * 1000) return;
+  lastSweepConv = now;
+  for (const [k, v] of conversations) if (v.expiresAt < now) conversations.delete(k);
+}
 
 const BASE_SYSTEM_PROMPT = `# claude_behavior
 
@@ -116,7 +135,7 @@ export async function POST(req: NextRequest) {
     let systemPrompt = BASE_SYSTEM_PROMPT;
 
     if (project) {
-      const p = project as Project;
+      const p = project as ProjectShape;
       let context = `\n\n# Current Project Context\n\n`;
       context += `Project: ${p.name}\n`;
       if (p.description) context += `Description: ${p.description}\n`;
@@ -131,8 +150,11 @@ export async function POST(req: NextRequest) {
       systemPrompt += context;
     }
 
-    // Get or create conversation
-    let history = conversations.get(sid) || [{ role: 'assistant', content: systemPrompt }];
+    // Get or create conversation (TTL-guarded)
+    sweepConversations();
+    const existing = conversations.get(sid);
+    let history: { role: string; content: string }[] =
+      (existing && existing.expiresAt > Date.now()) ? existing.history : [{ role: 'assistant', content: systemPrompt }];
     history.push({ role: 'user', content: message });
 
     if (history.length > MAX_MESSAGES) {
@@ -156,15 +178,49 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ error: 'No response from AI' }, { status: 500 });
       }
 
-      // Check if AI wants to call a tool
+      // Check if AI wants to call a tool — try strict JSON first, then
+      // balanced-brace scan (handles nested objects in args.content).
       let toolCall: { tool: string; args: Record<string, unknown> } | null = null;
       try {
-        // AI might embed JSON in text — try to extract
-        const jsonMatch = aiResponse.match(/\{[\s\S]*"tool"[\s\S]*\}/);
-        if (jsonMatch) {
-          const parsed = JSON.parse(jsonMatch[0]);
-          if (parsed.tool && typeof parsed.tool === 'string') {
-            toolCall = parsed;
+        const trimmed = aiResponse.trim();
+        if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
+          const parsed = JSON.parse(trimmed);
+          if (parsed.tool && typeof parsed.tool === 'string' && parsed.args) {
+            toolCall = { tool: parsed.tool, args: parsed.args };
+          }
+        }
+        if (!toolCall) {
+          // Balanced-brace scan: find first {...} that parses as a tool call
+          let i = 0;
+          while (i < aiResponse.length) {
+            if (aiResponse[i] !== '{') { i++; continue; }
+            let depth = 0, inStr = false, escape = false, j = i;
+            for (; j < aiResponse.length; j++) {
+              const c = aiResponse[j];
+              if (inStr) {
+                if (escape) escape = false;
+                else if (c === '\\') escape = true;
+                else if (c === '"') inStr = false;
+              } else {
+                if (c === '"') inStr = true;
+                else if (c === '{') depth++;
+                else if (c === '}') {
+                  depth--;
+                  if (depth === 0) {
+                    const json = aiResponse.slice(i, j + 1);
+                    try {
+                      const parsed = JSON.parse(json);
+                      if (parsed && typeof parsed === 'object' && typeof parsed.tool === 'string') {
+                        toolCall = { tool: parsed.tool, args: parsed.args || {} };
+                        break;
+                      }
+                    } catch { /* keep scanning */ }
+                    break;
+                  }
+                }
+              }
+            }
+            i++;
           }
         }
       } catch {
@@ -186,7 +242,7 @@ export async function POST(req: NextRequest) {
     }
 
     history.push({ role: 'assistant', content: aiResponse });
-    conversations.set(sid, history);
+    conversations.set(sid, { history, expiresAt: Date.now() + CONV_TTL_MS });
 
     // Extract tool call for frontend display
     let displayToolCall = null;
@@ -202,7 +258,7 @@ export async function POST(req: NextRequest) {
       sessionId: sid,
       response: aiResponse,
       toolCall: displayToolCall,
-      toolExecutions: toolCallHistory.map(t => ({ tool: t.tool, args: t.args, success: !t.result.startsWith('Tool error') })),
+      toolExecutions: toolCallHistory.map(t => ({ tool: t.tool, args: t.args, success: !t.result.startsWith('Tool error:') && !t.result.startsWith('Tool execution failed') })),
       messageCount: history.length - 1,
       model: model || 'default',
     });

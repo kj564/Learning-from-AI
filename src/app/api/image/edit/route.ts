@@ -11,6 +11,7 @@ import { saveBase64Image, getAssetPath } from '@/lib/assets';
 import { readFile } from 'fs/promises';
 import { existsSync } from 'fs';
 import { db } from '@/lib/db';
+import { safeFetch } from '@/lib/net-security';
 
 const SIZE_DIMS: Record<string, { w: number; h: number }> = {
   '1024x1024': { w: 1024, h: 1024 },
@@ -33,13 +34,11 @@ async function toDataUrl(url: string): Promise<string> {
     return `data:${meta.mime};base64,${buf.toString('base64')}`;
   }
   if (url.startsWith('http://') || url.startsWith('https://')) {
-    const res = await fetch(url);
-    if (!res.ok) throw new Error(`Failed to fetch: HTTP ${res.status}`);
-    const buf = Buffer.from(await res.arrayBuffer());
-    const mime = res.headers.get('content-type') || 'image/png';
-    return `data:${mime};base64,${buf.toString('base64')}`;
+    // SSRF-safe fetch (private/loopback blocked, size capped)
+    const { buffer, mime } = await safeFetch(url, { maxBytes: 10 * 1024 * 1024 });
+    return `data:${mime};base64,${buffer.toString('base64')}`;
   }
-  throw new Error(`Unsupported image URL: ${url.slice(0, 50)}`);
+  throw new Error(`Unsupported image URL (local file paths blocked for security): ${url.slice(0, 50)}`);
 }
 
 export async function POST(req: NextRequest) {

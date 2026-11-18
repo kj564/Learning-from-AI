@@ -4,14 +4,11 @@
  * Image understanding via z-ai-web-dev-sdk's chat.completions.createVision.
  * Accepts a data: URL, http(s) URL, or our own /api/image/asset?id=... URL.
  *
- * IMPORTANT: The SDK only accepts data: URLs (its server can't fetch our
- * localhost). So we fetch any http(s) or local asset URL server-side and
- * re-encode as a data: URL before passing to the SDK.
+ * SECURITY: All http(s) URLs are fetched via `safeFetch` (DNS resolves, no
+ * private/loopback/link-local, size cap). Local-file branch deleted to prevent
+ * arbitrary file disclosure via prompt-injection.
  *
  * Body: { imageUrl, prompt?, history? }
- *  - imageUrl: 'data:image/png;base64,...' OR 'https://...' OR '/api/image/asset?id=...'
- *  - prompt: default 'Describe this image in detail.'
- *
  * Response: { success, text }
  */
 
@@ -21,42 +18,28 @@ import { readFile } from 'fs/promises';
 import { existsSync } from 'fs';
 import path from 'path';
 import { getAssetPath } from '@/lib/assets';
+import { safeFetch } from '@/lib/net-security';
 
-/** Convert any imageUrl to a data: URL (base64-encoded). */
-async function toDataUrl(url: string, req: NextRequest): Promise<string> {
-  // Already a data URL — pass through
+async function toDataUrl(url: string): Promise<string> {
   if (url.startsWith('data:')) return url;
 
-  // Our own asset route — read directly from disk via DB lookup
+  // Our own asset routes — read directly from disk via DB lookup
   if (url.startsWith('/api/image/asset?') || url.startsWith('/api/asset?')) {
     const id = new URL('http://x' + url).searchParams.get('id');
     if (!id) throw new Error('asset id missing in URL');
     const meta = await getAssetPath(id);
     if (!meta || !existsSync(meta.path)) throw new Error('Asset not found');
     const buf = await readFile(meta.path);
-    const b64 = buf.toString('base64');
-    return `data:${meta.mime};base64,${b64}`;
+    return `data:${meta.mime};base64,${buf.toString('base64')}`;
   }
 
-  // http(s) URL — fetch server-side (the SDK can't fetch external URLs)
+  // External http(s) URL — fetch safely (SSRF guard)
   if (url.startsWith('http://') || url.startsWith('https://')) {
-    const res = await fetch(url);
-    if (!res.ok) throw new Error(`Failed to fetch image: HTTP ${res.status}`);
-    const buf = Buffer.from(await res.arrayBuffer());
-    const mime = res.headers.get('content-type') || 'image/png';
-    const b64 = buf.toString('base64');
-    return `data:${mime};base64,${b64}`;
+    const { buffer, mime } = await safeFetch(url, { maxBytes: 10 * 1024 * 1024 });
+    return `data:${mime};base64,${buffer.toString('base64')}`;
   }
 
-  // Local file path (absolute) — read directly
-  if (existsSync(url)) {
-    const buf = await readFile(url);
-    const ext = path.extname(url).slice(1).toLowerCase() || 'png';
-    const mime = ext === 'jpg' || ext === 'jpeg' ? 'image/jpeg' : `image/${ext}`;
-    return `data:${mime};base64,${buf.toString('base64')}`;
-  }
-
-  throw new Error(`Unsupported imageUrl format: ${url.slice(0, 50)}`);
+  throw new Error(`Unsupported imageUrl format (local file paths are blocked for security)`);
 }
 
 export async function POST(req: NextRequest) {
@@ -70,10 +53,15 @@ export async function POST(req: NextRequest) {
 
     if (!imageUrl) return NextResponse.json({ error: 'imageUrl required' }, { status: 400 });
 
-    const dataUrl = await toDataUrl(imageUrl, req);
+    const dataUrl = await toDataUrl(imageUrl);
+
+    // Filter history to only user/assistant roles (no system injection)
+    const safeHistory = (history || [])
+      .filter((m) => m.role === 'user' || m.role === 'assistant')
+      .map((m) => ({ role: m.role, content: m.content }));
 
     const messages: any[] = [
-      ...(history || []).map((m) => ({ role: m.role, content: m.content })),
+      ...safeHistory,
       {
         role: 'user',
         content: [

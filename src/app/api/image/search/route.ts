@@ -18,18 +18,19 @@ import ZAI from 'z-ai-web-dev-sdk';
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { query, count = 6, gl, rank = true } = body as {
+    const { query, count, gl, rank = true } = body as {
       query: string;
       count?: number;
       gl?: string;
       rank?: boolean;
     };
     if (!query) return NextResponse.json({ error: 'query required' }, { status: 400 });
+    const safeCount = typeof count === 'number' && isFinite(count) ? Math.max(1, Math.min(20, Math.floor(count))) : 6;
 
     const zai = await ZAI.create();
     const result = await zai.images.search.create({
       query,
-      count: Math.max(1, Math.min(20, count)),
+      count: safeCount,
       ...(gl ? { gl } : {}),
       rank,
     });

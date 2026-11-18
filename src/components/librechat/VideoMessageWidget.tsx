@@ -27,10 +27,18 @@ export default function VideoMessageWidget({ taskId, prompt }: VideoMessageWidge
 
   useEffect(() => {
     cancelledRef.current = false;
-    let timer: NodeJS.Timeout | null = null;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const startedAt = Date.now();
+    const MAX_POLLS = 60; // ~5 min at 5s intervals, then give up
+    let pollCount = 0;
 
     const poll = async () => {
       if (cancelledRef.current) return;
+      if (pollCount >= MAX_POLLS) {
+        setStatus('FAIL');
+        return;
+      }
+      pollCount++;
       try {
         const res = await fetch(`/api/video/status?taskId=${encodeURIComponent(taskId)}`);
         const data = await res.json();
@@ -68,7 +76,7 @@ export default function VideoMessageWidget({ taskId, prompt }: VideoMessageWidge
       a.href = url;
       a.download = `${prompt.slice(0, 40).replace(/[^a-z0-9]+/gi, '_') || 'video'}.mp4`;
       a.click();
-      URL.revokeObjectURL(url);
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
     } catch {
       // ignore
     }
@@ -107,7 +115,7 @@ export default function VideoMessageWidget({ taskId, prompt }: VideoMessageWidge
         <Film size={20} />
         <div className="flex items-center gap-1.5">
           <Loader2 size={12} className="animate-spin" />
-          <span>Generating video… ({polls * 5}s)</span>
+          <span>Generating video…</span>
         </div>
         <span className="text-text-tertiary mt-1 max-w-xs px-4 text-center line-clamp-2">{prompt}</span>
       </div>
