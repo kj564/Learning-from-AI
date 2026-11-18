@@ -385,7 +385,7 @@ export const useStore = create<WorkspaceState>()(
     {
       name: 'librechat-workspace-v1',
       version: 2,
-      skipHydration: true, // prevent SSR hydration mismatch — client rehydrates from localStorage
+      skipHydration: true, // prevent SSR hydration mismatch — client rehydrates from localStorage via Rehydrate component
       // Migrate older persisted state to current shape.
       migrate: (persisted: any, version: number) => {
         if (!persisted || typeof persisted !== 'object') return persisted;

@@ -49,7 +49,7 @@ const MODELS = [
 const STARTERS = [
   { icon: Code2, label: 'Write code', prompt: 'Build a React todo app with local storage', color: 'text-blue-400' },
   { icon: Brain, label: 'Think deeply', prompt: 'What are the implications of AI consciousness?', color: 'text-purple-400' },
-  { icon: Globe, label: 'Search web', prompt: 'What are the latest developments in quantum computing?', color: 'text-teal-400' },
+  { icon: Globe, label: 'Search web', prompt: 'What are the latest developments in quantum computing?', color: 'text-[var(--accent)]' },
   { icon: Sparkles, label: 'Generate image', prompt: 'Generate an image of a serene Japanese garden at sunset', color: 'text-amber-400' },
 ];
 
@@ -344,26 +344,26 @@ export default function Page() {
   }, new Map<string, any[]>());
 
   return (
-    <div className="flex h-screen w-full overflow-hidden bg-[#16181A] text-zinc-100">
+    <div className="flex h-screen w-full overflow-hidden bg-[var(--bg-page)] text-[var(--text-primary)]">
       {/* === SIDEBAR === */}
       {sidebarOpen && (
-        <div className="flex h-full w-64 shrink-0 flex-col border-r border-zinc-800 bg-[#1A1C1E]">
+        <div className="flex h-full w-64 shrink-0 flex-col border-r border-[var(--border-default)] bg-[var(--bg-surface)]">
           {/* Search + New */}
           <div className="flex items-center gap-2 p-3">
-            <div className="flex h-9 flex-1 items-center gap-2 rounded-lg bg-zinc-800/80 px-3">
-              <Search size={14} className="text-zinc-500 shrink-0" />
+            <div className="flex h-9 flex-1 items-center gap-2 rounded-lg bg-[var(--bg-surface)]/80 px-3">
+              <Search size={14} className="text-[var(--text-tertiary)] shrink-0" />
               <input
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 placeholder="Search chats"
-                className="w-full bg-transparent text-sm text-zinc-200 placeholder:text-zinc-500 outline-none"
+                className="w-full bg-transparent text-sm text-[var(--text-primary)] placeholder:text-[var(--text-tertiary)] outline-none"
               />
-              {searchQuery && <button onClick={() => setSearchQuery('')} className="text-zinc-500 hover:text-zinc-300"><X size={12} /></button>}
+              {searchQuery && <button onClick={() => setSearchQuery('')} className="text-[var(--text-tertiary)] hover:text-[var(--text-secondary)]"><X size={12} /></button>}
             </div>
           </div>
           <button
             onClick={() => newConversation()}
-            className="mx-3 mb-2 flex h-9 items-center gap-2 rounded-lg px-3 text-sm font-medium text-zinc-300 hover:bg-zinc-800 transition"
+            className="mx-3 mb-2 flex h-9 items-center gap-2 rounded-lg px-3 text-sm font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-surface)] transition"
           >
             <SquarePen size={14} /> New chat
           </button>
@@ -372,13 +372,13 @@ export default function Page() {
           <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-4">
             {Array.from(groups.entries()).map(([label, items]) => (
               <div key={label} className="mb-2">
-                <div className="px-2 py-1 text-[11px] font-medium text-zinc-500">{label}</div>
+                <div className="px-2 py-1 text-[11px] font-medium text-[var(--text-tertiary)]">{label}</div>
                 {items.map((c: any) => (
                   <div key={c.id} className="group relative">
                     <button
                       onClick={() => setActiveConversation(c.id)}
                       className={`flex h-8 w-full items-center rounded-lg px-3 text-start text-sm transition ${
-                        c.id === activeConversationId ? 'bg-zinc-800 text-zinc-100' : 'text-zinc-400 hover:bg-zinc-800/50 hover:text-zinc-200'
+                        c.id === activeConversationId ? 'bg-[var(--bg-surface)] text-[var(--text-primary)]' : 'text-[var(--text-secondary)] hover:bg-[var(--bg-surface)]/50 hover:text-[var(--text-primary)]'
                       }`}
                     >
                       <span className="truncate">{c.title}</span>
@@ -386,25 +386,25 @@ export default function Page() {
                     {/* Hover menu */}
                     <button
                       onClick={(e) => { e.stopPropagation(); setMenuOpenFor(menuOpenFor === c.id ? null : c.id); }}
-                      className="absolute end-1 top-1 hidden h-6 w-6 items-center justify-center rounded text-zinc-500 hover:bg-zinc-700 group-hover:flex"
+                      className="absolute end-1 top-1 hidden h-6 w-6 items-center justify-center rounded text-[var(--text-tertiary)] hover:bg-zinc-700 group-hover:flex"
                     >
                       <ChevronDown size={14} />
                     </button>
                     {menuOpenFor === c.id && (
-                      <div className="absolute end-1 top-8 z-50 w-40 rounded-lg border border-zinc-700 bg-[#1A1C1E] py-1 shadow-xl" onMouseLeave={() => setMenuOpenFor(null)}>
-                        <button onClick={() => { setRenameId(c.id); setRenameDraft(c.title); setMenuOpenFor(null); }} className="flex w-full items-center gap-2 px-3 py-1.5 text-start text-xs text-zinc-300 hover:bg-zinc-800">
+                      <div className="absolute end-1 top-8 z-50 w-40 rounded-lg border border-[var(--border-default)] bg-[var(--bg-surface)] py-1 shadow-xl" onMouseLeave={() => setMenuOpenFor(null)}>
+                        <button onClick={() => { setRenameId(c.id); setRenameDraft(c.title); setMenuOpenFor(null); }} className="flex w-full items-center gap-2 px-3 py-1.5 text-start text-xs text-[var(--text-secondary)] hover:bg-[var(--bg-surface)]">
                           <Pen size={12} /> Rename
                         </button>
                         {archivedConversations.includes(c.id) ? (
-                          <button onClick={() => { unarchiveConversation(c.id); setMenuOpenFor(null); }} className="flex w-full items-center gap-2 px-3 py-1.5 text-start text-xs text-zinc-300 hover:bg-zinc-800">
+                          <button onClick={() => { unarchiveConversation(c.id); setMenuOpenFor(null); }} className="flex w-full items-center gap-2 px-3 py-1.5 text-start text-xs text-[var(--text-secondary)] hover:bg-[var(--bg-surface)]">
                             <ArchiveRestore size={12} /> Unarchive
                           </button>
                         ) : (
-                          <button onClick={() => { archiveConversation(c.id); setMenuOpenFor(null); }} className="flex w-full items-center gap-2 px-3 py-1.5 text-start text-xs text-zinc-300 hover:bg-zinc-800">
+                          <button onClick={() => { archiveConversation(c.id); setMenuOpenFor(null); }} className="flex w-full items-center gap-2 px-3 py-1.5 text-start text-xs text-[var(--text-secondary)] hover:bg-[var(--bg-surface)]">
                             <Archive size={12} /> Archive
                           </button>
                         )}
-                        <button onClick={() => { deleteConversation(c.id); setMenuOpenFor(null); }} className="flex w-full items-center gap-2 px-3 py-1.5 text-start text-xs text-red-400 hover:bg-zinc-800">
+                        <button onClick={() => { deleteConversation(c.id); setMenuOpenFor(null); }} className="flex w-full items-center gap-2 px-3 py-1.5 text-start text-xs text-red-400 hover:bg-[var(--bg-surface)]">
                           <Trash2 size={12} /> Delete
                         </button>
                       </div>
@@ -416,7 +416,7 @@ export default function Page() {
                         onChange={(e) => setRenameDraft(e.target.value)}
                         onBlur={() => { if (renameDraft.trim()) renameConversation(c.id, renameDraft.trim()); setRenameId(null); }}
                         onKeyDown={(e) => { if (e.key === 'Enter' && renameDraft.trim()) { renameConversation(c.id, renameDraft.trim()); setRenameId(null); } if (e.key === 'Escape') setRenameId(null); }}
-                        className="absolute inset-x-1 top-1 h-6 rounded border border-zinc-600 bg-zinc-900 px-2 text-sm text-zinc-100 outline-none"
+                        className="absolute inset-x-1 top-1 h-6 rounded border border-[var(--border-strong)] bg-[var(--bg-page)] px-2 text-sm text-[var(--text-primary)] outline-none"
                       />
                     )}
                   </div>
@@ -427,9 +427,9 @@ export default function Page() {
             {/* Archived */}
             {archivedConvos.length > 0 && (
               <div className="mt-4">
-                <div className="px-2 py-1 text-[11px] font-medium text-zinc-500">Archived ({archivedConvos.length})</div>
+                <div className="px-2 py-1 text-[11px] font-medium text-[var(--text-tertiary)]">Archived ({archivedConvos.length})</div>
                 {archivedConvos.map((c: any) => (
-                  <button key={c.id} onClick={() => setActiveConversation(c.id)} className="flex h-8 w-full items-center rounded-lg px-3 text-start text-sm text-zinc-500 hover:bg-zinc-800/50">
+                  <button key={c.id} onClick={() => setActiveConversation(c.id)} className="flex h-8 w-full items-center rounded-lg px-3 text-start text-sm text-[var(--text-tertiary)] hover:bg-[var(--bg-surface)]/50">
                     <span className="truncate opacity-60">{c.title}</span>
                   </button>
                 ))}
@@ -438,12 +438,12 @@ export default function Page() {
           </div>
 
           {/* Bottom: Settings + Theme */}
-          <div className="border-t border-zinc-800 p-2">
+          <div className="border-t border-[var(--border-default)] p-2">
             <div className="flex items-center gap-1">
-              <button onClick={() => setSettingsOpen(true)} className="flex h-8 flex-1 items-center gap-2 rounded-lg px-3 text-xs text-zinc-400 hover:bg-zinc-800">
+              <button onClick={() => setSettingsOpen(true)} className="flex h-8 flex-1 items-center gap-2 rounded-lg px-3 text-xs text-[var(--text-secondary)] hover:bg-[var(--bg-surface)]">
                 <Settings size={14} /> Settings
               </button>
-              <button onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')} className="flex h-8 w-8 items-center justify-center rounded-lg text-zinc-400 hover:bg-zinc-800">
+              <button onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')} className="flex h-8 w-8 items-center justify-center rounded-lg text-[var(--text-secondary)] hover:bg-[var(--bg-surface)]">
                 {theme === 'dark' ? <Sun size={14} /> : <Moon size={14} />}
               </button>
             </div>
@@ -455,7 +455,7 @@ export default function Page() {
       <div className="relative flex h-full min-w-0 flex-1 flex-col">
         {/* Top bar: sidebar toggle + model picker + share */}
         <div className="flex h-12 shrink-0 items-center gap-2 px-3">
-          <button onClick={() => setSidebarOpen((v) => !v)} className="flex h-8 w-8 items-center justify-center rounded-lg text-zinc-400 hover:bg-zinc-800">
+          <button onClick={() => setSidebarOpen((v) => !v)} className="flex h-8 w-8 items-center justify-center rounded-lg text-[var(--text-secondary)] hover:bg-[var(--bg-surface)]">
             <PanelLeft size={16} />
           </button>
 
@@ -463,28 +463,28 @@ export default function Page() {
           <div className="relative mx-auto">
             <button
               onClick={() => setModelPickerOpen((v) => !v)}
-              className="flex h-9 items-center gap-1.5 rounded-lg px-3 text-sm font-medium text-zinc-200 hover:bg-zinc-800 transition"
+              className="flex h-9 items-center gap-1.5 rounded-lg px-3 text-sm font-medium text-[var(--text-primary)] hover:bg-[var(--bg-surface)] transition"
             >
-              <currentModel.icon size={14} className="text-teal-400" />
+              <currentModel.icon size={14} className="text-[var(--accent)]" />
               {currentModel.name}
-              <ChevronDown size={12} className="text-zinc-500" />
+              <ChevronDown size={12} className="text-[var(--text-tertiary)]" />
             </button>
             {modelPickerOpen && (
               <>
                 <div className="fixed inset-0 z-10" onClick={() => setModelPickerOpen(false)} />
-                <div className="absolute left-1/2 top-full z-20 mt-1 w-64 -translate-x-1/2 rounded-xl border border-zinc-700 bg-[#1A1C1E] py-1 shadow-2xl">
+                <div className="absolute left-1/2 top-full z-20 mt-1 w-64 -translate-x-1/2 rounded-xl border border-[var(--border-default)] bg-[var(--bg-surface)] py-1 shadow-2xl">
                   {MODELS.map((m) => (
                     <button
                       key={m.id}
                       onClick={() => { setSelectedModel(m.id); setModelPickerOpen(false); toast.success(`Model: ${m.name}`); }}
-                      className={`flex w-full items-start gap-2.5 px-3 py-2 text-start transition ${selectedModel === m.id ? 'bg-zinc-800' : 'hover:bg-zinc-800/50'}`}
+                      className={`flex w-full items-start gap-2.5 px-3 py-2 text-start transition ${selectedModel === m.id ? 'bg-[var(--bg-surface)]' : 'hover:bg-[var(--bg-surface)]/50'}`}
                     >
-                      <m.icon size={14} className="mt-0.5 shrink-0 text-teal-400" />
+                      <m.icon size={14} className="mt-0.5 shrink-0 text-[var(--accent)]" />
                       <div className="min-w-0 flex-1">
-                        <div className="text-sm font-medium text-zinc-100">{m.name}</div>
-                        <div className="truncate text-[11px] text-zinc-500">{m.desc}</div>
+                        <div className="text-sm font-medium text-[var(--text-primary)]">{m.name}</div>
+                        <div className="truncate text-[11px] text-[var(--text-tertiary)]">{m.desc}</div>
                       </div>
-                      {selectedModel === m.id && <Check size={14} className="shrink-0 text-teal-400" />}
+                      {selectedModel === m.id && <Check size={14} className="shrink-0 text-[var(--accent)]" />}
                     </button>
                   ))}
                 </div>
@@ -505,7 +505,7 @@ export default function Page() {
                 else toast.error('Failed', { id: 'share' });
               } catch { toast.error('Failed', { id: 'share' }); }
             }}
-            className="flex h-8 w-8 items-center justify-center rounded-lg text-zinc-400 hover:bg-zinc-800"
+            className="flex h-8 w-8 items-center justify-center rounded-lg text-[var(--text-secondary)] hover:bg-[var(--bg-surface)]"
           >
             <Share2 size={16} />
           </button>
@@ -517,9 +517,9 @@ export default function Page() {
             /* === WELCOME SCREEN === */
             <div className="flex h-full flex-col items-center justify-center px-4 pb-24">
               <div className="w-full max-w-2xl">
-                <h1 className="mb-6 text-center text-2xl font-semibold text-zinc-100">How can I help you today?</h1>
+                <h1 className="mb-6 text-center text-2xl font-semibold text-[var(--text-primary)]">How can I help you today?</h1>
                 {/* Composer in welcome screen */}
-                <div className="rounded-2xl border border-zinc-700 bg-[#1A1C1E] p-3 shadow-lg">
+                <div className="rounded-2xl border border-[var(--border-default)] bg-[var(--bg-surface)] p-3 shadow-lg">
                   <textarea
                     ref={textareaRef}
                     value={composerText}
@@ -539,20 +539,20 @@ export default function Page() {
                     }}
                     placeholder="Ask anything… (paste an image, type / for commands)"
                     rows={1}
-                    className="max-h-[40vh] w-full resize-none bg-transparent px-2 py-1 text-sm text-zinc-100 placeholder:text-zinc-500 outline-none"
+                    className="max-h-[40vh] w-full resize-none bg-transparent px-2 py-1 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-tertiary)] outline-none"
                   />
                   <div className="mt-2 flex items-center gap-1.5">
-                    <button onClick={() => setImageDialogOpen(true)} className="flex h-7 items-center gap-1 rounded-lg px-2 text-xs text-zinc-400 hover:bg-zinc-800">
+                    <button onClick={() => setImageDialogOpen(true)} className="flex h-7 items-center gap-1 rounded-lg px-2 text-xs text-[var(--text-secondary)] hover:bg-[var(--bg-surface)]">
                       <Plus size={14} /> Upload
                     </button>
-                    <button onClick={toggleWebSearch} className={`flex h-7 items-center gap-1 rounded-lg border px-2 text-xs ${webSearchEnabled ? 'border-teal-500/40 bg-teal-500/10 text-teal-400' : 'border-zinc-700 text-zinc-400 hover:bg-zinc-800'}`}>
+                    <button onClick={toggleWebSearch} className={`flex h-7 items-center gap-1 rounded-lg border px-2 text-xs ${webSearchEnabled ? 'border-[var(--accent)]/40 bg-[var(--primary-btn)]/10 text-[var(--accent)]' : 'border-[var(--border-default)] text-[var(--text-secondary)] hover:bg-[var(--bg-surface)]'}`}>
                       <Globe size={12} /> Web
                     </button>
-                    <button onClick={toggleThink} className={`flex h-7 items-center gap-1 rounded-lg border px-2 text-xs ${thinkEnabled ? 'border-teal-500/40 bg-teal-500/10 text-teal-400' : 'border-zinc-700 text-zinc-400 hover:bg-zinc-800'}`}>
+                    <button onClick={toggleThink} className={`flex h-7 items-center gap-1 rounded-lg border px-2 text-xs ${thinkEnabled ? 'border-[var(--accent)]/40 bg-[var(--primary-btn)]/10 text-[var(--accent)]' : 'border-[var(--border-default)] text-[var(--text-secondary)] hover:bg-[var(--bg-surface)]'}`}>
                       <Brain size={12} /> Think
                     </button>
                     <div className="flex-1" />
-                    <button onClick={handleSend} disabled={!composerText.trim()} className="flex h-7 w-7 items-center justify-center rounded-full bg-teal-500 text-white disabled:opacity-40 hover:bg-teal-600 transition">
+                    <button onClick={handleSend} disabled={!composerText.trim()} className="flex h-7 w-7 items-center justify-center rounded-full bg-[var(--primary-btn)] text-white disabled:opacity-40 hover:bg-[var(--accent-hover)] transition">
                       <Send size={12} />
                     </button>
                   </div>
@@ -563,10 +563,10 @@ export default function Page() {
                     <button
                       key={s.label}
                       onClick={() => setComposerText(s.prompt)}
-                      className="flex flex-col items-center gap-1.5 rounded-xl border border-zinc-800 bg-[#1A1C1E] p-3 text-center transition hover:border-zinc-600"
+                      className="flex flex-col items-center gap-1.5 rounded-xl border border-[var(--border-default)] bg-[var(--bg-surface)] p-3 text-center transition hover:border-[var(--border-strong)]"
                     >
                       <s.icon size={18} className={s.color} />
-                      <span className="text-xs font-medium text-zinc-200">{s.label}</span>
+                      <span className="text-xs font-medium text-[var(--text-primary)]">{s.label}</span>
                     </button>
                   ))}
                 </div>
@@ -608,8 +608,8 @@ export default function Page() {
               ))}
               {isGenerating && activeMessages[activeMessages.length - 1]?.role === 'user' && (
                 <div className="mb-4 flex gap-3">
-                  <div className="flex size-7 shrink-0 items-center justify-center rounded-full bg-teal-500/10">
-                    <Sparkles size={14} className="text-teal-400" />
+                  <div className="flex size-7 shrink-0 items-center justify-center rounded-full bg-[var(--primary-btn)]/10">
+                    <Sparkles size={14} className="text-[var(--accent)]" />
                   </div>
                   <div className="flex items-center gap-1 pt-1.5">
                     <span className="size-1.5 animate-bounce rounded-full bg-zinc-500 [animation-delay:-0.3s]" />
@@ -626,7 +626,7 @@ export default function Page() {
         {activeMessages.length > 0 && (
           <div className="shrink-0 pb-3 pt-1">
             <div className="mx-auto max-w-3xl px-4">
-              <div className="rounded-2xl border border-zinc-700 bg-[#1A1C1E] p-3 shadow-lg">
+              <div className="rounded-2xl border border-[var(--border-default)] bg-[var(--bg-surface)] p-3 shadow-lg">
                 <textarea
                   ref={textareaRef}
                   value={composerText}
@@ -646,16 +646,16 @@ export default function Page() {
                   }}
                   placeholder="Ask anything… (paste an image, type / for commands)"
                   rows={1}
-                  className="max-h-[40vh] w-full resize-none bg-transparent text-sm text-zinc-100 placeholder:text-zinc-500 outline-none"
+                  className="max-h-[40vh] w-full resize-none bg-transparent text-sm text-[var(--text-primary)] placeholder:text-[var(--text-tertiary)] outline-none"
                 />
                 <div className="mt-2 flex items-center gap-1.5">
-                  <button onClick={() => setImageDialogOpen(true)} className="flex h-7 items-center gap-1 rounded-lg px-2 text-xs text-zinc-400 hover:bg-zinc-800">
+                  <button onClick={() => setImageDialogOpen(true)} className="flex h-7 items-center gap-1 rounded-lg px-2 text-xs text-[var(--text-secondary)] hover:bg-[var(--bg-surface)]">
                     <Plus size={14} /> Upload
                   </button>
-                  <button onClick={toggleWebSearch} className={`flex h-7 items-center gap-1 rounded-lg border px-2 text-xs ${webSearchEnabled ? 'border-teal-500/40 bg-teal-500/10 text-teal-400' : 'border-zinc-700 text-zinc-400 hover:bg-zinc-800'}`}>
+                  <button onClick={toggleWebSearch} className={`flex h-7 items-center gap-1 rounded-lg border px-2 text-xs ${webSearchEnabled ? 'border-[var(--accent)]/40 bg-[var(--primary-btn)]/10 text-[var(--accent)]' : 'border-[var(--border-default)] text-[var(--text-secondary)] hover:bg-[var(--bg-surface)]'}`}>
                     <Globe size={12} /> Web
                   </button>
-                  <button onClick={toggleThink} className={`flex h-7 items-center gap-1 rounded-lg border px-2 text-xs ${thinkEnabled ? 'border-teal-500/40 bg-teal-500/10 text-teal-400' : 'border-zinc-700 text-zinc-400 hover:bg-zinc-800'}`}>
+                  <button onClick={toggleThink} className={`flex h-7 items-center gap-1 rounded-lg border px-2 text-xs ${thinkEnabled ? 'border-[var(--accent)]/40 bg-[var(--primary-btn)]/10 text-[var(--accent)]' : 'border-[var(--border-default)] text-[var(--text-secondary)] hover:bg-[var(--bg-surface)]'}`}>
                     <Brain size={12} /> Think
                   </button>
                   <div className="flex-1" />
@@ -664,13 +664,13 @@ export default function Page() {
                       <Square size={10} fill="currentColor" />
                     </button>
                   ) : (
-                    <button onClick={handleSend} disabled={!composerText.trim()} className="flex h-7 w-7 items-center justify-center rounded-full bg-teal-500 text-white disabled:opacity-40 hover:bg-teal-600 transition">
+                    <button onClick={handleSend} disabled={!composerText.trim()} className="flex h-7 w-7 items-center justify-center rounded-full bg-[var(--primary-btn)] text-white disabled:opacity-40 hover:bg-[var(--accent-hover)] transition">
                       <Send size={12} />
                     </button>
                   )}
                 </div>
               </div>
-              <div className="mt-1.5 text-center text-[11px] text-zinc-600">
+              <div className="mt-1.5 text-center text-[11px] text-[var(--text-placeholder)]">
                 GLM can use tools, search the web, generate images, and write files. Press Enter to send.
               </div>
             </div>
@@ -711,11 +711,11 @@ function MessageBubble({ message, isLast, isGenerating, onRegenerate, onReadAlou
           {message.attachments?.length > 0 && (
             <div className="mb-2 flex flex-wrap gap-2 justify-end">
               {message.attachments.map((a: any) => (
-                a.dataUrl ? <img key={a.id} src={a.dataUrl} alt={a.name} className="h-16 w-16 rounded-lg object-cover" /> : <div key={a.id} className="flex h-16 items-center rounded-lg border border-zinc-700 px-3 text-xs text-zinc-400">{a.name}</div>
+                a.dataUrl ? <img key={a.id} src={a.dataUrl} alt={a.name} className="h-16 w-16 rounded-lg object-cover" /> : <div key={a.id} className="flex h-16 items-center rounded-lg border border-[var(--border-default)] px-3 text-xs text-[var(--text-secondary)]">{a.name}</div>
               ))}
             </div>
           )}
-          <div className="rounded-2xl rounded-br-md bg-zinc-800 px-4 py-2.5 text-sm text-zinc-100">
+          <div className="rounded-2xl rounded-br-md bg-[var(--bg-surface)] px-4 py-2.5 text-sm text-[var(--text-primary)]">
             <p className="whitespace-pre-wrap break-words">{message.content}</p>
           </div>
         </div>
@@ -725,8 +725,8 @@ function MessageBubble({ message, isLast, isGenerating, onRegenerate, onReadAlou
 
   return (
     <div className="group mb-4 flex gap-3">
-      <div className="flex size-7 shrink-0 items-center justify-center rounded-full bg-teal-500/10">
-        <Sparkles size={14} className="text-teal-400" />
+      <div className="flex size-7 shrink-0 items-center justify-center rounded-full bg-[var(--primary-btn)]/10">
+        <Sparkles size={14} className="text-[var(--accent)]" />
       </div>
       <div className="min-w-0 flex-1">
         {message.pending && !message.content ? (
@@ -741,16 +741,16 @@ function MessageBubble({ message, isLast, isGenerating, onRegenerate, onReadAlou
           <>
             {/* Web search results */}
             {message.webSearch && message.webSearch.results.length > 0 && (
-              <details className="mb-2 rounded-lg border border-zinc-800 bg-zinc-800/30">
-                <summary className="flex cursor-pointer items-center gap-2 px-3 py-2 text-xs text-zinc-400">
-                  <Globe size={12} className="text-teal-400" /> Searched the web · {message.webSearch.results.length} results
+              <details className="mb-2 rounded-lg border border-[var(--border-default)] bg-[var(--bg-surface)]/30">
+                <summary className="flex cursor-pointer items-center gap-2 px-3 py-2 text-xs text-[var(--text-secondary)]">
+                  <Globe size={12} className="text-[var(--accent)]" /> Searched the web · {message.webSearch.results.length} results
                 </summary>
                 <div className="space-y-1 px-3 pb-2">
                   {message.webSearch.results.slice(0, 5).map((r: any, i: number) => (
-                    <a key={i} href={r.url} target="_blank" rel="noopener noreferrer" className="block rounded-md px-2 py-1.5 hover:bg-zinc-800">
-                      <div className="text-[11px] text-zinc-500">{r.host_name}</div>
-                      <div className="truncate text-xs font-medium text-zinc-200">{r.name}</div>
-                      <div className="line-clamp-2 text-[11px] text-zinc-500">{r.snippet}</div>
+                    <a key={i} href={r.url} target="_blank" rel="noopener noreferrer" className="block rounded-md px-2 py-1.5 hover:bg-[var(--bg-surface)]">
+                      <div className="text-[11px] text-[var(--text-tertiary)]">{r.host_name}</div>
+                      <div className="truncate text-xs font-medium text-[var(--text-primary)]">{r.name}</div>
+                      <div className="line-clamp-2 text-[11px] text-[var(--text-tertiary)]">{r.snippet}</div>
                     </a>
                   ))}
                 </div>
@@ -761,15 +761,15 @@ function MessageBubble({ message, isLast, isGenerating, onRegenerate, onReadAlou
             {message.toolExecutions?.length > 0 && (
               <div className="mb-2 space-y-1">
                 {message.toolExecutions.map((t: any, i: number) => (
-                  <div key={i} className={`flex items-center gap-2 rounded-md border px-2 py-1 text-xs ${t.success ? 'border-zinc-800 bg-zinc-800/30' : 'border-red-500/30 bg-red-500/5'}`}>
+                  <div key={i} className={`flex items-center gap-2 rounded-md border px-2 py-1 text-xs ${t.success ? 'border-[var(--border-default)] bg-[var(--bg-surface)]/30' : 'border-red-500/30 bg-red-500/5'}`}>
                     {t.tool === 'file_write' && <FileCode size={10} className="text-blue-400" />}
                     {t.tool === 'code_run' && <Code2 size={10} className="text-green-400" />}
-                    {t.tool === 'web_search' && <Globe size={10} className="text-teal-400" />}
+                    {t.tool === 'web_search' && <Globe size={10} className="text-[var(--accent)]" />}
                     {t.tool === 'image_generate' && <Sparkles size={10} className="text-amber-400" />}
-                    {!['file_write', 'code_run', 'web_search', 'image_generate'].includes(t.tool) && <span className="text-zinc-500">●</span>}
-                    <span className="font-mono text-zinc-300">{t.tool}</span>
-                    <span className="text-zinc-600">→</span>
-                    <span className="truncate text-zinc-500">{t.tool === 'file_write' ? t.args.path : t.tool === 'code_run' ? `${t.args.language || 'js'}` : t.tool === 'web_search' ? t.args.query : t.tool === 'image_generate' ? String(t.args.prompt || '').slice(0, 40) : ''}</span>
+                    {!['file_write', 'code_run', 'web_search', 'image_generate'].includes(t.tool) && <span className="text-[var(--text-tertiary)]">●</span>}
+                    <span className="font-mono text-[var(--text-secondary)]">{t.tool}</span>
+                    <span className="text-[var(--text-placeholder)]">→</span>
+                    <span className="truncate text-[var(--text-tertiary)]">{t.tool === 'file_write' ? t.args.path : t.tool === 'code_run' ? `${t.args.language || 'js'}` : t.tool === 'web_search' ? t.args.query : t.tool === 'image_generate' ? String(t.args.prompt || '').slice(0, 40) : ''}</span>
                     <span className={`ml-auto ${t.success ? 'text-green-400' : 'text-red-400'}`}>{t.success ? '✓' : '✗'}</span>
                   </div>
                 ))}
@@ -780,9 +780,9 @@ function MessageBubble({ message, isLast, isGenerating, onRegenerate, onReadAlou
             {message.images?.length > 0 && (
               <div className="mb-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
                 {message.images.map((img: any) => (
-                  <div key={img.id} className="group/img relative overflow-hidden rounded-xl border border-zinc-700">
+                  <div key={img.id} className="group/img relative overflow-hidden rounded-xl border border-[var(--border-default)]">
                     {img.pending ? (
-                      <div className="aspect-square animate-pulse bg-zinc-800" />
+                      <div className="aspect-square animate-pulse bg-[var(--bg-surface)]" />
                     ) : (
                       <>
                         <button onClick={() => onImageClick(img.url, img.prompt)} className="block w-full">
@@ -810,23 +810,23 @@ function MessageBubble({ message, isLast, isGenerating, onRegenerate, onReadAlou
 
             {/* Audio player */}
             {message.audio && (
-              <div className="mt-2 flex items-center gap-2 rounded-lg bg-zinc-800 px-3 py-2">
+              <div className="mt-2 flex items-center gap-2 rounded-lg bg-[var(--bg-surface)] px-3 py-2">
                 <audio src={message.audio.url} controls className="h-8" />
-                <span className="text-[11px] text-zinc-500">Read-aloud</span>
+                <span className="text-[11px] text-[var(--text-tertiary)]">Read-aloud</span>
               </div>
             )}
 
             {/* Hover toolbar */}
             {!message.pending && !message.error && (
               <div className="mt-1 flex items-center gap-1 opacity-0 transition group-hover:opacity-100">
-                <button onClick={copy} className="flex h-7 w-7 items-center justify-center rounded text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300">
+                <button onClick={copy} className="flex h-7 w-7 items-center justify-center rounded text-[var(--text-tertiary)] hover:bg-[var(--bg-surface)] hover:text-[var(--text-secondary)]">
                   {copied ? <Check size={12} /> : <Copy size={12} />}
                 </button>
-                <button onClick={onReadAloud} className="flex h-7 w-7 items-center justify-center rounded text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300">
+                <button onClick={onReadAloud} className="flex h-7 w-7 items-center justify-center rounded text-[var(--text-tertiary)] hover:bg-[var(--bg-surface)] hover:text-[var(--text-secondary)]">
                   <Sparkles size={12} />
                 </button>
                 {isLast && !isGenerating && (
-                  <button onClick={onRegenerate} className="flex h-7 w-7 items-center justify-center rounded text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300">
+                  <button onClick={onRegenerate} className="flex h-7 w-7 items-center justify-center rounded text-[var(--text-tertiary)] hover:bg-[var(--bg-surface)] hover:text-[var(--text-secondary)]">
                     <RefreshCw size={12} />
                   </button>
                 )}

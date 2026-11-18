@@ -1,34 +1,25 @@
 import type { Metadata } from "next";
-import { Inter, Roboto_Mono } from "next/font/google";
+import { GeistSans } from "geist/font/sans";
+import { GeistMono } from "geist/font/mono";
 import { ThemeProvider } from "next-themes";
 import { Toaster } from "@/components/ui/sonner";
 import Rehydrate from "@/components/Rehydrate";
 import "./globals.css";
 
-const inter = Inter({
-  subsets: ["latin"],
-  variable: "--font-inter",
-  display: "swap",
-});
-
-const robotoMono = Roboto_Mono({
-  subsets: ["latin"],
-  variable: "--font-roboto-mono",
-  display: "swap",
-});
-
 export const metadata: Metadata = {
-  title: "AI Chat — Multimodal Assistant",
-  description: "Multimodal AI chat with image generation, vision, voice, and web search — powered by Z.ai",
+  title: "Z.ai - Advanced AI Chatbot & Agent powered by GLM-5.3-Flash",
+  description: "Meet Z.ai, the AI assistant powered by GLM-5.3-Flash. Build websites, write code, handle long-horizon tasks, and get instant answers. Fast, smart, and reliable.",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" suppressHydrationWarning className={`${inter.variable} ${robotoMono.variable}`}>
+    <html lang="en" suppressHydrationWarning className={`${GeistSans.variable} ${GeistMono.variable}`}>
       <head>
         <style>{`
-          :root { --font-sans: ${inter.style.fontFamily}, ui-sans-serif, system-ui, sans-serif; }
-          :root { --font-mono: ${robotoMono.style.fontFamily}, ui-monospace, SFMono-Regular, Menlo, monospace; }
+          :root {
+            --font-sans: ${GeistSans.style.fontFamily}, ui-sans-serif, system-ui, sans-serif;
+            --font-mono: ${GeistMono.style.fontFamily}, ui-monospace, "Cascadia Code", monospace;
+          }
         `}</style>
       </head>
       <body>
