@@ -3,13 +3,15 @@
 /**
  * PlusMenu — popover menu for the composer's "+" button.
  *
- * Uses a React portal to render the menu outside the composer's stacking
- * context, so it always appears above the messages area.
+ * Items:
+ *   - Upload file (file picker → /api/files/upload → text/image attachment)
+ *   - Generate image… (opens ImageGenDialog)
+ *   - Search the web (toggle)
  */
 
 import { useState, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { Plus, ImagePlus, FileUp, Sparkles, Globe } from 'lucide-react';
+import { Plus, FileUp, Sparkles, Globe } from 'lucide-react';
 import { useStore } from '@/lib/store';
 import { toast } from 'sonner';
 
@@ -17,7 +19,7 @@ interface PlusMenuProps {
   onGenerateImage?: () => void;
 }
 
-const MAX_IMAGE_BYTES = 4 * 1024 * 1024; // 4 MB
+const MAX_IMAGE_BYTES = 4 * 1024 * 1024; // 4 MB for direct image attachments
 
 function readFileAsDataURL(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -31,82 +33,105 @@ function readFileAsDataURL(file: File): Promise<string> {
 export default function PlusMenu({ onGenerateImage }: PlusMenuProps) {
   const [open, setOpen] = useState(false);
   const [position, setPosition] = useState({ top: 0, left: 0 });
+  const [uploading, setUploading] = useState(false);
   const addAttachment = useStore((s) => s.addAttachment);
   const toggleWebSearch = useStore((s) => s.toggleWebSearch);
   const webSearchEnabled = useStore((s) => s.webSearchEnabled);
-  const imageInputRef = useRef<HTMLInputElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const btnRef = useRef<HTMLButtonElement>(null);
 
-  // Compute popover position when opening
   useEffect(() => {
     if (!open || !btnRef.current) return;
     const rect = btnRef.current.getBoundingClientRect();
-    setPosition({
-      top: rect.top - 8, // 8px gap above the button
-      left: rect.left,
-    });
+    setPosition({ top: rect.top - 8, left: rect.left });
   }, [open]);
 
-  // Close on outside click or Escape
   useEffect(() => {
     if (!open) return;
     const onDoc = (e: MouseEvent) => {
-      // Don't close if clicking the menu items (they're portaled, check by data attribute)
       const target = e.target as HTMLElement;
       if (target.closest('[data-plus-menu]') || target.closest('[data-plus-trigger]')) return;
       setOpen(false);
     };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setOpen(false);
-    };
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false); };
     document.addEventListener('mousedown', onDoc);
     document.addEventListener('keydown', onKey);
-    return () => {
-      document.removeEventListener('mousedown', onDoc);
-      document.removeEventListener('keydown', onKey);
-    };
+    return () => { document.removeEventListener('mousedown', onDoc); document.removeEventListener('keydown', onKey); };
   }, [open]);
-
-  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    if (!files) return;
-    for (const file of Array.from(files)) {
-      if (!file.type.startsWith('image/')) {
-        toast.error(`${file.name} is not an image`);
-        continue;
-      }
-      if (file.size > MAX_IMAGE_BYTES) {
-        toast.error(`${file.name} is too large (max 4MB)`);
-        continue;
-      }
-      const dataUrl = await readFileAsDataURL(file);
-      addAttachment({
-        id: `att_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-        kind: 'image',
-        name: file.name,
-        mime: file.type,
-        size: file.size,
-        dataUrl,
-      });
-    }
-    if (imageInputRef.current) imageInputRef.current.value = '';
-    setOpen(false);
-  };
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files) return;
+    setUploading(true);
     for (const file of Array.from(files)) {
-      addAttachment({
-        id: `att_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-        kind: 'file',
-        name: file.name,
-        mime: file.type,
-        size: file.size,
-      });
+      try {
+        // Images < 4MB → data URL attachment directly (for vision).
+        if (file.type.startsWith('image/') && file.size < MAX_IMAGE_BYTES) {
+          const dataUrl = await readFileAsDataURL(file);
+          addAttachment({
+            id: `att_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+            kind: 'image',
+            name: file.name,
+            mime: file.type,
+            size: file.size,
+            dataUrl,
+          });
+        } else {
+          // Other files (or large images) → upload to /api/files/upload →
+          // returns extracted text or asset URL.
+          const formData = new FormData();
+          formData.append('file', file);
+          const res = await fetch('/api/files/upload', { method: 'POST', body: formData });
+          const data = await res.json();
+          if (!data.success) {
+            toast.error(`Upload failed: ${file.name}`);
+            continue;
+          }
+          const f = data.file;
+          if (f.text) {
+            // Text/code/PDF → add as text attachment (content will be in context)
+            addAttachment({
+              id: f.id,
+              kind: 'file',
+              name: file.name,
+              mime: f.mime,
+              size: f.size,
+              url: undefined,
+              dataUrl: undefined,
+            });
+            // Store extracted text via a side-channel: append to composer text.
+            const current = useStore.getState().composerText;
+            const truncated = f.text.slice(0, 8000);
+            useStore.getState().setComposerText(
+              (current ? current + '\n\n' : '') + `[Attached file: ${file.name}]\n\`\`\`\n${truncated}\n\`\`\`\n`
+            );
+          } else if (f.image && f.assetUrl) {
+            // Image saved as asset → add as image attachment with URL.
+            addAttachment({
+              id: f.id,
+              kind: 'image',
+              name: file.name,
+              mime: f.mime,
+              size: f.size,
+              url: f.assetUrl,
+            });
+          } else if (f.assetUrl) {
+            addAttachment({
+              id: f.id,
+              kind: 'file',
+              name: file.name,
+              mime: f.mime,
+              size: f.size,
+              url: f.assetUrl,
+            });
+          }
+        }
+      } catch (e) {
+        toast.error(`Upload failed: ${file.name}`, { description: e instanceof Error ? e.message : String(e) });
+      }
     }
     if (fileInputRef.current) fileInputRef.current.value = '';
+    setUploading(false);
     setOpen(false);
   };
 
@@ -117,22 +142,14 @@ export default function PlusMenu({ onGenerateImage }: PlusMenuProps) {
       style={{ top: position.top, left: position.left, transform: 'translateY(-100%)' }}
     >
       <button
-        onClick={() => imageInputRef.current?.click()}
-        className="hover:bg-surface-hover flex w-full items-center gap-2 px-3 py-2 text-start text-sm"
-      >
-        <ImagePlus size={14} className="text-status-info" /> Upload image
-      </button>
-      <button
         onClick={() => fileInputRef.current?.click()}
-        className="hover:bg-surface-hover flex w-full items-center gap-2 px-3 py-2 text-start text-sm"
+        disabled={uploading}
+        className="hover:bg-surface-hover flex w-full items-center gap-2 px-3 py-2 text-start text-sm disabled:opacity-50"
       >
-        <FileUp size={14} className="text-text-secondary" /> Upload file
+        <FileUp size={14} className="text-status-info" /> {uploading ? 'Uploading…' : 'Upload file'}
       </button>
       <button
-        onClick={() => {
-          onGenerateImage?.();
-          setOpen(false);
-        }}
+        onClick={() => { onGenerateImage?.(); setOpen(false); }}
         className="hover:bg-surface-hover flex w-full items-center gap-2 px-3 py-2 text-start text-sm"
       >
         <Sparkles size={14} className="text-accent-primary" /> Generate image…
@@ -163,14 +180,6 @@ export default function PlusMenu({ onGenerateImage }: PlusMenuProps) {
 
       {typeof document !== 'undefined' && createPortal(menu, document.body)}
 
-      <input
-        ref={imageInputRef}
-        type="file"
-        accept="image/*"
-        multiple
-        className="hidden"
-        onChange={handleImageUpload}
-      />
       <input
         ref={fileInputRef}
         type="file"
