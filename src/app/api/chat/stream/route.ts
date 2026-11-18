@@ -306,6 +306,24 @@ export async function POST(req: NextRequest) {
             break;
           }
 
+          // The streamed text contained a tool call (raw JSON). Strip the JSON
+          // part out of the visible content so the user doesn't see the raw
+          // `{"tool":...,"args":...}` blob — the tool execution card (emitted
+          // below as tool_use) is the user-facing representation.
+          let visibleText = raw;
+          const trimmed = raw.trim();
+          if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
+            // Entire output was the tool call JSON → no visible prose
+            visibleText = '';
+          } else {
+            // Tool call embedded mid-text → keep the prose before the JSON block
+            const m = raw.match(/\{[\s\S]*?"tool"[\s\S]*?"args"[\s\S]*?\}/);
+            if (m && m.index !== undefined) {
+              visibleText = raw.slice(0, m.index).trim();
+            }
+          }
+          sseEmit(controller, 'text-replace', { text: visibleText });
+
           // We had a tool call — emit tool_use event, execute, emit tool_result event
           const toolUseId = `toolu_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
           sseEmit(controller, 'tool_use', { id: toolUseId, name: toolCall.tool, input: toolCall.args });

@@ -219,6 +219,12 @@ export default function Page() {
               content: (prev?.content || '') + text,
             }));
           },
+          onTextReplace: (text) => {
+            // Server tells us the streamed-so-far content should be replaced
+            // (used to strip out raw `{"tool":...,"args":...}` JSON after the
+            // model emits a tool call, so the user sees prose + tool card, not JSON)
+            updateMessage(convoId, pendingMsgId, { content: text });
+          },
           onToolUse: (event) => {
             updateMessage(convoId, pendingMsgId, (prev) => ({
               toolExecutions: [

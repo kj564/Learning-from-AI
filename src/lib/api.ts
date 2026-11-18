@@ -216,6 +216,7 @@ export async function getCanvaStatus(): Promise<{ connected: boolean; expired: b
 
 export interface StreamChatCallbacks {
   onTextDelta?: (text: string) => void;
+  onTextReplace?: (text: string) => void;
   onToolUse?: (event: { id: string; name: string; input: Record<string, unknown> }) => void;
   onToolResult?: (event: { tool_use_id: string; tool: string; success: boolean; result: string }) => void;
   onDone?: (event: { sessionId: string; messageCount: number; model: string; toolExecutions: { tool: string; args: Record<string, unknown>; success: boolean }[] }) => void;
@@ -288,6 +289,9 @@ export function streamChat(
             switch (event) {
               case 'text-delta':
                 cb.onTextDelta?.(payload.text || '');
+                break;
+              case 'text-replace':
+                cb.onTextReplace?.(payload.text || '');
                 break;
               case 'tool_use':
                 cb.onToolUse?.({ id: payload.id, name: payload.name, input: payload.input || {} });
