@@ -14,13 +14,13 @@
 import { useStore } from '@/lib/store';
 import {
   SquarePen, BookCopy, Bookmark, PanelRightOpen, PanelRightClose,
-  MoreVertical,
+  MoreVertical, Network,
 } from 'lucide-react';
 import { useState, useRef, useEffect } from 'react';
 import ModelSelector from './ModelSelector';
 import AssistantsMenu from './AssistantsMenu';
 
-export default function ChatHeader() {
+export default function ChatHeader({ onOpenCanvas }: { onOpenCanvas?: () => void }) {
   const isMobile = useStore((s) => s.isMobile);
   const setDrawerOpen = useStore((s) => s.setDrawerOpen);
   const newConversation = useStore((s) => s.newConversation);
@@ -82,6 +82,15 @@ export default function ChatHeader() {
 
       {/* Right: actions */}
       <div className="pointer-events-auto flex shrink-0 items-center gap-2">
+        {/* Thought Canvas toggle — spatial alternative to linear chat */}
+        <button
+          onClick={() => onOpenCanvas?.()}
+          title="Thought Canvas — spatial mode"
+          className="text-text-secondary hover:bg-surface-nav-hover hover:text-text-primary flex h-9 w-9 items-center justify-center rounded-lg transition"
+        >
+          <Network size={18} />
+        </button>
+
         {/* Documents panel toggle */}
         <button
           onClick={toggleDocumentsPanel}

@@ -31,6 +31,7 @@ import ImageGenDialog from '@/components/librechat/ImageGenDialog';
 import ImageLightbox from '@/components/librechat/ImageLightbox';
 import CommandPalette from '@/components/librechat/CommandPalette';
 import KeyboardShortcutsHelp from '@/components/librechat/KeyboardShortcutsHelp';
+import ThoughtCanvas from '@/components/librechat/ThoughtCanvas';
 import type { GeneratedImageRef } from '@/lib/store';
 
 const genId = (prefix: string) => `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
@@ -80,6 +81,7 @@ export default function Page() {
   const [activePanel, setActivePanel] = useState<PanelId>('conversations');
   const [imageDialogOpen, setImageDialogOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const [canvasOpen, setCanvasOpen] = useState(false);
 
   // Layout state
   const isMobile = useStore((s) => s.isMobile);
@@ -520,7 +522,7 @@ export default function Page() {
         className="relative isolate flex h-full min-w-0 flex-1 flex-col overflow-hidden"
         inert={showDrawer ? '' : undefined}
       >
-        <ChatHeader />
+        <ChatHeader onOpenCanvas={() => setCanvasOpen(true)} />
         <MessagesView onRegenerate={handleRegenerate} onRegenerateImage={handleRegenerateImage} />
         <div className="relative z-30 shrink-0 pb-3 pt-1">
           <ChatInput onSend={handleSend} onStop={handleStop} onGenerateImage={() => setImageDialogOpen(true)} />
@@ -548,6 +550,9 @@ export default function Page() {
 
       {/* Keyboard shortcuts help (⌘/) */}
       <KeyboardShortcutsHelp open={shortcutsOpen} onOpenChange={setShortcutsOpen} />
+
+      {/* Thought Canvas — spatial alternative to linear chat */}
+      {canvasOpen && <ThoughtCanvas onClose={() => setCanvasOpen(false)} />}
     </div>
   );
 }
