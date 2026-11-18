@@ -143,7 +143,7 @@ interface WorkspaceState {
   renameConversation: (id: string, title: string) => void;
 
   addMessage: (convoId: string, msg: ChatMessage) => void;
-  updateMessage: (convoId: string, msgId: string, patch: Partial<ChatMessage>) => void;
+  updateMessage: (convoId: string, msgId: string, patch: Partial<ChatMessage> | ((prev: ChatMessage) => Partial<ChatMessage>)) => void;
   removeMessage: (convoId: string, msgId: string) => void;
   setSessionForConversation: (convoId: string, sessionId: string) => void;
 
@@ -272,7 +272,14 @@ export const useStore = create<WorkspaceState>()(
           return {
             messagesByConversation: {
               ...s.messagesByConversation,
-              [convoId]: list.map((m) => (m.id === msgId ? { ...m, ...patch } : m)),
+              [convoId]: list.map((m) => {
+                if (m.id !== msgId) return m;
+                // Support updater-function form (like React setState) so callers
+                // can compute the next patch based on the current message — e.g.
+                // onTextDelta appends to content: (prev) => ({ content: prev.content + text })
+                const resolvedPatch = typeof patch === 'function' ? (patch as (prev: ChatMessage) => Partial<ChatMessage>)(m) : patch;
+                return { ...m, ...resolvedPatch };
+              }),
             },
           };
         });
