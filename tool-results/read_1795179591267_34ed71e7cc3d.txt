@@ -1,0 +1,613 @@
+     1→// SPDX-License-Identifier: GPL-3.0-or-later
+     2→// providers/glm.js - the GLM / Z.ai (chat.z.ai) provider.
+     3→// Exports the same ZSProvider interface as providers/deepseek.js and gemini.js;
+     4→// the core (core/main.js) is provider-agnostic. To DISABLE GLM support, remove
+     5→// this file from manifest.json (and its URL from background.js PROVIDER_URLS).
+     6→//
+     7→// Z.ai (GLM) DOM notes (validated live, 2026-06):
+     8→//  - Svelte app. One exchange = a `.user-message` div followed by a
+     9→//    `.chat-assistant` div (the assistant reply root, also `.markdown-prose`).
+    10→//    The assistant root is wrapped by `div.message-<uuid>`; that uuid is a
+    11→//    stable per-turn identity we expose as lastAssistantId (virtualization-proof).
+    12→//  - Reasoning ("Thought Process") renders as a `.thinking-chain-container`
+    13→//    INSIDE `.chat-assistant`, so all reply-text extraction strips that subtree
+    14→//    (tool blocks drafted inside reasoning are never detected or executed).
+    15→//  - The composer is a real <textarea id="chat-input">: set .value via the native
+    16→//    prototype setter + input event (React/Svelte both read it), WAIT for the
+    17→//    send button to re-enable, then click it. Typing + clicking in the same tick
+    18→//    fails because `#send-message-button` is still `disabled` for a frame.
+    19→//  - Idle: `button#send-message-button` is present (disabled when the box is
+    20→//    empty). While generating it is REPLACED by a round black stop button
+    21→//    (`button.rounded-full.bg-black` holding a small square <span>), so
+    22→//    "send button gone / stop button present" == generating for the WHOLE
+    23→//    stream (thinking included) - no indicatorless reasoning phase like DeepSeek.
+    24→//  - Fenced code = an atomic wrapper `div[class*="rounded-xl"]` carrying a
+    25→//    `.copy-code-button`; the command JSON survives in textContent.
+    26→//  - Conversation URL is /c/<uuid>; a fresh chat is exactly "/".
+    27→// eslint-disable-next-line no-unused-vars
+    28→const ZSProvider = (() => {
+    29→  "use strict";
+    30→  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    31→  let diag = () => {}; // injected by core via init()
+    32→
+    33→  const S = {
+    34→    userItem: ".user-message",
+    35→    assistantItem: ".chat-assistant",
+    36→    anyItem: ".user-message, .chat-assistant",
+    37→    thinking: ".thinking-chain-container",
+    38→    editor: "#chat-input",
+    39→    composer: ".messageInputContainer",
+    40→    sendBtn: "#send-message-button",
+    41→    // code-block wrapper carries a copy button; the JSON survives in textContent.
+    42→    copyCodeBtn: ".copy-code-button",
+    43→    codeWrap: 'div[class*="rounded-xl"]',
+    44→    errorSurfaces: '[role="alert"],[class*="toast"],[class*="error"],[class*="alert"],[class*="modal"]',
+    45→    // A SENT image renders as an attachment card (its filename + "JPG · NN KB")
+    46→    // as the FIRST child div of `.chat-user`, BEFORE the message text. Its
+    47→    // filename text would otherwise prefix the turn's classifyText - which broke
+    48→    // the result-chip: the core anchors on /^Output of '/ (isInjectedFeedback),
+    49→    // so "snapgentV3_….jpg JPG 179 KB Output of 'screen_capture'…" failed to match
+    50→    // and the screen_capture feedback turn stayed un-chipped (visible raw output,
+    51→    // unlike Kimi). Strip it from every text read. Precise: only the child holding
+    52→    // the attachment image, never the sibling text block.
+    53→    attachment: '.chat-user > div:has(img[data-cy="image"])',
+    54→  };
+    55→
+    56→  const RE = {
+    57→    contextLimit: new RegExp(
+    58→      [
+    59→        "conversation.{0,20}(too long|trop long)",
+    60→        "context.{0,20}(limit|exceeded|d\\u00e9pass\\u00e9)",
+    61→        "please.{0,30}(start|cr\\u00e9er).{0,20}(new|nouveau).{0,20}(chat|conversation)",
+    62→        "(token|context).{0,10}limit",
+    63→        "maximum.{0,20}context",
+    64→        "\\u4e0a\\u4e0b\\u6587.{0,10}(\\u8d85\\u51fa|\\u8fc7\\u957f|\\u9650\\u5236)",
+    65→      ].join("|"),
+    66→      "i"
+    67→    ),
+    68→    tooLong: /conversation .{0,20}(too long|getting too long|trop longue)/i,
+    69→    busy: /something went wrong|une erreur s.est produite|try again later|réessayer plus tard|server is busy|系统繁忙|请稍后再试/i,
+    70→  };
+    71→
+    72→  // GLM streams with a hard stop-button signal for the WHOLE generation
+    73→  // (reasoning + answer), so completion windows can be tight like Gemini.
+    74→  const timings = {
+    75→    GEN_IDLE_MS: 1500,
+    76→    REASON_IDLE_MS: 12000,
+    77→    WARMUP_MS: 45000,
+    78→    REASON_NOREPLY_MS: 90000,
+    79→    STABLE_MS: 9000,
+    80→    RESPONSE_TIMEOUT_MS: 300000,
+    81→  };
+    82→
+    83→  // ── Turn classification ───────────────────────────────────────────────────
+    84→  const isUserItem = (item) => !!item && item.matches && item.matches(S.userItem);
+    85→  const isAssistantItem = (item) => !!item && item.matches && item.matches(S.assistantItem);
+    86→
+    87→  // Walk an element's text, skipping the reasoning subtree, our own chip, and any
+    88→  // excluded selector. Used everywhere a turn's "real" text is needed so tool
+    89→  // blocks drafted inside reasoning are never detected, shown, or executed.
+    90→  function textWithout(root, excludeSel) {
+    91→    if (!root) return "";
+    92→    const skip = S.thinking + ", .zs-chip, " + S.attachment + (excludeSel ? ", " + excludeSel : "");
+    93→    let t = "";
+    94→    const walk = (n) => {
+    95→      if (n.nodeType === 3) { t += n.nodeValue; return; }
+    96→      if (n.nodeType !== 1) return;
+    97→      if (n.matches && n.matches(skip)) return;
+    98→      // GLM renders fenced code in a CodeMirror editor whose lines are separate
+    99→      // <div class="cm-line"> with NO newline text nodes, so textContent collapses
+   100→      // the whole block onto ONE line - which breaks Lua (a `--` then comments out
+   101→      // the rest) and any multi-line command. Rebuild the real source by joining
+   102→      // the cm-line elements with "\n" (and skip the .cm-announced a11y duplicate).
+   103→      if (n.matches && n.matches(".cm-editor, .cm-content")) {
+   104→        const lines = n.querySelectorAll(".cm-line");
+   105→        if (lines.length) { t += "\n" + [...lines].map((l) => l.textContent).join("\n"); return; }
+   106→      }
+   107→      for (const c of n.childNodes) walk(c);
+   108→    };
+   109→    walk(root);
+   110→    return t;
+   111→  }
+   112→
+   113→  const itemText = (item) =>
+   114→    isAssistantItem(item) ? textWithout(item) : textWithout(item);
+   115→  const classifyText = (item, excludeSel) => textWithout(item, excludeSel);
+   116→
+   117→  // ── DOM primitives ────────────────────────────────────────────────────────
+   118→  const allItems = () => [...document.querySelectorAll(S.anyItem)];
+   119→  const assistantItems = () => [...document.querySelectorAll(S.assistantItem)];
+   120→  const assistantCount = () => assistantItems().length;
+   121→  const userCount = () => document.querySelectorAll(S.userItem).length;
+   122→  // Scope to the SITE's composer only: skip snapgentV3's own injected UI (the
+   123→  // settings textarea #zs-set-text in #zs-root). On login/OAuth pages with no
+   124→  // site editor this returns null, keeping the "not on a chat page" guard in
+   125→  // the send hooks intact (otherwise our own textarea would defeat it and the
+   126→  // hooks could swallow the site's login button).
+   127→  const getEditor = () => {
+   128→    for (const e of document.querySelectorAll(S.editor)) {
+   129→      if (!e.closest("#zs-root")) return e;
+   130→    }
+   131→    return null;
+   132→  };
+   133→  const editorText = () => {
+   134→    const e = getEditor();
+   135→    if (!e) return "";
+   136→    return e.value != null ? e.value : e.textContent || "";
+   137→  };
+   138→
+   139→  const lastAssistant = () => {
+   140→    const it = assistantItems();
+   141→    return it.length ? it[it.length - 1] : null;
+   142→  };
+   143→
+   144→  // Stable per-turn identity: the `message-<uuid>` class on the assistant turn's
+   145→  // wrapper (survives Svelte re-renders / list virtualization). null if absent.
+   146→  function lastAssistantId() {
+   147→    let n = lastAssistant();
+   148→    while (n) {
+   149→      const m = (n.className || "").toString().match(/message-([0-9a-f-]{20,})/);
+   150→      if (m) return m[1];
+   151→      n = n.parentElement;
+   152→    }
+   153→    return null;
+   154→  }
+   155→
+   156→  // ── Chip anchor ───────────────────────────────────────────────────────────
+   157→  // The turn's inner reply lives in a `.markdown-prose` div (NOTE the turn root
+   158→  // `.chat-assistant` ALSO carries a `markdown-prose` class, so querySelector -
+   159→  // descendants only - returns the inner one). Its parent is the content COLUMN
+   160→  // (`.flex.flex-col.w-full`, a vertical stack holding the reply then an
+   161→  // `aria-hidden` spacer; the copy/regenerate action bar lives OUTSIDE the turn,
+   162→  // validated live). Anchoring the chip there + chipAppend stacks it UNDER the
+   163→  // reply (parity with Qwen/Kimi) instead of pinned above the whole turn.
+   164→  function chipAnchor(item) {
+   165→    if (!item) return item;
+   166→    const mp = item.querySelector(".markdown-prose");
+   167→    return (mp && mp.parentElement) || item;
+   168→  }
+   169→  // With chipAppend the chip trails the reply. The column's last child is a bare
+   170→  // `aria-hidden` spacer; name it as the fixed point the chip stays just BEFORE
+   171→  // so it hugs the reply text rather than sinking below the spacer. null when
+   172→  // absent -> the chip simply appends after the reply (still below it).
+   173→  function chipTrailRef(item) {
+   174→    const anchor = chipAnchor(item);
+   175→    return (anchor && anchor.querySelector(':scope > div[aria-hidden="true"]')) || null;
+   176→  }
+   177→
+   178→  const chatIsEmpty = () => allItems().length === 0;
+   179→  // A genuinely fresh chat: the "/" route with the composer rendered and no turns.
+   180→  const isFreshChat = () =>
+   181→    chatIsEmpty() && /^\/?$/.test(location.pathname) && !!getEditor();
+   182→
+   183→  // The composer box the Start gate hides as one unit.
+   184→  const composerFrame = () =>
+   185→    document.querySelector(S.composer) ||
+   186→    (getEditor() ? getEditor().closest("form, .relative") : null);
+   187→
+   188→  // Integrated status bar (same approach as Kimi): GLM is a Svelte app that
+   189→  // reconciles the composer subtree, so we must NOT insert our #zs-bar into it
+   190→  // (a foreign node in a framework-managed parent risks the diff nesting the
+   191→  // composer inside the bar). barAnchor() returns the rounded composer CARD - the
+   192→  // `flex flex-col … rounded-xl` ancestor of the textarea, which holds the input
+   193→  // box then the toolbar row - and the core (placeBar anchored branch) keeps the
+   194→  // bar in #zs-root, positions it to hug that card's top edge at full width, and
+   195→  // reserves the strip with padding-top. Validated live: full width, hugs top,
+   196→  // pushes the input down with no overlap.
+   197→  function barAnchor() {
+   198→    const ed = getEditor();
+   199→    return (ed && ed.closest('.flex-col[class*="rounded"]')) || null;
+   200→  }
+   201→
+   202→  // ── Input lock ────────────────────────────────────────────────────────────
+   203→  // The textarea is a real <textarea>: `readonly` blocks the user but is ignored
+   204→  // by the native prototype setter used in setTextareaValue(), so our own
+   205→  // injections still work.
+   206→  function setInputLock(on) {
+   207→    const ed = getEditor();
+   208→    if (!ed) return;
+   209→    if (on) {
+   210→      if (!ed.dataset.zsPlaceholder) ed.dataset.zsPlaceholder = ed.getAttribute("placeholder") || "";
+   211→      ed.setAttribute("readonly", "");
+   212→      ed.setAttribute("placeholder", "⏳ Agent working… please wait");
+   213→    } else {
+   214→      ed.removeAttribute("readonly");
+   215→      if (ed.dataset.zsPlaceholder != null) ed.setAttribute("placeholder", ed.dataset.zsPlaceholder);
+   216→    }
+   217→  }
+   218→
+   219→  // ── Send / stop buttons ────────────────────────────────────────────────────
+   220→  const sendButton = () => {
+   221→    const c = composerFrame();
+   222→    return (c && c.querySelector(S.sendBtn)) || document.querySelector(S.sendBtn);
+   223→  };
+   224→  // While generating, the send button is replaced by a round stop button inside
+   225→  // the composer (a submit button with `rounded-full`/`bg-black` and no id).
+   226→  function stopButton() {
+   227→    const c = composerFrame();
+   228→    if (!c) return null;
+   229→    return [...c.querySelectorAll("button")].find(
+   230→      (b) => b.id !== "send-message-button" &&
+   231→             /rounded-full/.test(b.className) &&
+   232→             /bg-black|bg-white/.test(b.className) &&
+   233→             // z.ai added round `bg-white rounded-full` SCROLL-TO-BOTTOM arrows to
+   234→             // the composer (an <svg> down-arrow in an `absolute` overlay). They
+   235→             // matched the old criteria, so genActive()/isGenerating latched TRUE
+   236→             // forever on a static page - the Stop button showed red with no loop
+   237→             // running and finalisation/camouflage stalled. The real stop button is
+   238→             // a round button holding a small square <span> (NO svg), so exclude any
+   239→             // svg-bearing button.
+   240→             !b.querySelector("svg")
+   241→    ) || null;
+   242→  }
+   243→
+   244→  // ── Generation detection ──────────────────────────────────────────────────
+   245→  function streamText(item) {
+   246→    if (!item) return "";
+   247→    const think = item.querySelector(S.thinking);
+   248→    return (think ? think.textContent || "" : "") + "\n" + textWithout(item);
+   249→  }
+   250→  const streamLen = (item) => streamText(item === undefined ? lastAssistant() : item).length;
+   251→
+   252→  let _streamMax = -1, _streamAt = 0, _streamItem = null;
+   253→  function sampleStream() {
+   254→    const item = lastAssistant();
+   255→    const len = streamText(item).length;
+   256→    const now = Date.now();
+   257→    if (item !== _streamItem || len < _streamMax - 400) {
+   258→      _streamItem = item; _streamMax = len; _streamAt = now; return;
+   259→    }
+   260→    if (len > _streamMax) { _streamMax = len; _streamAt = now; }
+   261→  }
+   262→  const grewWithin = (ms) => _streamMax > 1 && Date.now() - _streamAt < ms;
+   263→
+   264→  // GLM's stop button is present for the ENTIRE generation and reliably clears
+   265→  // when it ends (validated live), so we TRUST it directly. We must NOT gate it
+   266→  // on stream growth the way Gemini's wedge guard does: GLM renders the answer
+   267→  // in a CodeMirror editor that VIRTUALIZES its lines, so a long script's
+   268→  // measured text length PLATEAUS mid-stream. The growth guard then wrongly
+   269→  // declared the still-active generation "done", the watcher finalized a
+   270→  // half-written command, and the feedback we sent aborted GLM mid-reply - the
+   271→  // parse_error / truncation loop. Trusting the button avoids that entirely;
+   272→  // the growth check only covers the brief tail right after the button clears.
+   273→  function genActive() {
+   274→    sampleStream();
+   275→    if (stopButton()) return true;
+   276→    return grewWithin(timings.GEN_IDLE_MS);
+   277→  }
+   278→  const isGenerating = genActive;
+   279→  const isBusyNow = genActive;
+   280→  const isHardGenerating = () => !!stopButton();
+   281→
+   282→  // GLM exposes no reliable per-turn "stopped" marker → never halted.
+   283→  const turnHalted = () => false;
+   284→  const findContinueBtn = () => null;
+   285→  const clickContinueBtn = () => false;
+   286→
+   287→  function snapshot() {
+   288→    try {
+   289→      const it = lastAssistant();
+   290→      if (!it) return { th: 0, rp: 0 };
+   291→      const think = it.querySelector(S.thinking);
+   292→      return {
+   293→        th: think ? (think.textContent || "").trim().length : 0,
+   294→        rp: textWithout(it).length,
+   295→      };
+   296→    } catch { return {}; }
+   297→  }
+   298→
+   299→  function readAssistant() {
+   300→    const item = lastAssistant();
+   301→    if (!item) return { present: false, reply: "", thinking: "", item: null };
+   302→    const think = item.querySelector(S.thinking);
+   303→    return {
+   304→      present: true,
+   305→      reply: textWithout(item).trim(),
+   306→      thinking: think ? (think.textContent || "").trim() : "",
+   307→      item,
+   308→    };
+   309→  }
+   310→
+   311→  async function waitFor(pred, timeout) {
+   312→    const t0 = Date.now();
+   313→    while (Date.now() - t0 < timeout) {
+   314→      if (pred()) return true;
+   315→      await sleep(120);
+   316→    }
+   317→    return false;
+   318→  }
+   319→
+   320→  // ── Sending ─────────────────────────────────────────────────────────────────
+   321→  // Real <textarea> driven by Svelte: set .value via the native prototype setter
+   322→  // so the framework's input handler fires, dispatch an input event, then click
+   323→  // the send button ONCE it re-enables (a fresh value disables it for a frame).
+   324→  function setTextareaValue(el, v) {
+   325→    const proto = window.HTMLTextAreaElement && window.HTMLTextAreaElement.prototype;
+   326→    const setter = proto && Object.getOwnPropertyDescriptor(proto, "value");
+   327→    if (setter && setter.set) setter.set.call(el, v);
+   328→    else el.value = v;
+   329→    el.dispatchEvent(new Event("input", { bubbles: true }));
+   330→  }
+   331→
+   332→  function clickSendButton() {
+   333→    if (isBusyNow()) return false;
+   334→    const btn = sendButton();
+   335→    if (btn && !btn.disabled) { btn.click(); return true; }
+   336→    return false;
+   337→  }
+   338→
+   339→  async function typeAndSend(text, images) {
+   340→    const editor = getEditor();
+   341→    if (!editor) throw new Error("GLM input box not found");
+   342→    editor.focus();
+   343→    setTextareaValue(editor, text);
+   344→    // Attach images LAST, right before the send click - see gemini.js's
+   345→    // typeAndSend for why (attaching before retyping the text can sever the
+   346→    // site's binding between the pending upload and the message being sent).
+   347→    // submitAndGetBase RETRIES this function; only attach if nothing is staged
+   348→    // yet, else each retry uploads ANOTHER duplicate copy.
+   349→    if (images && images.length && !hasPendingAttachment()) { try { await attachImages(images); } catch {} }
+   350→    // Wait for Svelte to re-enable the send button (proof it registered the text),
+   351→    // then click the instant it's clickable. In a LONG conversation the message
+   352→    // list is heavy, so Svelte's reactivity to the input event can take well over
+   353→    // a second - the old 1500ms cap expired with the button still `disabled`, the
+   354→    // click no-opped, and only the core's retry loop eventually landed it (the
+   355→    // user's "message sits in the input then sends after a long time"). We now wait
+   356→    // up to 8s AND re-dispatch the input event every ~700ms so a slow/queued Svelte
+   357→    // cycle keeps getting nudged until it re-enables the button.
+   358→    let lastNudge = Date.now();
+   359→    const enabled = await waitFor(() => {
+   360→      const b = sendButton();
+   361→      if (b && !b.disabled) return true;
+   362→      if (Date.now() - lastNudge > 700) {
+   363→        lastNudge = Date.now();
+   364→        // Re-assert the value (a heavy re-render can drop it) and re-fire input.
+   365→        if (editorText() !== text) setTextareaValue(editor, text);
+   366→        else editor.dispatchEvent(new Event("input", { bubbles: true }));
+   367→      }
+   368→      return false;
+   369→    }, 8000);
+   370→    diag("glm.send", { enabled, busy: isBusyNow() });
+   371→    if (!clickSendButton() && !isBusyNow()) {
+   372→      const o = { key: "Enter", code: "Enter", keyCode: 13, which: 13, bubbles: true, cancelable: true };
+   373→      editor.dispatchEvent(new KeyboardEvent("keydown", o));
+   374→      editor.dispatchEvent(new KeyboardEvent("keyup", o));
+   375→    }
+   376→  }
+   377→
+   378→  function stopGeneration() {
+   379→    const b = stopButton();
+   380→    if (b) try { b.click(); } catch {}
+   381→  }
+   382→
+   383→  // No site modes to enforce (model / reasoning toggle left to the user).
+   384→  function enforceComposer() { return { ready: !!getEditor() }; }
+   385→  async function ensureComposerReady(reason) {
+   386→    diag("mode_ready", { reason, provider: "glm" });
+   387→    return { ready: !!getEditor() };
+   388→  }
+   389→
+   390→  // ── Error / limit detection (site chrome only) ────────────────────────────
+   391→  function scanError() {
+   392→    try {
+   393→      for (const el of document.querySelectorAll(S.errorSurfaces)) {
+   394→        if (el.offsetParent === null) continue;
+   395→        if (el.closest(S.anyItem)) continue; // model content, not UI chrome
+   396→        const t = (el.innerText || "").trim();
+   397→        if (t.length > 8 && t.length < 600 && RE.contextLimit.test(t)) return t.slice(0, 240);
+   398→      }
+   399→    } catch {}
+   400→    if (!getEditor()) return "The input box disappeared (session ended?).";
+   401→    return null;
+   402→  }
+   403→  const isTooLongMsg = (text) => RE.tooLong.test(text);
+   404→  const isBusyMsg = (text) => RE.busy.test(text);
+   405→
+   406→  // ── Image attachment (best effort) ────────────────────────────────────────
+   407→  function fileFromImage(img, i) {
+   408→    const mime = img.mimeType || "image/jpeg";
+   409→    const bin = atob(img.data);
+   410→    const arr = new Uint8Array(bin.length);
+   411→    for (let j = 0; j < bin.length; j++) arr[j] = bin.charCodeAt(j);
+   412→    const ext = mime.includes("png") ? "png" : "jpg";
+   413→    return new File([arr], `snapgentV3_${Date.now()}_${i}.${ext}`, { type: mime });
+   414→  }
+   415→  // The PENDING attachment chip. z.ai mounts each staged upload as a
+   416→  // `.chip-scroll > button` inside the composer card (barAnchor). A SENT image
+   417→  // renders separately in its `.user-message` turn, so scoping the probe to the
+   418→  // composer card excludes history - which stops a leftover chip from a PREVIOUS
+   419→  // capture reading as "already pending" and skipping the next attach (the
+   420→  // 2nd-capture-never-attaches bug seen on Kimi). Validated live on chat.z.ai.
+   421→  const pendingChip = () => {
+   422→    const host = barAnchor() || document;
+   423→    return host.querySelector(".chip-scroll > button");
+   424→  };
+   425→  const hasPendingAttachment = () => !!pendingChip();
+   426→  // Upload done = the chip's <img data-cy="image"> src has flipped from its local
+   427→  // placeholder to the remote CDN url (https://z-cdn-media.chatglm.cn/…). Sending
+   428→  // before that goes out text-only, so we WAIT for the http(s) src.
+   429→  const attachmentReady = () => {
+   430→    const host = barAnchor() || document;
+   431→    const im = host.querySelector('.chip-scroll img[data-cy="image"]') || host.querySelector(".chip-scroll img");
+   432→    return !!(im && /^https?:\/\//.test(im.getAttribute("src") || ""));
+   433→  };
+   434→  async function attachImages(images) {
+   435→    if (!images || !images.length) return false;
+   436→    const dt = new DataTransfer();
+   437→    images.forEach((img, i) => { try { dt.items.add(fileFromImage(img, i)); } catch {} });
+   438→    if (!dt.items.length) return false;
+   439→    // z.ai keeps a single always-mounted <input type=file> in the composer
+   440→    // (accepts png/jpg among others); setting .files + change stages the upload -
+   441→    // no "+" menu to open (unlike Kimi). A synthetic paste is NOT needed.
+   442→    const fileInput = document.querySelector('input[type="file"]');
+   443→    if (!fileInput) { diag("attach.noFileInput"); return false; }
+   444→    diag("attach.setFiles", { count: dt.items.length });
+   445→    try { fileInput.files = dt.files; fileInput.dispatchEvent(new Event("change", { bubbles: true })); }
+   446→    catch (e) { diag("attach.setFilesThrew", { msg: String((e && e.message) || e) }); return false; }
+   447→    if (!(await waitFor(pendingChip, 15000))) { diag("attach.noChip"); return false; }
+   448→    const ok = await waitFor(attachmentReady, 30000);
+   449→    diag("attach.uploadDone", { ok });
+   450→    return ok;
+   451→  }
+   452→  function clearAttachments() {
+   453→    try {
+   454→      const host = barAnchor() || document;
+   455→      host.querySelectorAll(".chip-scroll > button").forEach((chip) => {
+   456→        // The per-chip remove control is the small button revealed on hover
+   457→        // (`invisible text-icon-…`); fall back to the chip's last inner button.
+   458→        const inner = [...chip.querySelectorAll("button")];
+   459→        const rm = inner.find((b) => /invisible|text-icon/.test(b.className)) || inner[inner.length - 1];
+   460→        if (rm) try { rm.click(); } catch {}
+   461→      });
+   462→    } catch {}
+   463→  }
+   464→
+   465→  // /c/<uuid> = a real conversation. "/" = a fresh chat with no id yet → ""
+   466→  // (transient) so the core never persists it as "started".
+   467→  const conversationKey = () => (/^\/?$/.test(location.pathname) ? "" : location.pathname);
+   468→
+   469→  // ── User-send interception ────────────────────────────────────────────────
+   470→  function installSendHooks(handlers) {
+   471→    document.addEventListener(
+   472→      "keydown",
+   473→      (e) => {
+   474→        if (e.key !== "Enter" || e.shiftKey || e.isComposing) return;
+   475→        const ed = getEditor();
+   476→        if (!ed || !ed.contains(e.target)) return;
+   477→        if (editorText().trim() === "") return;
+   478→        if (handlers.isBlocked()) return;
+   479→        if (!handlers.isStarted()) {
+   480→          if (!chatIsEmpty()) return; // existing conversation → not ours to gate
+   481→          handlers.onBlockedAttempt(); // nudge only; never block plain chat
+   482→          return;
+   483→        }
+   484→        handlers.onUserMessage(assistantCount());
+   485→      },
+   486→      true
+   487→    );
+   488→
+   489→    document.addEventListener(
+   490→      "click",
+   491→      (e) => {
+   492→        if (!getEditor()) return;
+   493→        const t = e.target;
+   494→        // Stop button (round, in the composer) = a native stop intent.
+   495→        const stop = t && t.closest && t.closest("button");
+   496→        if (stop && composerFrame() && composerFrame().contains(stop) &&
+   497→            stop.id !== "send-message-button" &&
+   498→            /rounded-full/.test(stop.className) && /bg-black|bg-white/.test(stop.className) &&
+   499→            !stop.querySelector("svg")) { // exclude the scroll-to-bottom arrows (see stopButton)
+   500→          handlers.onNativeStop();
+   501→          return;
+   502→        }
+   503→        const btn = t && t.closest && t.closest(S.sendBtn);
+   504→        if (!btn) return;
+   505→        if (btn.disabled) return;
+   506→        if (handlers.isBlocked()) return;
+   507→        if (!handlers.isStarted()) {
+   508→          if (!chatIsEmpty()) return;
+   509→          handlers.onBlockedAttempt(); // nudge only; never block plain chat
+   510→          return;
+   511→        }
+   512→        handlers.onUserMessage(assistantCount());
+   513→      },
+   514→      true
+   515→    );
+   516→  }
+   517→
+   518→  // ── Tool-block location for camouflage ────────────────────────────────────
+   519→  // GLM wraps each fenced code block in an atomic `div[class*="rounded-xl"]`
+   520→  // carrying a `.copy-code-button` (markers + JSON survive in textContent), and
+   521→  // Svelte re-renders the markdown subtree on stream updates / next send. So,
+   522→  // like Gemini: hide every code wrapper in the reply whose text carries a
+   523→  // command shape AND mark the reply root (`.chat-assistant`, which keeps its
+   524→  // identity) with .zs-cmd-mask so a CSS rule re-hides recreated wrappers with
+   525→  // zero flash. Also catch a stray bare inline command paragraph.
+   526→  const CMD_SHAPE = /"(?:command|tool)"\s*:\s*"|###\s*lua|###mcp_tool###/i;
+   527→  function findToolBlockSpot(item /*, chip */) {
+   528→    if (!item) return null;
+   529→    let hidAny = null;
+   530→    // 1. Fenced code blocks carrying a command (skip ones inside the reasoning).
+   531→    for (const cc of item.querySelectorAll(S.copyCodeBtn)) {
+   532→      if (cc.closest(S.thinking)) continue;
+   533→      const wrap = cc.closest(S.codeWrap);
+   534→      if (!wrap || wrap.closest(".zs-chip")) continue;
+   535→      if (CMD_SHAPE.test(wrap.textContent || "")) {
+   536→        wrap.classList.add("zs-tool-hide");
+   537→        item.classList.add("zs-cmd-mask");
+   538→        hidAny = hidAny || { parent: wrap.parentElement, ref: wrap };
+   539→      }
+   540→    }
+   541→    // 2. Bare top-level blocks with an inline command (no code wrapper inside).
+   542→    const reply = item.querySelector(".markdown-prose") || item;
+   543→    [...reply.children].forEach((el) => {
+   544→      if (el.classList.contains("zs-chip") || el.closest(S.thinking) ||
+   545→          el.querySelector(S.copyCodeBtn)) return;
+   546→      const t = el.textContent || "";
+   547→      if (t.length < 600 && CMD_SHAPE.test(t)) {
+   548→        el.classList.add("zs-tool-hide");
+   549→        hidAny = hidAny || { parent: el.parentElement, ref: el };
+   550→      }
+   551→    });
+   552→    return hidAny;
+   553→  }
+   554→
+   555→  return {
+   556→    id: "glm",
+   557→    displayName: "GLM",
+   558→    // GLM-5.2 is multimodal and z.ai's composer accepts image uploads (png/jpg via
+   559→    // the always-mounted file input; chip staged in .chip-scroll, upload complete
+   560→    // when its <img> src flips to the z-cdn-media CDN url - see attachImages). So
+   561→    // screen_capture is exposed here (main.js BLOCKED_TOOLS gate). Confirm the
+   562→    // model actually READS the image via provider-test-checklist step 9 (incl. two
+   563→    // captures in a row) - flip back to false if a live read ever fails.
+   564→    supportsVision: true,
+   565→    timings,
+   566→    // Reasoning-area selector, exported so the CORE's raw-command-visible probes
+   567→    // exclude it (same fix as DeepSeek/Gemini/Kimi): GLM's "Thought Process"
+   568→    // renders in .thinking-chain-container and quotes the command JSON, which the
+   569→    // camouflage never hides - without this the core reads it as "raw block still
+   570→    // visible" forever and the chip flaps done→run→done.
+   571→    thinkingSel: S.thinking,
+   572→    // Shown as a permanent, non-intrusive "⚠ unstable" notice in the bar. The
+   573→    // z.ai free endpoint is frequently at capacity: its backend returns an HTML
+   574→    // error page instead of JSON, so the reply shows "No response, please try
+   575→    // again later" (a z.ai server issue, NOT the extension). Prefer the GLM-5.2
+   576→    // model and retry off-peak.
+   577→    unstableWarning:
+   578→      "GLM (z.ai) can be unstable: when its servers are busy a turn fails with " +
+   579→      "\"No response, please try again later\" - that's a z.ai issue, not the extension. " +
+   580→      "Prefer the GLM-5.2 model and retry in a moment (or off-peak) if it happens.",
+   581→    // Svelte re-renders the reply's markdown subtree on every update, wiping any
+   582→    // chip placed inside it. Anchor chips at the turn-element level instead
+   583→    // (redirected into the reply column by chipAnchor).
+   584→    chipAtItemLevel: true,
+   585→    chipAnchor,
+   586→    // GLM writes narration THEN the tool call at the end of the turn, so trail
+   587→    // the chip after the reply text (chipAppend) rather than pinning it first -
+   588→    // it then sits BELOW the reply, like Qwen/Kimi. chipTrailRef keeps it just
+   589→    // above the trailing aria-hidden spacer; ensureOwnedChip re-asserts both
+   590→    // across Svelte's re-renders of the reply subtree.
+   591→    chipAppend: true,
+   592→    chipTrailRef,
+   593→    // Assistant turns expose a stable message-<uuid> identity (lastAssistantId),
+   594→    // so the core's watcher can refuse finalizing before this send's reply exists.
+   595→    reliableCounts: true,
+   596→    init({ diag: d } = {}) { if (d) diag = d; },
+   597→    // turns
+   598→    allItems, isUserItem, isAssistantItem, itemText, classifyText,
+   599→    assistantCount, userCount, lastAssistant, lastAssistantId, readAssistant,
+   600→    streamLen, snapshot,
+   601→    // composer / state
+   602→    getEditor, editorText, chatIsEmpty, isFreshChat, composerFrame, barAnchor,
+   603→    setInputLock, typeAndSend, stopGeneration,
+   604→    isGenerating, isBusyNow, isHardGenerating,
+   605→    enforceComposer, ensureComposerReady,
+   606→    turnHalted, findContinueBtn, clickContinueBtn,
+   607→    scanError, isTooLongMsg, isBusyMsg,
+   608→    // actions
+   609→    attachImages, clearAttachments, conversationKey,
+   610→    installSendHooks, findToolBlockSpot,
+   611→  };
+   612→})();
+   613→

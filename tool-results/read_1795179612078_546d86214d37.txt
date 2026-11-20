@@ -1,0 +1,684 @@
+     1→#!/usr/bin/env python3
+     2→import fnmatch
+     3→import json
+     4→import os
+     5→import re
+     6→import shutil
+     7→import subprocess
+     8→import sys
+     9→from pathlib import Path
+    10→from typing import Any, Dict, Iterable, List, Optional
+    11→from urllib.parse import unquote, urlparse
+    12→
+    13→try:
+    14→    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    15→    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    16→except AttributeError:
+    17→    pass
+    18→
+    19→IGNORED_DIRECTORIES = {
+    20→    ".git", ".hg", ".svn", ".venv", "venv", "node_modules",
+    21→    "__pycache__", ".pytest_cache", ".mypy_cache", ".next", "dist", "build",
+    22→}
+    23→MAX_RESULTS = 500
+    24→MAX_FILE_CHARS = 200_000
+    25→SAFE_PROJECT_SCRIPTS = {"build", "check", "format", "lint", "test", "typecheck"}
+    26→
+    27→
+    28→def _vscode_active_folder() -> Optional[Path]:
+    29→    if sys.platform == "win32":
+    30→        result = subprocess.run(
+    31→            ["tasklist", "/FI", "IMAGENAME eq Code.exe", "/NH"],
+    32→            capture_output=True,
+    33→            text=True,
+    34→            encoding="utf-8",
+    35→            errors="replace",
+    36→            timeout=5,
+    37→            check=False,
+    38→        )
+    39→        if result.returncode != 0:
+    40→            raise RuntimeError("Could not check whether VS Code is running.")
+    41→        if "Code.exe" not in result.stdout:
+    42→            return None
+    43→
+    44→    for storage_path in _vscode_storage_paths():
+    45→        if not storage_path.is_file():
+    46→            continue
+    47→        try:
+    48→            data = json.loads(storage_path.read_text(encoding="utf-8", errors="replace"))
+    49→        except (OSError, json.JSONDecodeError) as error:
+    50→            raise RuntimeError(f"Could not read VS Code workspace state: {error}") from error
+    51→
+    52→        windows_state = data.get("windowsState") or {}
+    53→        uris = []
+    54→        last_folder = (windows_state.get("lastActiveWindow") or {}).get("folder")
+    55→        if last_folder:
+    56→            uris.append(last_folder)
+    57→        uris.extend(
+    58→            folder
+    59→            for window in (windows_state.get("openedWindows") or [])
+    60→            if (folder := (window or {}).get("folder"))
+    61→        )
+    62→
+    63→        for uri in uris:
+    64→            try:
+    65→                parsed = urlparse(uri)
+    66→                path = unquote(parsed.path)
+    67→                if sys.platform == "win32" and re.match(r"^/[A-Za-z]:/", path):
+    68→                    path = path[1:]
+    69→                candidate = Path(path).resolve()
+    70→            except (OSError, ValueError):
+    71→                continue
+    72→            if candidate.is_dir():
+    73→                return candidate
+    74→    return None
+    75→
+    76→
+    77→def _vscode_storage_paths() -> List[Path]:
+    78→    if sys.platform == "win32":
+    79→        appdata = os.environ.get("APPDATA")
+    80→        if not appdata:
+    81→            return []
+    82→        return [Path(appdata) / "Code" / "User" / "globalStorage" / "storage.json"]
+    83→
+    84→    if sys.platform == "linux":
+    85→        config = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
+    86→        return [
+    87→            config / product / "User" / "globalStorage" / "storage.json"
+    88→            for product in ("Code", "Code - Insiders", "VSCodium")
+    89→        ]
+    90→
+    91→    support = Path.home() / "Library" / "Application Support"
+    92→    return [
+    93→        support / product / "User" / "globalStorage" / "storage.json"
+    94→        for product in ("Code", "Code - Insiders", "VSCodium")
+    95→    ]
+    96→
+    97→
+    98→def get_root() -> Path:
+    99→    active = _vscode_active_folder()
+   100→    if active is None:
+   101→        raise RuntimeError("Open a project folder in VS Code before using the VS Code MCP server.")
+   102→    return active.resolve()
+   103→
+   104→
+   105→def normalize_target(rel_or_abs: str, root: Path) -> Path:
+   106→    path = Path(rel_or_abs or ".")
+   107→    if not path.is_absolute():
+   108→        path = root / path
+   109→    target = path.resolve()
+   110→    try:
+   111→        target.relative_to(root)
+   112→    except ValueError as error:
+   113→        raise ValueError(f"Path escapes workspace root: {rel_or_abs}") from error
+   114→    return target
+   115→
+   116→
+   117→def _relative(path: Path, root: Path) -> str:
+   118→    return path.relative_to(root).as_posix() or "."
+   119→
+   120→
+   121→def _iter_files(base: Path) -> Iterable[Path]:
+   122→    if base.is_file():
+   123→        yield base
+   124→        return
+   125→    for current, dirs, names in os.walk(base):
+   126→        dirs[:] = sorted(
+   127→            name for name in dirs
+   128→            if name not in IGNORED_DIRECTORIES
+   129→        )
+   130→        for name in sorted(names):
+   131→            yield Path(current) / name
+   132→
+   133→
+   134→def _run_process(command: List[str], root: Path, timeout: int = 30) -> str:
+   135→    result = subprocess.run(
+   136→        command,
+   137→        cwd=str(root),
+   138→        capture_output=True,
+   139→        text=True,
+   140→        encoding="utf-8",
+   141→        errors="replace",
+   142→        shell=False,
+   143→        timeout=timeout,
+   144→        check=False,
+   145→    )
+   146→    output = result.stdout.strip() or result.stderr.strip() or "(no output)"
+   147→    if result.returncode:
+   148→        raise RuntimeError(
+   149→            f"Command exited with status {result.returncode}:\n{output[:MAX_FILE_CHARS]}"
+   150→        )
+   151→    return output[:MAX_FILE_CHARS]
+   152→
+   153→
+   154→def get_workspace_info() -> Dict[str, Any]:
+   155→    root = get_root()
+   156→    return {
+   157→        "name": root.name,
+   158→        "path": str(root),
+   159→        "is_git_repository": (root / ".git").exists(),
+   160→    }
+   161→
+   162→
+   163→def get_project_info() -> Dict[str, Any]:
+   164→    root = get_root()
+   165→    info: Dict[str, Any] = {"workspace": root.name, "manifests": []}
+   166→    for filename in ("package.json", "pyproject.toml", "Cargo.toml", "go.mod", "pom.xml", "*.sln"):
+   167→        candidates = sorted(root.glob(filename))[:10]
+   168→        for candidate in candidates:
+   169→            entry: Dict[str, Any] = {"path": _relative(candidate, root)}
+   170→            if candidate.name == "package.json":
+   171→                try:
+   172→                    package = json.loads(candidate.read_text(encoding="utf-8"))
+   173→                except (OSError, json.JSONDecodeError) as error:
+   174→                    entry["error"] = str(error)
+   175→                else:
+   176→                    entry["name"] = package.get("name")
+   177→                    entry["scripts"] = package.get("scripts", {})
+   178→            info["manifests"].append(entry)
+   179→    return info
+   180→
+   181→
+   182→def list_dir(path: str = ".") -> List[Dict[str, str]]:
+   183→    root = get_root()
+   184→    target = normalize_target(path, root)
+   185→    if not target.exists():
+   186→        raise FileNotFoundError(f"Directory not found: {path}")
+   187→    if not target.is_dir():
+   188→        raise NotADirectoryError(f"Not a directory: {path}")
+   189→    return [
+   190→        {
+   191→            "name": child.name,
+   192→            "path": _relative(child, root),
+   193→            "type": "directory" if child.is_dir() else "file",
+   194→        }
+   195→        for child in sorted(target.iterdir(), key=lambda item: (item.is_file(), item.name.lower()))
+   196→    ]
+   197→
+   198→
+   199→def list_tree(path: str = ".", max_depth: int = 3) -> List[Dict[str, Any]]:
+   200→    root = get_root()
+   201→    target = normalize_target(path, root)
+   202→    if not target.is_dir():
+   203→        raise NotADirectoryError(f"Not a directory: {path}")
+   204→    depth_limit = max(0, min(int(max_depth), 8))
+   205→    result: List[Dict[str, Any]] = []
+   206→    for current, dirs, files in os.walk(target):
+   207→        current_path = Path(current)
+   208→        depth = len(current_path.relative_to(target).parts)
+   209→        dirs[:] = sorted(
+   210→            name for name in dirs
+   211→            if name not in IGNORED_DIRECTORIES
+   212→        )
+   213→        for name in sorted(dirs) + sorted(files):
+   214→            entry_path = current_path / name
+   215→            result.append({
+   216→                "path": _relative(entry_path, root),
+   217→                "type": "directory" if entry_path.is_dir() else "file",
+   218→            })
+   219→            if len(result) >= MAX_RESULTS:
+   220→                return result
+   221→        if depth >= depth_limit:
+   222→            dirs[:] = []
+   223→    return result
+   224→
+   225→
+   226→def find_files(path: str = ".", pattern: str = "*") -> List[str]:
+   227→    root = get_root()
+   228→    base = normalize_target(path, root)
+   229→    if not base.exists():
+   230→        raise FileNotFoundError(f"Path not found: {path}")
+   231→    if not base.is_dir():
+   232→        raise NotADirectoryError(f"Not a directory: {path}")
+   233→    matches = [
+   234→        _relative(file_path, root)
+   235→        for file_path in _iter_files(base)
+   236→        if fnmatch.fnmatch(file_path.name, pattern)
+   237→        or fnmatch.fnmatch(_relative(file_path, base), pattern)
+   238→    ]
+   239→    return matches[:MAX_RESULTS]
+   240→
+   241→
+   242→def search_files(path: str, query: str, file_pattern: str = "*", case_sensitive: bool = False) -> List[Dict[str, Any]]:
+   243→    root = get_root()
+   244→    target = normalize_target(path, root)
+   245→    if not target.exists():
+   246→        raise FileNotFoundError(f"Path not found: {path}")
+   247→    if not query.strip():
+   248→        raise ValueError("Search query cannot be empty.")
+   249→    needle = query if case_sensitive else query.lower()
+   250→    matches: List[Dict[str, Any]] = []
+   251→    files = [target] if target.is_file() else _iter_files(target)
+   252→    for file_path in files:
+   253→        if not fnmatch.fnmatch(file_path.name, file_pattern):
+   254→            continue
+   255→        try:
+   256→            text = file_path.read_text(encoding="utf-8", errors="replace")
+   257→        except OSError:
+   258→            continue
+   259→        for line_number, line in enumerate(text.splitlines(), start=1):
+   260→            haystack = line if case_sensitive else line.lower()
+   261→            if needle in haystack:
+   262→                matches.append({
+   263→                    "path": _relative(file_path, root),
+   264→                    "line": line_number,
+   265→                    "text": line[:500],
+   266→                })
+   267→                if len(matches) >= MAX_RESULTS:
+   268→                    return matches
+   269→    return matches
+   270→
+   271→
+   272→def read_file(path: str) -> str:
+   273→    root = get_root()
+   274→    target = normalize_target(path, root)
+   275→    if not target.is_file():
+   276→        raise FileNotFoundError(f"File not found: {path}")
+   277→    content = target.read_text(encoding="utf-8", errors="replace")
+   278→    if len(content) > MAX_FILE_CHARS:
+   279→        return content[:MAX_FILE_CHARS] + "\n[truncated]"
+   280→    return content
+   281→
+   282→
+   283→def read_files(paths: List[str]) -> List[Dict[str, str]]:
+   284→    if len(paths) > 50:
+   285→        raise ValueError("Read at most 50 files per request.")
+   286→    return [{"path": path, "content": read_file(path)} for path in paths]
+   287→
+   288→
+   289→def read_file_lines(path: str, start_line: int = 1, end_line: int = 200) -> str:
+   290→    if start_line < 1 or end_line < start_line:
+   291→        raise ValueError("Line numbers must be positive, and end_line must be >= start_line.")
+   292→    if end_line - start_line > 999:
+   293→        raise ValueError("Read at most 1000 lines per request.")
+   294→    lines = read_file(path).splitlines()
+   295→    return "\n".join(
+   296→        f"{number}: {lines[number - 1]}"
+   297→        for number in range(start_line, min(end_line, len(lines)) + 1)
+   298→    )
+   299→
+   300→
+   301→def get_file_info(path: str) -> Dict[str, Any]:
+   302→    root = get_root()
+   303→    target = normalize_target(path, root)
+   304→    if not target.exists():
+   305→        raise FileNotFoundError(f"Path not found: {path}")
+   306→    stat = target.stat()
+   307→    return {
+   308→        "path": _relative(target, root),
+   309→        "type": "directory" if target.is_dir() else "file",
+   310→        "size_bytes": stat.st_size,
+   311→        "modified": stat.st_mtime,
+   312→        "suffix": target.suffix,
+   313→    }
+   314→
+   315→
+   316→def get_file_outline(path: str) -> List[Dict[str, Any]]:
+   317→    content = read_file(path)
+   318→    patterns = (
+   319→        r"^\s*(?:async\s+)?def\s+([A-Za-z_]\w*)",
+   320→        r"^\s*class\s+([A-Za-z_]\w*)",
+   321→        r"^\s*(?:export\s+)?(?:async\s+)?function\s+([A-Za-z_$][\w$]*)",
+   322→        r"^\s*(?:export\s+)?(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:async\s*)?(?:function|\([^)]*\)\s*=>|[A-Za-z_$][\w$]*\s*=>)",
+   323→    )
+   324→    result = []
+   325→    for line_number, line in enumerate(content.splitlines(), start=1):
+   326→        for pattern in patterns:
+   327→            match = re.search(pattern, line)
+   328→            if match:
+   329→                result.append({"name": match.group(1), "line": line_number})
+   330→                break
+   331→    return result[:MAX_RESULTS]
+   332→
+   333→
+   334→def create_file(path: str, content: str = "") -> str:
+   335→    root = get_root()
+   336→    target = normalize_target(path, root)
+   337→    target.parent.mkdir(parents=True, exist_ok=True)
+   338→    try:
+   339→        with target.open("x", encoding="utf-8", newline="") as file:
+   340→            file.write(content)
+   341→    except FileExistsError as error:
+   342→        raise FileExistsError(f"File already exists: {path}") from error
+   343→    return f"Created {_relative(target, root)}"
+   344→
+   345→
+   346→def write_file(path: str, content: str) -> str:
+   347→    root = get_root()
+   348→    target = normalize_target(path, root)
+   349→    target.parent.mkdir(parents=True, exist_ok=True)
+   350→    target.write_text(content, encoding="utf-8")
+   351→    return f"Saved {_relative(target, root)}"
+   352→
+   353→
+   354→def edit_file(path: str, old_text: str, new_text: str, replace_all: bool = False) -> str:
+   355→    if not old_text:
+   356→        raise ValueError("old_text cannot be empty.")
+   357→    root = get_root()
+   358→    target = normalize_target(path, root)
+   359→    if not target.is_file():
+   360→        raise FileNotFoundError(f"File not found: {path}")
+   361→    content = target.read_text(encoding="utf-8", errors="replace")
+   362→    occurrences = content.count(old_text)
+   363→    if occurrences == 0:
+   364→        raise ValueError("The exact old_text was not found.")
+   365→    if not replace_all and occurrences != 1:
+   366→        raise ValueError(f"old_text occurs {occurrences} times; provide a unique snippet or set replace_all.")
+   367→    updated = content.replace(old_text, new_text) if replace_all else content.replace(old_text, new_text, 1)
+   368→    target.write_text(updated, encoding="utf-8")
+   369→    return f"Updated {_relative(target, root)} ({occurrences if replace_all else 1} replacement(s))"
+   370→
+   371→
+   372→def create_directory(path: str) -> str:
+   373→    root = get_root()
+   374→    target = normalize_target(path, root)
+   375→    target.mkdir(parents=True, exist_ok=True)
+   376→    return f"Directory ready: {_relative(target, root)}"
+   377→
+   378→
+   379→def move_file(source: str, destination: str) -> str:
+   380→    root = get_root()
+   381→    source_path = normalize_target(source, root)
+   382→    destination_path = normalize_target(destination, root)
+   383→    if not source_path.is_file():
+   384→        raise FileNotFoundError(f"File not found: {source}")
+   385→    if destination_path.exists():
+   386→        raise FileExistsError(f"Destination already exists: {destination}")
+   387→    destination_path.parent.mkdir(parents=True, exist_ok=True)
+   388→    source_path.rename(destination_path)
+   389→    return f"Moved {_relative(source_path, root)} to {_relative(destination_path, root)}"
+   390→
+   391→
+   392→def copy_file(source: str, destination: str) -> str:
+   393→    root = get_root()
+   394→    source_path = normalize_target(source, root)
+   395→    destination_path = normalize_target(destination, root)
+   396→    if not source_path.is_file():
+   397→        raise FileNotFoundError(f"File not found: {source}")
+   398→    if destination_path.exists():
+   399→        raise FileExistsError(f"Destination already exists: {destination}")
+   400→    destination_path.parent.mkdir(parents=True, exist_ok=True)
+   401→    shutil.copy2(source_path, destination_path)
+   402→    return f"Copied {_relative(source_path, root)} to {_relative(destination_path, root)}"
+   403→
+   404→
+   405→def git_status() -> str:
+   406→    root = get_root()
+   407→    return _run_process(["git", "status", "--short", "--branch"], root)
+   408→
+   409→
+   410→def git_diff(path: str = "") -> str:
+   411→    root = get_root()
+   412→    command = ["git", "diff", "--"]
+   413→    if path:
+   414→        command.append(_relative(normalize_target(path, root), root))
+   415→    return _run_process(command, root)
+   416→
+   417→
+   418→def git_log(limit: int = 10) -> str:
+   419→    if limit < 1 or limit > 50:
+   420→        raise ValueError("limit must be between 1 and 50.")
+   421→    return _run_process(["git", "log", f"-{limit}", "--oneline", "--decorate"], get_root())
+   422→
+   423→
+   424→def git_branches() -> str:
+   425→    return _run_process(
+   426→        ["git", "branch", "--format=%(refname:short)"],
+   427→        get_root(),
+   428→    )
+   429→
+   430→
+   431→def delete_file(path: str) -> str:
+   432→    root = get_root()
+   433→    target = normalize_target(path, root)
+   434→    if target == root or ".git" in target.relative_to(root).parts:
+   435→        raise ValueError(f"Refusing to delete protected path: {path}")
+   436→    if target.is_dir():
+   437→        raise IsADirectoryError(f"Not a file (directories are not deleted): {path}")
+   438→    if not target.is_file():
+   439→        raise FileNotFoundError(f"File not found: {path}")
+   440→    target.unlink()
+   441→    return f"Deleted {_relative(target, root)}"
+   442→
+   443→
+   444→def apply_patch(path: str, edits: List[Dict[str, Any]]) -> str:
+   445→    if not isinstance(edits, list) or not edits:
+   446→        raise ValueError("edits must be a non-empty list.")
+   447→    root = get_root()
+   448→    target = normalize_target(path, root)
+   449→    if not target.is_file():
+   450→        raise FileNotFoundError(f"File not found: {path}")
+   451→    content = target.read_text(encoding="utf-8", errors="replace")
+   452→    for index, edit in enumerate(edits, start=1):
+   453→        if not isinstance(edit, dict):
+   454→            raise ValueError(f"Edit {index} must be an object with old_text and new_text.")
+   455→        old_text = edit.get("old_text")
+   456→        new_text = edit.get("new_text")
+   457→        if not isinstance(old_text, str) or not old_text or not isinstance(new_text, str):
+   458→            raise ValueError(f"Edit {index} needs a non-empty old_text and a string new_text.")
+   459→        occurrences = content.count(old_text)
+   460→        if occurrences != 1:
+   461→            raise ValueError(f"Edit {index}: old_text occurs {occurrences} times; it must match exactly once. No changes were written.")
+   462→        content = content.replace(old_text, new_text, 1)
+   463→    target.write_text(content, encoding="utf-8")
+   464→    return f"Patched {_relative(target, root)} ({len(edits)} edit(s))"
+   465→
+   466→
+   467→def git_add(paths: List[str]) -> str:
+   468→    if not isinstance(paths, list) or not paths:
+   469→        raise ValueError("paths must be a non-empty list.")
+   470→    root = get_root()
+   471→    relatives = [_relative(normalize_target(item, root), root) for item in paths]
+   472→    if "." in relatives:
+   473→        raise ValueError("Stage specific paths, not the whole workspace.")
+   474→    _run_process(["git", "add", "--", *relatives], root)
+   475→    return f"Staged {len(relatives)} path(s): " + ", ".join(relatives)
+   476→
+   477→
+   478→def git_commit(message: str) -> str:
+   479→    if not isinstance(message, str) or not message.strip():
+   480→        raise ValueError("Commit message cannot be empty.")
+   481→    return _run_process(["git", "commit", "-m", message.strip()], get_root(), timeout=120)
+   482→
+   483→
+   484→def run_command(command: str, args: Optional[List[str]] = None) -> str:
+   485→    if not command.strip():
+   486→        raise ValueError("Command cannot be empty.")
+   487→    root = get_root()
+   488→    extra_args = args or []
+   489→    if os.name == "nt":
+   490→        return _run_process(["cmd.exe", "/c", command, *extra_args], root, timeout=30)
+   491→    return _run_process([command, *extra_args], root, timeout=30)
+   492→
+   493→
+   494→def _package_script_command(script: str, root: Path) -> List[str]:
+   495→    if script not in SAFE_PROJECT_SCRIPTS:
+   496→        raise ValueError(f"Script must be one of: {', '.join(sorted(SAFE_PROJECT_SCRIPTS))}.")
+   497→    package_path = root / "package.json"
+   498→    if not package_path.is_file():
+   499→        raise FileNotFoundError("No package.json found in the workspace root.")
+   500→    try:
+   501→        package = json.loads(package_path.read_text(encoding="utf-8"))
+   502→    except (OSError, json.JSONDecodeError) as error:
+   503→        raise RuntimeError(f"Could not read package.json: {error}") from error
+   504→    if script not in (package.get("scripts") or {}):
+   505→        raise ValueError(f"package.json does not define the '{script}' script.")
+   506→    manager = "npm"
+   507→    if (root / "pnpm-lock.yaml").exists():
+   508→        manager = "pnpm"
+   509→    elif (root / "yarn.lock").exists():
+   510→        manager = "yarn"
+   511→    elif (root / "bun.lock").exists() or (root / "bun.lockb").exists():
+   512→        manager = "bun"
+   513→    if os.name == "nt":
+   514→        return ["cmd.exe", "/c", manager, "run", script]
+   515→    return [manager, "run", script]
+   516→
+   517→
+   518→def run_project_script(script: str) -> str:
+   519→    root = get_root()
+   520→    return _run_process(_package_script_command(script, root), root, timeout=300)
+   521→
+   522→
+   523→def run_tests() -> str:
+   524→    root = get_root()
+   525→    if (root / "package.json").is_file():
+   526→        return run_project_script("test")
+   527→    if (root / "pyproject.toml").is_file() or (root / "pytest.ini").is_file():
+   528→        return _run_process([sys.executable, "-m", "pytest"], root, timeout=300)
+   529→    if any(root.glob("*.sln")) or any(root.glob("*.csproj")):
+   530→        return _run_process(["dotnet", "test"], root, timeout=300)
+   531→    raise FileNotFoundError("No supported test setup found (package.json, pytest, or .NET project).")
+   532→
+   533→
+   534→def _property(name: str, schema: Dict[str, Any]) -> Dict[str, Any]:
+   535→    return {"name": name, **schema}
+   536→
+   537→
+   538→def _tool(name: str, description: str, properties: Dict[str, Any], required: Optional[List[str]] = None) -> Dict[str, Any]:
+   539→    return {
+   540→        "name": name,
+   541→        "description": description,
+   542→        "inputSchema": {
+   543→            "type": "object",
+   544→            "properties": properties,
+   545→            "required": required or [],
+   546→        },
+   547→    }
+   548→
+   549→
+   550→STR = {"type": "string"}
+   551→TOOLS = [
+   552→    _tool("get_workspace_info", "Get the active VS Code workspace name, path, and Git status.", {}),
+   553→    _tool("get_project_info", "Inspect common project manifests and package scripts.", {}),
+   554→    _tool("list_dir", "List files and folders in the workspace.", {"path": STR}),
+   555→    _tool("list_tree", "List a bounded tree of workspace files and folders.", {"path": STR, "max_depth": {"type": "integer", "minimum": 0, "maximum": 8}}),
+   556→    _tool("find_files", "Find workspace files by glob pattern.", {"path": STR, "pattern": STR}),
+   557→    _tool("search_files", "Search text in workspace files.", {"path": STR, "query": STR, "file_pattern": STR, "case_sensitive": {"type": "boolean"}}, ["path", "query"]),
+   558→    _tool("read_file", "Read a UTF-8 text file in the workspace.", {"path": STR}, ["path"]),
+   559→    _tool("read_files", "Read up to 50 workspace files.", {"paths": {"type": "array", "items": STR}}, ["paths"]),
+   560→    _tool("read_file_lines", "Read a bounded line range from a workspace file.", {"path": STR, "start_line": {"type": "integer", "minimum": 1}, "end_line": {"type": "integer", "minimum": 1}}, ["path"]),
+   561→    _tool("get_file_info", "Get size, type, extension, and modification time for a workspace path.", {"path": STR}, ["path"]),
+   562→    _tool("get_file_outline", "List class and function declarations from a source file.", {"path": STR}, ["path"]),
+   563→    _tool("create_file", "Create a new file without overwriting an existing file.", {"path": STR, "content": STR}, ["path"]),
+   564→    _tool("write_file", "Write or replace a UTF-8 text file inside the workspace.", {"path": STR, "content": STR}, ["path", "content"]),
+   565→    _tool("edit_file", "Replace an exact text snippet; by default the snippet must be unique.", {"path": STR, "old_text": STR, "new_text": STR, "replace_all": {"type": "boolean"}}, ["path", "old_text", "new_text"]),
+   566→    _tool("create_directory", "Create a directory inside the workspace.", {"path": STR}, ["path"]),
+   567→    _tool("move_file", "Move a file inside the workspace without overwriting a destination.", {"source": STR, "destination": STR}, ["source", "destination"]),
+   568→    _tool("copy_file", "Copy a file inside the workspace without overwriting a destination.", {"source": STR, "destination": STR}, ["source", "destination"]),
+   569→    _tool("git_status", "Show the current Git branch and working-tree status.", {}),
+   570→    _tool("git_diff", "Show unstaged Git changes, optionally for one workspace path.", {"path": STR}),
+   571→    _tool("git_log", "Show recent Git commits.", {"limit": {"type": "integer", "minimum": 1, "maximum": 50}}),
+   572→    _tool("git_branches", "List local Git branches.", {}),
+   573→    _tool("run_command", "Run a command with the workspace as its working directory.", {"command": STR, "args": {"type": "array", "items": STR}}, ["command"]),
+   574→    _tool("run_project_script", "Run a named safe script (build, check, format, lint, test, typecheck) from package.json.", {"script": STR}, ["script"]),
+   575→    _tool("run_tests", "Run the workspace test script, pytest, or .NET tests when configured.", {}),
+   576→    _tool("delete_file", "Delete one file inside the workspace; directories, the workspace root, and .git are refused.", {"path": STR}, ["path"]),
+   577→    _tool("apply_patch", "Apply several exact text replacements to one file; each old_text must match exactly once and nothing is written if any edit fails.", {"path": STR, "edits": {"type": "array", "items": {"type": "object", "properties": {"old_text": STR, "new_text": STR}, "required": ["old_text", "new_text"]}}}, ["path", "edits"]),
+   578→    _tool("git_add", "Stage specific workspace paths; staging the whole workspace is refused.", {"paths": {"type": "array", "items": STR}}, ["paths"]),
+   579→    _tool("git_commit", "Commit the currently staged changes with a message; no auto-staging and no amend.", {"message": STR}, ["message"]),
+   580→]
+   581→
+   582→
+   583→def tool_dispatch(name: str, args: Dict[str, Any]) -> Any:
+   584→    handlers = {
+   585→        "get_workspace_info": lambda: get_workspace_info(),
+   586→        "get_project_info": lambda: get_project_info(),
+   587→        "list_dir": lambda: list_dir(args.get("path", ".")),
+   588→        "list_tree": lambda: list_tree(args.get("path", "."), args.get("max_depth", 3)),
+   589→        "find_files": lambda: find_files(args.get("path", "."), args.get("pattern", "*")),
+   590→        "search_files": lambda: search_files(args["path"], args["query"], args.get("file_pattern", "*"), args.get("case_sensitive", False)),
+   591→        "read_file": lambda: read_file(args["path"]),
+   592→        "read_files": lambda: read_files(args["paths"]),
+   593→        "read_file_lines": lambda: read_file_lines(args["path"], args.get("start_line", 1), args.get("end_line", 200)),
+   594→        "get_file_info": lambda: get_file_info(args["path"]),
+   595→        "get_file_outline": lambda: get_file_outline(args["path"]),
+   596→        "create_file": lambda: create_file(args["path"], args.get("content", "")),
+   597→        "write_file": lambda: write_file(args["path"], args["content"]),
+   598→        "edit_file": lambda: edit_file(args["path"], args["old_text"], args["new_text"], args.get("replace_all", False)),
+   599→        "create_directory": lambda: create_directory(args["path"]),
+   600→        "move_file": lambda: move_file(args["source"], args["destination"]),
+   601→        "copy_file": lambda: copy_file(args["source"], args["destination"]),
+   602→        "git_status": lambda: git_status(),
+   603→        "git_diff": lambda: git_diff(args.get("path", "")),
+   604→        "git_log": lambda: git_log(args.get("limit", 10)),
+   605→        "git_branches": lambda: git_branches(),
+   606→        "run_command": lambda: run_command(args["command"], args.get("args", [])),
+   607→        "run_project_script": lambda: run_project_script(args["script"]),
+   608→        "run_tests": lambda: run_tests(),
+   609→        "delete_file": lambda: delete_file(args["path"]),
+   610→        "apply_patch": lambda: apply_patch(args["path"], args["edits"]),
+   611→        "git_add": lambda: git_add(args["paths"]),
+   612→        "git_commit": lambda: git_commit(args["message"]),
+   613→    }
+   614→    handler = handlers.get(name)
+   615→    if handler is None:
+   616→        raise ValueError(f"Unknown tool: {name}")
+   617→    return handler()
+   618→
+   619→
+   620→def send_message(message: Dict[str, Any]) -> None:
+   621→    sys.stdout.write(json.dumps(message, separators=(",", ":"), ensure_ascii=False) + "\n")
+   622→    sys.stdout.flush()
+   623→
+   624→
+   625→def handle_request(request: Dict[str, Any]) -> None:
+   626→    method = request.get("method")
+   627→    request_id = request.get("id")
+   628→    params = request.get("params") or {}
+   629→
+   630→    if method in ("initialize", "ping"):
+   631→        result = {
+   632→            "protocolVersion": "2024-11-05",
+   633→            "capabilities": {"tools": {"listChanged": False}},
+   634→            "serverInfo": {"name": "vscode-mcp", "version": "2.0.0"},
+   635→        } if method == "initialize" else {}
+   636→        send_message({"jsonrpc": "2.0", "id": request_id, "result": result})
+   637→        return
+   638→
+   639→    if method == "tools/list":
+   640→        tools = TOOLS if _vscode_active_folder() is not None else []
+   641→        send_message({"jsonrpc": "2.0", "id": request_id, "result": {"tools": tools}})
+   642→        return
+   643→
+   644→    if method == "tools/call":
+   645→        try:
+   646→            output = tool_dispatch(params.get("name", ""), params.get("arguments") or {})
+   647→            text = output if isinstance(output, str) else json.dumps(output, ensure_ascii=False)
+   648→            send_message({
+   649→                "jsonrpc": "2.0",
+   650→                "id": request_id,
+   651→                "result": {
+   652→                    "content": [{"type": "text", "text": text}],
+   653→                    "structuredContent": {"result": output},
+   654→                },
+   655→            })
+   656→        except Exception as error:
+   657→            send_message({
+   658→                "jsonrpc": "2.0",
+   659→                "id": request_id,
+   660→                "error": {"code": -32603, "message": str(error)},
+   661→            })
+   662→        return
+   663→
+   664→    if method == "notifications/initialized":
+   665→        return
+   666→    send_message({
+   667→        "jsonrpc": "2.0",
+   668→        "id": request_id,
+   669→        "error": {"code": -32601, "message": f"Method not found: {method}"},
+   670→    })
+   671→
+   672→
+   673→if __name__ == "__main__":
+   674→    for line in sys.stdin:
+   675→        stripped = line.strip()
+   676→        if not stripped:
+   677→            continue
+   678→        try:
+   679→            request = json.loads(stripped)
+   680→        except json.JSONDecodeError:
+   681→            continue
+   682→        if isinstance(request, dict):
+   683→            handle_request(request)
+   684→

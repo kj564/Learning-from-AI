@@ -1,0 +1,452 @@
+   400→        // input is covered and the loop owns this send, so no user turn can slip
+   401→        // into the window, and the pre-hide is one-shot (consumes the first turn).
+   402→        A.injectHideUntil = Date.now() + 2500;
+   403→        // The site clears the textarea as soon as the send is accepted - faster
+   404→        // and more reliable than waiting for a DOM turn count change.
+   405→        await waitFor(() => {
+   406→          if (P.editorText().trim() === "") messageSent = true;
+   407→          return messageSent || landed();
+   408→        }, 3500);
+   409→        tries++;
+   410→      }
+   411→      if (messageSent) diag("send.cleared", { tries });
+   412→      // All retries exhausted with NO evidence the message landed (textarea never
+   413→      // cleared, no new turn). Silently returning here left the loop waiting for
+   414→      // a reply that will never come (~60s "empty" timeout) with zero explanation
+   415→      // - the reported "the tool result just never gets injected" symptom. Tell
+   416→      // the user what actually happened so they can nudge the conversation
+   417→      // themselves instead of watching a stuck bar.
+   418→      if (!messageSent && !landed() && !A.stop) {
+   419→        diag("send.failed", { tries });
+   420→        ui.banner("warn", "Message could not be sent",
+   421→          `Send "continue" to resume.`);
+   422→      }
+   423→      return base;
+   424→    } finally {
+   425→      // During Starting Up / the agent loop, the bootstrap or loop owns the cover
+   426→      // for the whole phase, so don't lift it here between an injection and the
+   427→      // next waitForResponse - it stays up until the loop / bootstrap ends.
+   428→      if (!A.starting && !A.running) ui.inputCover(false);
+   429→      setTimeout(() => (A.injecting = false), 400);
+   430→      // Camouflage the turn we just injected without waiting on the rAF observer
+   431→      // (paused in a background tab). A couple of nudges cover the render.
+   432→      setTimeout(scheduleSweep, 200);
+   433→      setTimeout(scheduleSweep, 700);
+   434→    }
+   435→  }
+   436→
+   437→  // ════════════════════════════════════════════════════════════════════════
+   438→  //  RESPONSE WATCHER  (generating-flag driven - robust to DOM churn)
+   439→  // ════════════════════════════════════════════════════════════════════════
+   440→  // Shared wording for the 2026-11 placeholder turn, used by both the Start flow
+   441→  // and agentLoop so the user sees one explanation, not two dialects.
+   442→  const FALLBACK_TURN_TEXT =
+   443→    "ChatGPT returned an empty placeholder reply for this conversation - open a new chat and Start again.";
+   444→
+   445→  async function waitForResponse(base) {
+   446→    const t0 = Date.now();
+   447→    // INACTIVITY timeout (not total-elapsed): the loop only gives up after this
+   448→    // long with NO streaming AND no text change. lastActiveAt is refreshed every
+   449→    // tick the model is generating or the reply text grows, so an arbitrarily
+   450→    // LONG but still-active response never trips it (the old total-elapsed cap
+   451→    // wrongly fired "No response" while the model was still writing past 300s).
+   452→    const TIMEOUT = T.RESPONSE_TIMEOUT_MS;
+   453→    let lastActiveAt = Date.now();
+   454→    const STABLE_MS = T.STABLE_MS; // generating-flag stuck ON but text frozen → done
+   455→    let started = false, doneSince = 0, lastLimitScan = 0;
+   456→    let lastText = null, lastChangeAt = Date.now(), genFalseSince = 0;
+   457→    // ── DIAG: finalisation-latency instrumentation (multi_edit "slow" probe) ──
+   458→    // genOffFirstAt: the FIRST moment gen went false after streaming began (does
+   459→    // NOT reset on flicker, unlike genFalseSince). genFlickers: how many times gen
+   460→    // flipped back true after having been false - a high count means post-stop DOM
+   461→    // churn (or a wedged stop button) is what keeps the watcher alive. waitedBlock/
+   462→    // waitedFlicker: iterations spent waiting because effectiveBlock held vs because
+   463→    // gen was (re)true. These pinpoint which gate causes any tail latency.
+   464→    let genOffFirstAt = 0, genFlickers = 0, prevGen = null;
+   465→    let waitedBlock = 0, waitedFlicker = 0;
+   466→    const finalizeDiag = (kind) => {
+   467→      const now = Date.now();
+   468→      diag("stopGoneToResp", {
+   469→        kind,
+   470→        stopGoneToRespMs: genOffFirstAt ? now - genOffFirstAt : null,
+   471→        genStableForMs: genFalseSince ? now - genFalseSince : null,
+   472→        lastChangeAgoMs: now - lastChangeAt,
+   473→        genFlickers, waitedBlock, waitedFlicker,
+   474→        totalMs: now - t0,
+   475→      });
+   476→    };
+   477→    let preStartSilent = 0; // nothing produced AND not generating
+   478→    let curItem = null, sawContent = false, warmSince = 0; // per-turn "warming up"
+   479→    // Last NON-EMPTY reply read for the CURRENT turn. Sites re-render a turn's
+   480→    // subtree (React/Monaco churn) and a read can come back "" for a frame at
+   481→    // the exact moment the watcher finalizes - the turn then ended as
+   482→    // kind:"empty" even though a (possibly cut-off) command was sitting there a
+   483→    // tick earlier, leaving a DEAD turn: no parse_error feedback, and the
+   484→    // autoResume dedupe (zResume) blocks any later retry (validated live on a
+   485→    // Qwen post-stop regenerate, 2026-07). Classify on this fallback instead of
+   486→    // declaring empty. Reset whenever the turn NODE changes so a new turn can
+   487→    // never inherit the previous turn's text.
+   488→    let lastGoodReply = "";
+   489→    let reasonSince = 0; // reasoning written but no answer yet (loading phase)
+   490→    let noTurnSince = 0; // finalize attempted before this send's reply turn exists
+   491→    let unsettledSince = 0; // command-shaped reply whose read is not yet stable
+   492→    const WARMUP_MS = T.WARMUP_MS;
+   493→    const REASON_NOREPLY_MS = T.REASON_NOREPLY_MS;
+   494→    const NO_TURN_GRACE_MS = 30000;
+   495→    // Upper bound on holding off a parse verdict while a provider reports its
+   496→    // read is unsettled (Qwen A/B dual turn still landing). A genuinely stuck
+   497→    // read still resolves after this and is parsed as-is.
+   498→    const UNSETTLED_GRACE_MS = 8000;
+   499→    // Once the generating flag has been OFF this long, the model has clearly
+   500→    // stopped streaming - so an "open tool block" reading is a DOM-churn/parse
+   501→    // artifact, not live output, and must not keep the watcher waiting. Provider
+   502→    // -neutral: while a model is genuinely streaming, gen stays true and this is
+   503→    // never reached.
+   504→    const GEN_STOP_GRACE_MS = 2500;
+   505→
+   506→    while (Date.now() - lastActiveAt < TIMEOUT) {
+   507→      if (A.stop) return { kind: "stopped" };
+   508→      // SCROLL-AWAY RULE: while the user scrolls up, NOTHING is read or run.
+   509→      // Hold here (and keep the inactivity clock alive, since this is the user
+   510→      // browsing, not a stalled model) so no scroll-rendered history can be
+   511→      // interpreted as a fresh command. Resumes as soon as the gesture window
+   512→      // lapses; a genuine run that was already in flight is untouched.
+   513→      if (scrollSuppressed()) {
+   514→        lastActiveAt = Date.now();
+   515→        await sleep(250);
+   516→        continue;
+   517→      }
+   518→      // NEVER let a deadline expire while the tab is in the background. A hidden
+   519→      // tab has no layout (innerText reads come back "", getBoundingClientRect is
+   520→      // 0x0) and Chrome throttles its timers, so every read here is unreliable -
+   521→      // and the site may legitimately keep streaming for as long as the user is
+   522→      // away in Studio. Park until the tab is foreground again, then slide EVERY
+   523→      // deadline forward by the time we were parked so nothing that was mid-flight
+   524→      // when the user switched away expires the moment they come back. This is the
+   525→      // fix for "I switched to Studio, came back and the command says 'not run'":
+   526→      // the loop used to burn its 5-minute inactivity budget off-screen, end with
+   527→      // "No response from <site>", and orphan the pending command.
+   528→      if (document.hidden && !A.stop && !(await backgroundSessionsReady())) {
+   529→        const parked = await parkHidden();
+   530→        if (A.stop) return { kind: "stopped" };
+   531→        if (parked) {
+   532→          lastActiveAt += parked; lastChangeAt += parked;
+   533→          if (doneSince) doneSince += parked;
+   534→          if (genFalseSince) genFalseSince += parked;
+   535→          if (preStartSilent) preStartSilent += parked;
+   536→          if (warmSince) warmSince += parked;
+   537→          if (reasonSince) reasonSince += parked;
+   538→          if (noTurnSince) noTurnSince += parked;
+   539→          if (unsettledSince) unsettledSince += parked;
+   540→          if (genOffFirstAt) genOffFirstAt += parked;
+   541→        }
+   542→        continue; // re-read everything now that the tab has layout again
+   543→      }
+   544→      const gen = P.isGenerating();
+   545→      if (gen) lastActiveAt = Date.now(); // actively generating ⇒ never time out
+   546→      const d = P.readAssistant();
+   547→      // Sites virtualize their lists, so the absolute assistant count can DROP
+   548→      // even as a new reply is added. A count increase still proves a new turn
+   549→      // appeared; the generating flag is the reliable "reply has begun" signal.
+   550→      // A new reply turn exists. Prefer node IDENTITY (virtualization-proof) when
+   551→      // the provider exposes it: the last assistant turn's id differs from the one
+   552→      // captured at send time. Fall back to the count test otherwise. Without this,
+   553→      // a provider's list virtualisation can keep assistantCount() <= base for a
+   554→      // fresh reply, so the reliableCounts gate below waits out the full NO_TURN_GRACE
+   555→      // (~30s) before finalising a multi_edit - the "input box stuck until I scroll
+   556→      // up" symptom (scrolling re-attached old turns and bumped the count).
+   557→      const curTok = P.lastAssistantId ? P.lastAssistantId() : undefined;
+   558→      // A NULL token means the provider could not read an identity for the
+   559→      // CURRENT last turn (not that the provider lacks ids - that's undefined).
+   560→      // Treating null as "no new reply" wedged the watcher on Qwen: a
+   561→      // REGENERATED turn is rebuilt WITHOUT the id attribute the normal turns
+   562→      // carry, so curTok stayed null, `started` never latched, and the loop
+   563→      // sat in the pre-start branch for the full 60s before ending "empty" -
+   564→      // the regenerated command (complete in the net tap) was never run and
+   565→      // zResume then blocked any retry (validated live via empty.why, 2026-07).
+   566→      // Fall back to the count test instead, exactly as for a provider with no
+   567→      // lastAssistantId at all.
+   568→      const newReply = (curTok !== undefined && curTok !== null)
+   569→        ? (curTok !== A.sendToken)
+   570→        : P.assistantCount() > base;
+   571→
+   572→      // Track whether the CURRENT turn has produced anything. Reset when the
+   573→      // turn node changes (the PREVIOUS turn's content never counts).
+   574→      if (d.item !== curItem) { curItem = d.item; sawContent = false; warmSince = 0; lastGoodReply = ""; }
+   575→      if ((d.reply && d.reply.length) || (d.thinking && d.thinking.length)) sawContent = true;
+   576→      if (d.reply && d.reply.length) lastGoodReply = d.reply;
+   577→
+   578→      if (!started) {
+   579→        // CRITICAL: a bare count increase is NOT enough - the empty turn
+   580→        // CONTAINER can appear seconds before the first token. Require actual
+   581→        // CONTENT (or the generating flag).
+   582→        const hasText = !!((d.reply && d.reply.length) || (d.thinking && d.thinking.length));
+   583→        if (gen || (newReply && hasText)) { started = true; }
+   584→        else {
+   585→          // The site can be slow to even CREATE the reply turn. Keep waiting -
+   586→          // only give up after a long fully-silent window.
+   587→          if (!preStartSilent) preStartSilent = Date.now();
+   588→          // diag: WHICH empty-branch fired matters - a dead post-regenerate turn
+   589→          // on Qwen kept ending "empty" with a complete command in the net tap,
+   590→          // and without the branch name the cause was unfindable from the log.
+   591→          if (Date.now() - preStartSilent > 60000) { diag("empty.why", { branch: "preStart", rep: (d.reply||"").length }); return { kind: "empty" }; }
+   592→          await sleep(200);
+   593→          continue;
+   594→        }
+   595→      }
+   596→
+   597→      // Track text stability (independent of the generating flag). Compare the
+   598→      // NORMALISED reply (collapsed whitespace) so cosmetic re-renders of a large
+   599→      // reply - React re-creating the hidden tool <pre>, syntax-highlight passes,
+   600→      // copy-bar text churn - don't count as real "changes" and keep resetting
+   601→      // lastChangeAt. A churn-poisoned lastChangeAt was stalling finalisation of
+   602→      // big multi_edit blocks ~30s (stuckDone never fired); this can only ever
+   603→      // reduce false changes, so short replies / other providers are unaffected.
+   604→      const replyNorm = (d.reply || "").replace(/\s+/g, " ").trim();
+   605→      if (replyNorm !== lastText) { lastText = replyNorm; lastChangeAt = Date.now(); lastActiveAt = Date.now(); }
+   606→      // How long the generating flag has been OFF. A mid-stream flicker resets
+   607→      // this the instant growth resumes and gen flips back on.
+   608→      if (gen) genFalseSince = 0; else if (!genFalseSince) genFalseSince = Date.now();
+   609→      // DIAG: first gen-off, and count flickers back to true after a gen-off.
+   610→      if (started && !gen && !genOffFirstAt) genOffFirstAt = Date.now();
+   611→      if (prevGen === false && gen && genOffFirstAt) genFlickers++;
+   612→      prevGen = gen;
+   613→
+   614→      if (Date.now() - lastLimitScan > 1000) {
+   615→        lastLimitScan = Date.now();
+   616→        const ctx = P.scanError();
+   617→        if (ctx) return { kind: "context_limit", detail: ctx };
+   618→      }
+   619→
+   620→      // Keep waiting while a tool command is still being streamed (opener written
+   621→      // but no end marker yet) so we never parse/finalize half a command.
+   622→      const blockActive = ZSParse.hasOpenToolBlock(d.reply) && Date.now() - lastChangeAt < 6000;
+   623→      // ...but once generation has clearly stopped (stop indicator gone past the
+   624→      // grace window), stop honoring an "open block" - it is DOM churn, not live
+   625→      // streaming. Lets a finished big block finalise in seconds instead of
+   626→      // waiting out ~30s of re-render churn. Safe: real streaming keeps gen true.
+   627→      const genStopped = !gen && genFalseSince && Date.now() - genFalseSince > GEN_STOP_GRACE_MS;
+   628→      const effectiveBlock = blockActive && !genStopped;
+   629→
+   630→      // Fallback: generating flag stuck ON (e.g. a wedged stop button - seen
+   631→      // live on Gemini after a mid-write halt) but the text has been frozen for
+   632→      // a while → stop waiting and finalize. This must BYPASS the gen branch
+   633→      // below entirely: falling through while gen stays true used to reset
+   634→      // doneSince every iteration, so the watcher never finalized at all.
+   635→      // ...but NEVER treat a still-OPEN command block as "done" while the site is
+   636→      // genuinely still generating. A model writing a big command (a 3799-char
+   637→      // execute_luau seen live on GLM) can pause >STABLE_MS between tokens - that
+   638→      // is a mid-write gap, NOT a wedged stop button on a COMPLETE reply. Firing
+   639→      // here parsed the half-written JSON and stamped a false "bad JSON" error
+   640→      // while GLM was still typing. RESPONSE_TIMEOUT still bounds a truly stuck one.
+   641→      const stuckDone = started && d.reply && Date.now() - lastChangeAt > STABLE_MS &&
+   642→        !(gen && ZSParse.hasOpenToolBlock(d.reply));
+   643→      if ((gen || effectiveBlock) && !stuckDone) {
+   644→        // DIAG: attribute this wait. genOffFirstAt set ⇒ we are PAST first stop,
+   645→        // so any wait here is tail latency: either gen flickered back on, or an
+   646→        // (effective) open-block reading is holding us.
+   647→        if (genOffFirstAt) { if (gen) waitedFlicker++; else if (effectiveBlock) waitedBlock++; }
+   648→        doneSince = 0;
+   649→        await sleep(160);
+   650→        continue;
+   651→      }
+   652→      if (stuckDone && gen) log("generating flag stuck - falling back to text stability");
+   653→
+   654→      // On providers whose turn counts are RELIABLE (semantic elements, no
+   655→      // list virtualisation - Gemini), never finalize before the reply turn
+   656→      // for THIS send exists. The generating flag can flicker off in the gap
+   657→      // between the send and the new <model-response> node spawning, and the
+   658→      // watcher used to finalize on the PREVIOUS turn's stable text - a
+   659→      // premature loop.end rescued only by autoResume 30-45s later (diag
+   660→      // showed `response kind:text` ~2.4s after loop.start with rp unchanged).
+   661→      // Bounded so a genuinely dead send still ends the turn.
+   662→      if (P.reliableCounts && !newReply) {
+   663→        if (!noTurnSince) noTurnSince = Date.now();
+   664→        // [TRACE] This is the 30s NO_TURN_GRACE gate. If a Qwen tool turn sits here
+   665→        // ~30s EVERY turn, newReply is wrongly stuck false: log the identity values
+   666→        // that decide it so we can see whether curTok is null (id missing on the new
+   667→        // turn -> count fallback) or equal to sendToken (last turn not advancing).
+   668→        const _waited = Date.now() - noTurnSince;
+   669→        if (_waited > 800 && (!A._noTurnLoggedAt || Date.now() - A._noTurnLoggedAt > 3000)) {
+   670→          A._noTurnLoggedAt = Date.now();
+   671→          diag("noTurnGrace.wait", {
+   672→            waitedMs: _waited,
+   673→            curTok: (P.lastAssistantId ? P.lastAssistantId() : undefined),
+   674→            sendToken: A.sendToken,
+   675→            assistantCount: P.assistantCount ? P.assistantCount() : undefined,
+   676→            base, gen, started, replyLen: (d.reply || "").length });
+   677→        }
+   678→        if (Date.now() - noTurnSince < NO_TURN_GRACE_MS) { await sleep(200); continue; }
+   679→      } else {
+   680→        noTurnSince = 0;
+   681→        A._noTurnLoggedAt = 0;
+   682→      }
+   683→
+   684→      if (!doneSince) doneSince = Date.now();
+   685→      if (Date.now() - doneSince < 500) {  // 500ms settle – DOM is stable
+   686→        await sleep(120);
+   687→        continue;
+   688→      }
+   689→
+   690→      // A turn that has produced NOTHING yet is still warming up - never
+   691→      // finalize it as empty/truncated/text (a premature retry interrupts it).
+   692→      if (!sawContent) {
+   693→        // 2026-11 ChatGPT: a saturated conversation answers with a PLACEHOLDER
+   694→        // turn that never gains content. Its only marker is the search-unit key
+   695→        //   data-content-search-unit-key="fallback-turn-0:2:assistant"
+   696→        // and the bubble holds nothing but "ChatGPT said:". Measured live: the
+   697→        // reply text was present in the page's own text but never rendered into
+   698→        // the turn, so the loop waited the full WARMUP_MS (45 s) and then blamed
+   699→        // the DOM ("empty"). Detect the placeholder immediately and say what it
+   700→        // actually is, so the user is told to open a new chat instead of losing
+   701→        // an hour to a stuck chip.
+   702→        try {
+   703→          const it = d && d.item;
+   704→          const marker = it && it.querySelector
+   705→            ? it.querySelector('[data-content-search-unit-key^="fallback-turn"]')
+   706→            : null;
+   707→          if (marker && !(d.reply || "").length) {
+   708→            if (!warmSince) warmSince = Date.now();
+   709→            if (Date.now() - warmSince > 2500) {
+   710→              diag("empty.why", { branch: "fallbackTurn", rep: 0 });
+   711→              return { kind: "fallback_turn" };
+   712→            }
+   713→            await sleep(200);
+   714→            continue;
+   715→          }
+   716→        } catch {}
+   717→        if (!warmSince) warmSince = Date.now();
+   718→        if (Date.now() - warmSince < WARMUP_MS) { await sleep(200); continue; }
+   719→        diag("empty.why", { branch: "warmup", rep: (d.reply||"").length, lastGood: lastGoodReply.length });
+   720→        return { kind: "empty" };
+   721→      }
+   722→
+   723→      // Still REASONING / loading: thinking written but no answer yet. Don't
+   724→      // finalize - wait for the reply, bounded. A manually-stopped turn is
+   725→      // exempt so a real stop still ends.
+   726→      if (d.thinking && d.thinking.length && !(d.reply && d.reply.length) && !P.turnHalted(d.item)) {
+   727→        if (!reasonSince) reasonSince = Date.now();
+   728→        if (Date.now() - reasonSince < REASON_NOREPLY_MS) { await sleep(200); continue; }
+   729→      } else {
+   730→        reasonSince = 0;
+   731→      }
+   732→
+   733→      // Blank-read guard: if THIS read came back empty but the same turn had
+   734→      // real text a tick ago, classify that text - see lastGoodReply above.
+   735→      let r = d.reply;
+   736→      if (!r && lastGoodReply) { r = lastGoodReply; diag("reply.blankReadFallback", { len: r.length }); }
+   737→      // "Conversation too long" / "server busy" notices are always SHORT system
+   738→      // messages; gating on a short reply stops the model's own long output
+   739→      // (which may quote those phrases) from tripping them.
+   740→      if (r.length < 400 && P.isTooLongMsg(r)) return { kind: "too_long" };
+   741→      // Hold off on any "unparseable command" verdict while the provider reports
+   742→      // this turn's text is not yet a settled read. Qwen's A/B "dual" turn is the
+   743→      // case: its network tap flips `done` the instant the SSE ends, but the
+   744→      // candidate-1 DOM we parse can still be mid-render, so a real command looks
+   745→      // half-written for a beat. Firing parse_error there sends an ERROR
+   746→      // mid-generation and nags a model that did nothing wrong. Only guard when
+   747→      // the reply already LOOKS like a command (so a plain-text answer is never
+   748→      // delayed) and bound it with UNSETTLED_GRACE_MS. No-op on providers that
+   749→      // don't implement replyUnsettled (DeepSeek/Gemini/GLM/Kimi/Arena).
+   750→      const cmdShaped = P.replyUnsettled && (
+   751→        ZSParse.hasToolSignature(r) ||
+   752→        (ZSParse.LUA_END_RE.test(r) && !ZSParse.LUA_START_RE.test(r)) ||
+   753→        (/"(?:datamodel_type|edits|old_string|new_string|file_path|target_file)"\s*:/.test(r) &&
+   754→          !/"command"\s*:/.test(r))
+   755→      );
+   756→      if (cmdShaped && P.replyUnsettled(d.item)) {
+   757→        if (!unsettledSince) unsettledSince = Date.now();
+   758→        if (Date.now() - unsettledSince < UNSETTLED_GRACE_MS) { await sleep(250); continue; }
+   759→      } else {
+   760→        unsettledSince = 0;
+   761→      }
+   762→      // A/B "carousel" turn (Qwen): while it is unresolved the site REMOVES the
+   763→      // composer from the DOM (validated live: getEditor() is null), so we can't
+   764→      // send the tool result until a candidate is picked - and the read reply is a
+   765→      // partial candidate, so a command there looks "cut off". Per the product rule
+   766→      // we use the FIRST candidate: wait for BOTH candidates to finish generating
+   767→      // (you can't select mid-stream), then auto-select Response 1. That collapses
+   768→      // the carousel to a normal turn - composer returns - and the normal parse/run
+   769→      // path below handles it. Never a parse_error here (the model didn't truncate).
+   770→      // No-op for every provider except Qwen. RESPONSE_TIMEOUT still bounds a truly
+   771→      // stuck carousel, so this cannot hang.
+   772→      if (P.isComparisonTurn && P.isComparisonTurn(d.item)) {
+   773→        if (P.isGenerating()) { await sleep(250); continue; }   // both still writing
+   774→        if (P.resolveComparison && P.resolveComparison()) {
+   775→          diag("carousel.resolved");
+   776→          await sleep(400); continue;                            // let it collapse, re-read
+   777→        }
+   778→        await sleep(250); continue;                              // button not ready yet
+   779→      }
+   780→      if (ZSParse.hasToolSignature(r)) {
+   781→        const calls = ZSParse.parseToolCalls(r);
+   782→        if (calls.length) { finalizeDiag("tool"); return { kind: "tool", calls, item: d.item }; }
+   783→        // A half-written command + the site's "Continue" button means the command
+   784→        // was truncated mid-stream → resume it rather than reporting bad JSON.
+   785→        if (P.findContinueBtn()) return { kind: "truncated", text: r, item: d.item };
+   786→        // Only fire parse_error if explicit markers were present.
+   787→        if (r.includes(ZSParse.START_M) || ZSParse.LUA_START_RE.test(r)) return { kind: "parse_error", reason: "malformed", raw: r, item: d.item };
+   788→        // A command opener with no closer (a JSON object that never closed -
+   789→        // the model was halted mid-write and there is no Continue affordance):
+   790→        // ask the model to rewrite it instead of silently ending the turn.
+   791→        // ...unless ONLY the trailing closers were lost (the model hit its
+   792→        // output limit with the payload complete - seen live on Qwen: a big
+   793→        // multi_edit missing exactly one final "}"). salvageCutOff auto-closes
+   794→        // and runs it instead of burning a whole retry turn; it refuses any
+   795→        // cut that amputated real content (mid-string / deep deficit), which
+   796→        // still falls through to the parse_error feedback. Safe to run here:
+   797→        // generation has ended (the open-block branch above kept waiting
+   798→        // while it streamed).
+   799→        if (ZSParse.hasOpenToolBlock(r)) {
+   800→          const saved = ZSParse.salvageCutOff(r);
+   801→          if (saved) {
+   802→            diag("tool.salvaged", { name: saved.tool });
+   803→            finalizeDiag("tool");
+   804→            return { kind: "tool", calls: [saved], item: d.item };
+   805→          }
+   806→          return { kind: "parse_error", reason: "unclosed", raw: r, item: d.item };
+   807→        }
+   808→        // A closed-looking JSON command envelope that NAMES A REAL TOOL but failed
+   809→        // to parse - typically an unescaped " inside a code/string param broke the
+   810→        // JSON (seen live on Kimi's execute_blender_code: `name = "Camera_System"`
+   811→        // mid-code). Unlike execute_luau there is NO ###LUA### fallback, so the
+   812→        // command silently dropped and the loop finalized the turn as a plain-text
+   813→        // answer with no result and no error - a dead turn. Fire a parse_error so
+   814→        // the model can fix its JSON. GATED on a known command name so prose that
+   815→        // merely quotes {"command":"..."} (a DeepSeek-style explanation, or a
+   816→        // placeholder like "command_name") is NOT misread as a broken command and
+   817→        // looped on - only a real tool name means a genuine failed call.
+   818→        const nm = ZSParse.toolNameFromText(r);
+   819→        if (nm && nm !== "command" && (A.toolNames.has(nm) || A.toolNames.has(bareToolName(nm)))) {
+   820→          return { kind: "parse_error", reason: "malformed", raw: r, item: d.item };
+   821→        }
+   822→      }
+   823→      // The model answered in its OWN native tool-call markup instead of a
+   824→      // snapgentV3 command - DeepSeek's DSML invoke/parameter tags (reported by
+   825→      // users, 2026-08; DeepSeek is the only provider seen doing it). It carries
+   826→      // no "command"/"tool" key and no ###...### markers, so hasToolSignature is
+   827→      // false and every guard below misses it too: the turn finalized as a
+   828→      // plain-text answer, the tool never ran, and the loop ended on a dead agent.
+   829→      // Checked FIRST among the fallthrough guards because the marker is
+   830→      // unambiguous - unlike the guards below it needs no known-tool gate, which
+   831→      // matters because the degenerate form seen in the wild carries no tool name
+   832→      // at all (a bare tool_calls opener followed by prose).
+   833→      if (ZSParse.DSML_RE.test(r)) {
+   834→        diag("cmd.dsml", { len: r.length });
+   835→        return { kind: "parse_error", reason: "dsml", raw: r, item: d.item };
+   836→      }
+   837→      // Malformed execute_luau: the model wrote the ###END_LUA### closer but
+   838→      // FORGOT the ###LUA### opener, so hasToolSignature missed it and the block
+   839→      // never ran (seen on Gemini). Don't silently treat it as a final answer -
+   840→      // nudge a rewrite instead of leaving the user stuck on a dead turn.
+   841→      if (ZSParse.LUA_END_RE.test(r) && !ZSParse.LUA_START_RE.test(r) && !r.includes(ZSParse.START_M)) {
+   842→        return { kind: "parse_error", reason: "luaOpener", raw: r, item: d.item };
+   843→      }
+   844→      // Malformed command: the model emitted a tool's RAW ARGUMENTS as a bare JSON
+   845→      // object (e.g. {"datamodel_type":...,"edits":[...],"file_path":...}) instead of
+   846→      // the required {"command":...,"params":...} envelope - it treated the tool as a
+   847→      // real callable function (seen on Gemini). Those argument keys never appear in a
+   848→      // normal prose answer, so nudge a rewrite rather than ending the turn silently.
+   849→      if (/"(?:datamodel_type|edits|old_string|new_string|file_path|target_file)"\s*:/.test(r) &&
+
+[showing lines 400-849 of 5314; use offset=850 with limit to continue reading]

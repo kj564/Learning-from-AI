@@ -1,0 +1,842 @@
+     1→#!/usr/bin/env python3
+     2→"""Cross-platform local WebSocket bridge for Snapgent MCP servers."""
+     3→
+     4→import asyncio
+     5→import json
+     6→import logging
+     7→import os
+     8→import re
+     9→import signal
+    10→import socket
+    11→import subprocess
+    12→import sys
+    13→import time
+    14→from pathlib import Path
+    15→from typing import Any, Dict, List, Optional, Tuple
+    16→
+    17→try:
+    18→    import websockets
+    19→except ImportError:
+    20→    websockets = None
+    21→
+    22→
+    23→if getattr(sys, "frozen", False):
+    24→    # PyInstaller build: config.json and logs live next to the .exe, not in the temp extraction dir.
+    25→    ROOT = Path(sys.executable).resolve().parent
+    26→else:
+    27→    ROOT = Path(__file__).resolve().parent
+    28→CONFIG_PATH = ROOT / "config.json"
+    29→LOG_PATH = ROOT / "logs" / "bridge_debug.log"
+    30→HOST = "127.0.0.1"
+    31→PORT = int(os.environ.get("ZS_BRIDGE_PORT", "17613"))
+    32→MCP_PROTOCOL_VERSION = "2024-11-05"
+    33→BRIDGE_VERSION = "3.9.7"
+    34→MAX_LOG_CHARS = 1000
+    35→MAX_CONCURRENT_REQUESTS = 32
+    36→BIG_PAYLOAD_THREAD_BYTES = 256 * 1024
+    37→
+    38→LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    39→logging.basicConfig(
+    40→    filename=str(LOG_PATH),
+    41→    level=logging.INFO,
+    42→    format="%(asctime)s %(message)s",
+    43→    datefmt="%Y-%m-%d %H:%M:%S",
+    44→)
+    45→
+    46→
+    47→def log(message: str) -> None:
+    48→    logging.info(message)
+    49→    print(message, flush=True)
+    50→
+    51→
+    52→def _json_line(value: Any) -> str:
+    53→    return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+    54→
+    55→
+    56→class MCPServer:
+    57→    def __init__(self, server_id: str, config: Dict[str, Any]) -> None:
+    58→        self.server_id = server_id
+    59→        self.config = config
+    60→        self.process: Optional[asyncio.subprocess.Process] = None
+    61→        self.tools: List[Dict[str, Any]] = []
+    62→        self._next_id = 1
+    63→        self._pending: Dict[int, asyncio.Future] = {}
+    64→        self._write_lock = asyncio.Lock()
+    65→        self._reader_task: Optional[asyncio.Task] = None
+    66→        self._stderr_task: Optional[asyncio.Task] = None
+    67→        self._start_lock = asyncio.Lock()
+    68→        self.error: Optional[str] = None
+    69→        self.ready = False
+    70→
+    71→    @property
+    72→    def alive(self) -> bool:
+    73→        reader_dead = bool(self._reader_task and self._reader_task.done())
+    74→        return bool(self.process and self.process.returncode is None and not reader_dead)
+    75→
+    76→    async def start(self) -> bool:
+    77→        async with self._start_lock:
+    78→            if self.alive and self.ready:
+    79→                return True
+    80→            await self.stop()
+    81→            command = self.config.get("command")
+    82→            args = self.config.get("args", [])
+    83→            if not isinstance(command, str) or not command.strip():
+    84→                self.error = "MCP server command is missing."
+    85→                log(f"[{self.server_id}] {self.error}")
+    86→                return False
+    87→            if not isinstance(args, list) or not all(isinstance(arg, str) for arg in args):
+    88→                self.error = "MCP server args must be an array of strings."
+    89→                log(f"[{self.server_id}] {self.error}")
+    90→                return False
+    91→
+    92→            env = os.environ.copy()
+    93→            server_env = self.config.get("env", {})
+    94→            if not isinstance(server_env, dict):
+    95→                self.error = "MCP server env must be an object."
+    96→                log(f"[{self.server_id}] {self.error}")
+    97→                return False
+    98→            env.update({str(key): str(value) for key, value in server_env.items()})
+    99→            try:
+   100→                self.process = await asyncio.create_subprocess_exec(
+   101→                    command,
+   102→                    *args,
+   103→                    cwd=str(ROOT),
+   104→                    env=env,
+   105→                    stdin=asyncio.subprocess.PIPE,
+   106→                    stdout=asyncio.subprocess.PIPE,
+   107→                    stderr=asyncio.subprocess.PIPE,
+   108→                    limit=128 * 1024 * 1024,
+   109→                )
+   110→            except (OSError, ValueError) as error:
+   111→                self.error = str(error)
+   112→                log(f"[{self.server_id}] failed to launch: {self.error}")
+   113→                return False
+   114→
+   115→            self.tools = []
+   116→            self.error = None
+   117→            self._reader_task = asyncio.create_task(self._read_stdout())
+   118→            self._stderr_task = asyncio.create_task(self._read_stderr())
+   119→            try:
+   120→                await self._request(
+   121→                    "initialize",
+   122→                    {
+   123→                        "protocolVersion": MCP_PROTOCOL_VERSION,
+   124→                        "capabilities": {},
+   125→                        "clientInfo": {"name": "snapgent-bridge", "version": BRIDGE_VERSION},
+   126→                    },
+   127→                    timeout=12,
+   128→                )
+   129→                await self._notify("notifications/initialized")
+   130→                result = await self._request("tools/list", {}, timeout=20)
+   131→                raw_tools = result.get("tools", []) if isinstance(result, dict) else []
+   132→                if not isinstance(raw_tools, list):
+   133→                    raise RuntimeError("MCP tools/list returned an invalid tool list.")
+   134→                self.tools = [
+   135→                    tool for tool in raw_tools
+   136→                    if isinstance(tool, dict) and isinstance(tool.get("name"), str)
+   137→                ]
+   138→                self.ready = True
+   139→                log(f"[{self.server_id}] MCP server up ({len(self.tools)} tools advertised)")
+   140→                return True
+   141→            except (asyncio.TimeoutError, RuntimeError, OSError, ValueError) as error:
+   142→                self.error = str(error)
+   143→                log(f"[{self.server_id}] MCP startup failed: {self.error}")
+   144→                await self.stop()
+   145→                return False
+   146→
+   147→    async def stop(self) -> None:
+   148→        process = self.process
+   149→        self.process = None
+   150→        self.tools = []
+   151→        self.ready = False
+   152→        for task in (self._reader_task, self._stderr_task):
+   153→            if task and not task.done():
+   154→                task.cancel()
+   155→        tasks = [task for task in (self._reader_task, self._stderr_task) if task]
+   156→        self._reader_task = None
+   157→        self._stderr_task = None
+   158→        for future in self._pending.values():
+   159→            if not future.done():
+   160→                future.set_exception(RuntimeError(f"{self.server_id} MCP server stopped."))
+   161→        self._pending.clear()
+   162→        if tasks:
+   163→            await asyncio.gather(*tasks, return_exceptions=True)
+   164→        if not process or process.returncode is not None:
+   165→            return
+   166→        if process.stdin:
+   167→            try:
+   168→                process.stdin.close()
+   169→            except (BrokenPipeError, OSError):
+   170→                pass
+   171→        try:
+   172→            await asyncio.wait_for(process.wait(), timeout=2)
+   173→        except asyncio.TimeoutError:
+   174→            process.terminate()
+   175→            try:
+   176→                await asyncio.wait_for(process.wait(), timeout=2)
+   177→            except asyncio.TimeoutError:
+   178→                process.kill()
+   179→                await process.wait()
+   180→
+   181→    async def _send(self, payload: Dict[str, Any]) -> None:
+   182→        process = self.process
+   183→        if not process or process.returncode is not None or not process.stdin:
+   184→            raise RuntimeError(f"{self.server_id} MCP server is offline.")
+   185→        data = (_json_line(payload) + "\n").encode("utf-8")
+   186→        async with self._write_lock:
+   187→            process.stdin.write(data)
+   188→            await process.stdin.drain()
+   189→
+   190→    async def _request(
+   191→        self, method: str, params: Dict[str, Any], timeout: float = 30
+   192→    ) -> Any:
+   193→        request_id = self._next_id
+   194→        self._next_id += 1
+   195→        future = asyncio.get_running_loop().create_future()
+   196→        self._pending[request_id] = future
+   197→        try:
+   198→            await self._send(
+   199→                {
+   200→                    "jsonrpc": "2.0",
+   201→                    "id": request_id,
+   202→                    "method": method,
+   203→                    "params": params,
+   204→                }
+   205→            )
+   206→            response = await asyncio.wait_for(future, timeout=timeout)
+   207→        finally:
+   208→            self._pending.pop(request_id, None)
+   209→        if "error" in response:
+   210→            detail = response["error"]
+   211→            if isinstance(detail, dict):
+   212→                raise RuntimeError(str(detail.get("message") or detail))
+   213→            raise RuntimeError(str(detail))
+   214→        return response.get("result")
+   215→
+   216→    async def _notify(self, method: str, params: Optional[Dict[str, Any]] = None) -> None:
+   217→        await self._send(
+   218→            {
+   219→                "jsonrpc": "2.0",
+   220→                "method": method,
+   221→                "params": params or {},
+   222→            }
+   223→        )
+   224→
+   225→    async def call_tool(
+   226→        self, tool_name: str, arguments: Dict[str, Any], timeout: float
+   227→    ) -> Dict[str, Any]:
+   228→        if not self.alive:
+   229→            raise RuntimeError(self.error or f"{self.server_id} MCP server is offline.")
+   230→        result = await self._request(
+   231→            "tools/call",
+   232→            {"name": tool_name, "arguments": arguments},
+   233→            timeout=timeout,
+   234→        )
+   235→        return result if isinstance(result, dict) else {"content": [{"text": str(result)}]}
+   236→
+   237→    async def _read_stdout(self) -> None:
+   238→        process = self.process
+   239→        if not process or not process.stdout:
+   240→            return
+   241→        try:
+   242→            while True:
+   243→                try:
+   244→                    line = await process.stdout.readline()
+   245→                except ValueError:
+   246→                    # Response line exceeded the stream limit. Discard the rest of it,
+   247→                    # fail waiting requests with a clear error, and keep the server alive.
+   248→                    log(f"[{self.server_id}] MCP response exceeded the buffer limit; discarding it.")
+   249→                    while True:
+   250→                        chunk = await process.stdout.read(1024 * 1024)
+   251→                        if not chunk or b"\n" in chunk:
+   252→                            break
+   253→                    for future in list(self._pending.values()):
+   254→                        if not future.done():
+   255→                            future.set_exception(
+   256→                                RuntimeError(
+   257→                                    f"{self.server_id} MCP response was too large (over 128 MB). "
+   258→                                    "Request a smaller range or fewer items."
+   259→                                )
+   260→                            )
+   261→                    continue
+   262→                if not line:
+   263→                    break
+   264→                try:
+   265→                    if len(line) > BIG_PAYLOAD_THREAD_BYTES:
+   266→                        message = await asyncio.to_thread(lambda raw=line: json.loads(raw.decode("utf-8")))
+   267→                    else:
+   268→                        message = json.loads(line.decode("utf-8"))
+   269→                except (UnicodeDecodeError, json.JSONDecodeError):
+   270→                    log(f"[{self.server_id}] ignored non-JSON MCP stdout.")
+   271→                    continue
+   272→                request_id = message.get("id")
+   273→                if isinstance(request_id, int):
+   274→                    future = self._pending.get(request_id)
+   275→                    if future and not future.done():
+   276→                        future.set_result(message)
+   277→        except asyncio.CancelledError:
+   278→            raise
+   279→        except (ValueError, asyncio.LimitOverrunError) as error:
+   280→            log(f"[{self.server_id}] MCP stdout read failed: {error}")
+   281→        finally:
+   282→            if self.process is process and process.returncode is None:
+   283→                log(f"[{self.server_id}] MCP stdout closed.")
+   284→                for future in self._pending.values():
+   285→                    if not future.done():
+   286→                        future.set_exception(RuntimeError(f"{self.server_id} MCP server disconnected."))
+   287→
+   288→    async def _read_stderr(self) -> None:
+   289→        process = self.process
+   290→        if not process or not process.stderr:
+   291→            return
+   292→        try:
+   293→            while True:
+   294→                line = await process.stderr.readline()
+   295→                if not line:
+   296→                    break
+   297→                text = line.decode("utf-8", errors="replace").strip()
+   298→                if text:
+   299→                    log(f"[{self.server_id}] stderr: {text[:MAX_LOG_CHARS]}")
+   300→        except asyncio.CancelledError:
+   301→            raise
+   302→
+   303→
+   304→class Bridge:
+   305→    def __init__(self) -> None:
+   306→        self.servers: Dict[str, MCPServer] = {}
+   307→        self.clients = set()
+   308→        self._client_lock = asyncio.Lock()
+   309→        self._catalog: List[Dict[str, Any]] = []
+   310→        self._last_studio: Optional[bool] = None
+   311→
+   312→    def load_config(self) -> Dict[str, Dict[str, Any]]:
+   313→        if not CONFIG_PATH.exists():
+   314→            return {}
+   315→        try:
+   316→            config = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
+   317→        except (OSError, json.JSONDecodeError) as error:
+   318→            raise RuntimeError(f"Could not read {CONFIG_PATH.name}: {error}") from error
+   319→        servers = config.get("mcpServers") if isinstance(config, dict) else None
+   320→        if not isinstance(servers, dict):
+   321→            raise RuntimeError(f"{CONFIG_PATH.name} must contain an object named mcpServers.")
+   322→        return {
+   323→            server_id: value
+   324→            for server_id, value in servers.items()
+   325→            if isinstance(server_id, str)
+   326→            and isinstance(value, dict)
+   327→            and re.fullmatch(r"[A-Za-z0-9._-]{1,64}", server_id)
+   328→        }
+   329→
+   330→    async def start_servers(self) -> None:
+   331→        config = self.load_config()
+   332→        self.servers = {
+   333→            server_id: MCPServer(server_id, server_config)
+   334→            for server_id, server_config in config.items()
+   335→        }
+   336→        async def _start_one(server: MCPServer) -> None:
+   337→            try:
+   338→                await server.start()
+   339→            except Exception as error:
+   340→                server.error = str(error)
+   341→                log(f"[{server.server_id}] unexpected startup error: {error}")
+   342→            # Publish each server as soon as it is ready so slow ones do not block the rest.
+   343→            self._rebuild_catalog()
+   344→            await self.broadcast(self._connected_message())
+   345→
+   346→        await asyncio.gather(*(_start_one(server) for server in self.servers.values()))
+   347→        self._rebuild_catalog()
+   348→        self._log_health()
+   349→
+   350→    async def stop_servers(self) -> None:
+   351→        await asyncio.gather(*(server.stop() for server in self.servers.values()))
+   352→        self.servers.clear()
+   353→        self._catalog = []
+   354→
+   355→    def _rebuild_catalog(self) -> None:
+   356→        entries = []
+   357→        for server in self.servers.values():
+   358→            if server.alive:
+   359→                entries.extend((server.server_id, tool) for tool in server.tools)
+   360→        name_counts: Dict[str, int] = {}
+   361→        for _, tool in entries:
+   362→            name_counts[tool["name"]] = name_counts.get(tool["name"], 0) + 1
+   363→        self._catalog = []
+   364→        for server_id, tool in entries:
+   365→            bare_name = tool["name"]
+   366→            name = f"{server_id}/{bare_name}" if name_counts[bare_name] > 1 else bare_name
+   367→            self._catalog.append(
+   368→                {
+   369→                    "name": name,
+   370→                    "server": server_id,
+   371→                    "description": tool.get("description", ""),
+   372→                    "inputSchema": tool.get("inputSchema", {"type": "object", "properties": {}}),
+   373→                }
+   374→            )
+   375→
+   376→    def _server_status(self) -> List[Dict[str, Any]]:
+   377→        return [
+   378→            {
+   379→                "id": server.server_id,
+   380→                "alive": server.alive,
+   381→                "tools": len(server.tools) if server.alive else 0,
+   382→            }
+   383→            for server in self.servers.values()
+   384→        ]
+   385→
+   386→    def _log_health(self) -> None:
+   387→        ids = ", ".join(self.servers) or "none"
+   388→        active = ", ".join(server.server_id for server in self.servers.values() if server.alive) or "none"
+   389→        log(f"configured {len(self.servers)} MCP server(s): {ids}  (active: {active})")
+   390→        total = len(self._catalog)
+   391→        log(f"ready {total} tools available ({len(self.servers)} MCP server(s))")
+   392→
+   393→    def _connected_message(self) -> Dict[str, Any]:
+   394→        return {
+   395→            "type": "connected",
+   396→            "bridge_version": BRIDGE_VERSION,
+   397→            "mcp_alive": any(server.alive for server in self.servers.values()),
+   398→            "tools": self._catalog,
+   399→            "servers": self._server_status(),
+   400→        }
+   401→
+   402→    async def broadcast(self, message: Dict[str, Any]) -> None:
+   403→        async with self._client_lock:
+   404→            clients = list(self.clients)
+   405→        if not clients:
+   406→            return
+   407→        await asyncio.gather(
+   408→            *(self._send_client(client, message) for client in clients),
+   409→            return_exceptions=True,
+   410→        )
+   411→
+   412→    async def _send_client(self, client: Any, message: Dict[str, Any]) -> None:
+   413→        try:
+   414→            text = message.get("text") if isinstance(message, dict) else None
+   415→            heavy = bool(
+   416→                isinstance(message, dict)
+   417→                and (
+   418→                    (isinstance(text, str) and len(text) > BIG_PAYLOAD_THREAD_BYTES)
+   419→                    or message.get("images")
+   420→                )
+   421→            )
+   422→            payload = await asyncio.to_thread(_json_line, message) if heavy else _json_line(message)
+   423→            await client.send(payload)
+   424→        except Exception as error:
+   425→            log(f"send to client failed: {type(error).__name__}: {str(error)[:200]}")
+   426→
+   427→    async def handle_client(self, websocket: Any, _path: Optional[str] = None) -> None:
+   428→        async with self._client_lock:
+   429→            self.clients.add(websocket)
+   430→        log("extension connected")
+   431→        await self._send_client(websocket, self._connected_message())
+   432→        pending: set = set()
+   433→        limiter = asyncio.Semaphore(MAX_CONCURRENT_REQUESTS)
+   434→
+   435→        async def _run(request: Dict[str, Any]) -> None:
+   436→            async with limiter:
+   437→                try:
+   438→                    await self._handle_request(websocket, request)
+   439→                except asyncio.CancelledError:
+   440→                    raise
+   441→                except Exception as error:
+   442→                    log(f"request handler error: {error}")
+   443→                    await self._send_client(
+   444→                        websocket,
+   445→                        {
+   446→                            "type": "tool_result",
+   447→                            "id": request.get("id"),
+   448→                            "ok": False,
+   449→                            "kind": "tool_error",
+   450→                            "error": f"Bridge error: {error}",
+   451→                        },
+   452→                    )
+   453→
+   454→        try:
+   455→            async for raw in websocket:
+   456→                try:
+   457→                    if len(raw) > BIG_PAYLOAD_THREAD_BYTES:
+   458→                        request = await asyncio.to_thread(json.loads, raw)
+   459→                    else:
+   460→                        request = json.loads(raw)
+   461→                except (TypeError, json.JSONDecodeError):
+   462→                    await self._send_client(websocket, {"type": "error", "error": "Invalid JSON request."})
+   463→                    continue
+   464→                if not isinstance(request, dict):
+   465→                    await self._send_client(websocket, {"type": "error", "error": "Request must be a JSON object."})
+   466→                    continue
+   467→                task = asyncio.create_task(_run(request))
+   468→                pending.add(task)
+   469→                task.add_done_callback(pending.discard)
+   470→        finally:
+   471→            for task in list(pending):
+   472→                task.cancel()
+   473→            if pending:
+   474→                await asyncio.gather(*pending, return_exceptions=True)
+   475→            async with self._client_lock:
+   476→                self.clients.discard(websocket)
+   477→            log("extension disconnected")
+   478→
+   479→    async def _handle_request(self, websocket: Any, request: Dict[str, Any]) -> None:
+   480→        request_id = request.get("id")
+   481→        kind = request.get("type")
+   482→        if kind == "ping":
+   483→            await self._send_client(websocket, {"type": "pong", "id": request_id})
+   484→        elif kind == "studio_status":
+   485→            studio, studio_app, studio_proc = await self._studio_status()
+   486→            await self._send_client(
+   487→                websocket,
+   488→                {
+   489→                    "type": "studio_status",
+   490→                    "id": request_id,
+   491→                    "studio": studio,
+   492→                    "studio_app": studio_app,
+   493→                    "studio_proc": studio_proc,
+   494→                },
+   495→            )
+   496→        elif kind == "list_tools":
+   497→            await self._send_client(
+   498→                websocket,
+   499→                {
+   500→                    **self._connected_message(),
+   501→                    "type": "tools",
+   502→                    "id": request_id,
+   503→                },
+   504→            )
+   505→        elif kind == "call_tool":
+   506→            await self._call_tool(websocket, request)
+   507→        elif kind == "restart_mcp":
+   508→            try:
+   509→                await self.stop_servers()
+   510→                await self.start_servers()
+   511→                response = {
+   512→                    "type": "mcp_status",
+   513→                    "id": request_id,
+   514→                    "ok": True,
+   515→                    "alive": any(server.alive for server in self.servers.values()),
+   516→                    "tools": self._catalog,
+   517→                    "servers": self._server_status(),
+   518→                }
+   519→            except (OSError, RuntimeError) as error:
+   520→                response = {"type": "mcp_status", "id": request_id, "ok": False, "alive": False, "error": str(error)}
+   521→            await self._send_client(websocket, response)
+   522→            await self.broadcast(self._connected_message())
+   523→        elif kind == "add_server":
+   524→            await self._change_server(websocket, request, remove=False)
+   525→        elif kind == "remove_server":
+   526→            await self._change_server(websocket, request, remove=True)
+   527→        else:
+   528→            await self._send_client(
+   529→                websocket,
+   530→                {"type": "error", "id": request_id, "error": f"Unknown bridge request: {kind}"},
+   531→            )
+   532→
+   533→    async def _call_tool(self, websocket: Any, request: Dict[str, Any]) -> None:
+   534→        request_id = request.get("id")
+   535→        name = request.get("name")
+   536→        arguments = request.get("arguments") or {}
+   537→        timeout = request.get("timeout", 120000)
+   538→        if not isinstance(name, str) or not isinstance(arguments, dict):
+   539→            await self._send_client(
+   540→                websocket,
+   541→                {"type": "tool_result", "id": request_id, "ok": False, "error": "Invalid tool call."},
+   542→            )
+   543→            return
+   544→        try:
+   545→            timeout_seconds = max(1.0, min(float(timeout) / 1000, 300.0))
+   546→        except (TypeError, ValueError):
+   547→            timeout_seconds = 120.0
+   548→        server, tool_name = self._resolve_tool(name)
+   549→        # Isolation: the extension states which server is selected. The bridge refuses to
+   550→        # run a tool that belongs to any other server (requests without the field keep
+   551→        # the old behaviour).
+   552→        allowed = request.get("server")
+   553→        if isinstance(allowed, str) and allowed:
+   554→            if server is None and "/" not in name:
+   555→                allowed_server = self.servers.get(allowed)
+   556→                if allowed_server and allowed_server.alive and any(t["name"] == name for t in allowed_server.tools):
+   557→                    server, tool_name = allowed_server, name
+   558→            if server is not None and server.server_id != allowed:
+   559→                await self._send_client(
+   560→                    websocket,
+   561→                    {
+   562→                        "type": "tool_result",
+   563→                        "id": request_id,
+   564→                        "ok": False,
+   565→                        "kind": "unknown_tool",
+   566→                        "error": f"MCP tool not available for the selected server: {name}",
+   567→                    },
+   568→                )
+   569→                return
+   570→        if not server:
+   571→            await self._send_client(
+   572→                websocket,
+   573→                {
+   574→                    "type": "tool_result",
+   575→                    "id": request_id,
+   576→                    "ok": False,
+   577→                    "kind": "unknown_tool",
+   578→                    "error": f"Unknown or unavailable MCP tool: {name}",
+   579→                },
+   580→            )
+   581→            return
+   582→        try:
+   583→            result = await server.call_tool(tool_name, arguments, timeout_seconds)
+   584→            text_parts = []
+   585→            images = []
+   586→            for item in result.get("content", []):
+   587→                if not isinstance(item, dict):
+   588→                    continue
+   589→                if item.get("type") == "text" and isinstance(item.get("text"), str):
+   590→                    text_parts.append(item["text"])
+   591→                elif item.get("type") == "image" and isinstance(item.get("data"), str):
+   592→                    images.append(
+   593→                        {
+   594→                            "data": item["data"],
+   595→                            "mimeType": item.get("mimeType", "image/png"),
+   596→                        }
+   597→                    )
+   598→            structured = result.get("structuredContent")
+   599→            if not text_parts and structured is not None:
+   600→                text_parts.append(json.dumps(structured, ensure_ascii=False))
+   601→            text = "\n".join(text_parts)
+   602→            if result.get("isError"):
+   603→                await self._send_client(
+   604→                    websocket,
+   605→                    {"type": "tool_result", "id": request_id, "ok": False, "error": text or "MCP tool failed."},
+   606→                )
+   607→            else:
+   608→                await self._send_client(
+   609→                    websocket,
+   610→                    {"type": "tool_result", "id": request_id, "ok": True, "text": text, "images": images},
+   611→                )
+   612→            log(f"<- {name} ({text[:120].replace(chr(10), ' ')})")
+   613→        except (asyncio.TimeoutError, RuntimeError, OSError, ValueError) as error:
+   614→            message = str(error)
+   615→            await self._send_client(
+   616→                websocket,
+   617→                {
+   618→                    "type": "tool_result",
+   619→                    "id": request_id,
+   620→                    "ok": False,
+   621→                    "kind": "timeout" if isinstance(error, asyncio.TimeoutError) else "tool_error",
+   622→                    "error": message,
+   623→                },
+   624→            )
+   625→            log(f"<- {name} ERROR: {message[:MAX_LOG_CHARS]}")
+   626→
+   627→    def _resolve_tool(self, name: str) -> Tuple[Optional[MCPServer], str]:
+   628→        if "/" in name:
+   629→            server_id, bare_name = name.split("/", 1)
+   630→            server = self.servers.get(server_id)
+   631→            if server and server.alive and any(tool["name"] == bare_name for tool in server.tools):
+   632→                return server, bare_name
+   633→        matches = [
+   634→            (server, tool)
+   635→            for server in self.servers.values()
+   636→            if server.alive
+   637→            for tool in server.tools
+   638→            if tool["name"] == name
+   639→        ]
+   640→        if len(matches) == 1:
+   641→            return matches[0][0], name
+   642→        return None, name
+   643→
+   644→    async def _studio_status(self) -> Tuple[Optional[bool], Optional[bool], Optional[bool]]:
+   645→        studio_server = self.servers.get("roblox")
+   646→        studio_proc = await _process_running("RobloxStudioBeta.exe" if os.name == "nt" else "RobloxStudio")
+   647→        if not studio_server or not studio_server.alive:
+   648→            return None, None, studio_proc
+   649→        if not any(tool["name"] == "get_studio_state" for tool in studio_server.tools):
+   650→            return None, None, studio_proc
+   651→        try:
+   652→            result = await studio_server.call_tool("get_studio_state", {}, 8)
+   653→        except (asyncio.TimeoutError, RuntimeError, OSError, ValueError):
+   654→            return False, studio_proc, studio_proc
+   655→        text = " ".join(
+   656→            item.get("text", "")
+   657→            for item in result.get("content", [])
+   658→            if isinstance(item, dict) and isinstance(item.get("text"), str)
+   659→        )
+   660→        if result.get("isError") or re.search(
+   661→            r"Unable to find an active Studio instance|previously active Studio has disconnected",
+   662→            text,
+   663→            re.IGNORECASE,
+   664→        ):
+   665→            return False, studio_proc, studio_proc
+   666→        return True, True, studio_proc
+   667→
+   668→    async def _change_server(
+   669→        self, websocket: Any, request: Dict[str, Any], remove: bool
+   670→    ) -> None:
+   671→        request_id = request.get("id")
+   672→        server_id = request.get("server_id")
+   673→        if (
+   674→            not isinstance(server_id, str)
+   675→            or server_id == "roblox"
+   676→            or not re.fullmatch(r"[A-Za-z0-9._-]{1,64}", server_id)
+   677→        ):
+   678→            await self._send_client(
+   679→                websocket,
+   680→                {"type": "server_changed", "id": request_id, "ok": False, "error": "Invalid or protected MCP server id."},
+   681→            )
+   682→            return
+   683→        try:
+   684→            config = json.loads(CONFIG_PATH.read_text(encoding="utf-8")) if CONFIG_PATH.exists() else {}
+   685→            servers = config.setdefault("mcpServers", {})
+   686→            if not isinstance(servers, dict):
+   687→                raise RuntimeError("mcpServers must be a JSON object.")
+   688→            if remove:
+   689→                if server_id == "vscode":
+   690→                    raise RuntimeError("The VS Code MCP server cannot be removed.")
+   691→                servers.pop(server_id, None)
+   692→            else:
+   693→                command = request.get("command")
+   694→                args = request.get("args", [])
+   695→                env = request.get("env", {})
+   696→                if not isinstance(command, str) or not command.strip():
+   697→                    raise RuntimeError("MCP server command is required.")
+   698→                if not isinstance(args, list) or not all(isinstance(arg, str) for arg in args):
+   699→                    raise RuntimeError("MCP server args must be an array of strings.")
+   700→                if not isinstance(env, dict) or not all(isinstance(k, str) for k in env):
+   701→                    raise RuntimeError("MCP server env must be an object.")
+   702→                servers[server_id] = {"command": command, "args": args, "env": env}
+   703→            temp_path = CONFIG_PATH.with_suffix(".json.tmp")
+   704→            temp_path.write_text(json.dumps(config, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+   705→            temp_path.replace(CONFIG_PATH)
+   706→            await self.stop_servers()
+   707→            await self.start_servers()
+   708→            await self._send_client(
+   709→                websocket,
+   710→                {"type": "server_changed", "id": request_id, "ok": True, "restarting": False},
+   711→            )
+   712→            await self.broadcast(self._connected_message())
+   713→        except (OSError, json.JSONDecodeError, RuntimeError) as error:
+   714→            await self._send_client(
+   715→                websocket,
+   716→                {"type": "server_changed", "id": request_id, "ok": False, "error": str(error)},
+   717→            )
+   718→
+   719→
+   720→async def _process_running(process_name: str) -> Optional[bool]:
+   721→    try:
+   722→        if os.name == "nt":
+   723→            result = await asyncio.to_thread(
+   724→                subprocess_run,
+   725→                ["tasklist", "/FI", f"IMAGENAME eq {process_name}", "/NH"],
+   726→                5,
+   727→            )
+   728→            return process_name.lower() in result.lower()
+   729→        result = await asyncio.to_thread(subprocess_run, ["pgrep", "-f", process_name], 5)
+   730→        return bool(result.strip())
+   731→    except (OSError, subprocess.TimeoutExpired):
+   732→        return None
+   733→
+   734→
+   735→def subprocess_run(command: List[str], timeout: int) -> str:
+   736→    result = subprocess.run(
+   737→        command,
+   738→        capture_output=True,
+   739→        text=True,
+   740→        encoding="utf-8",
+   741→        errors="replace",
+   742→        timeout=timeout,
+   743→        check=False,
+   744→    )
+   745→    return result.stdout
+   746→
+   747→
+   748→async def run() -> None:
+   749→    if websockets is None:
+   750→        raise RuntimeError(
+   751→            "The 'websockets' package is required. Install it with "
+   752→            f"'{sys.executable} -m pip install websockets'."
+   753→        )
+   754→    bridge = Bridge()
+   755→    server = await websockets.serve(
+   756→        bridge.handle_client,
+   757→        HOST,
+   758→        PORT,
+   759→        max_size=128 * 1024 * 1024,
+   760→        max_queue=256,
+   761→        ping_interval=20,
+   762→        ping_timeout=90,
+   763→    )
+   764→    log(f"snapgent bridge v{BRIDGE_VERSION}")
+   765→    log(f"listening on ws://{HOST}:{PORT} - load the extension and open a supported AI chat")
+   766→    loop = asyncio.get_running_loop()
+   767→    stop_event = asyncio.Event()
+   768→    async def _startup_then_monitor() -> None:
+   769→        # Servers start in parallel after the websocket is already listening;
+   770→        # the monitor only begins once the initial startup has finished.
+   771→        try:
+   772→            await bridge.start_servers()
+   773→        except RuntimeError as error:
+   774→            log(f"config error: {error}")
+   775→        await _monitor_servers(bridge)
+   776→
+   777→    monitor_task = asyncio.create_task(_startup_then_monitor())
+   778→    for sig in (signal.SIGINT, signal.SIGTERM):
+   779→        try:
+   780→            loop.add_signal_handler(sig, stop_event.set)
+   781→        except (NotImplementedError, RuntimeError):
+   782→            pass
+   783→    try:
+   784→        await stop_event.wait()
+   785→    finally:
+   786→        monitor_task.cancel()
+   787→        await asyncio.gather(monitor_task, return_exceptions=True)
+   788→        server.close()
+   789→        await server.wait_closed()
+   790→        await bridge.stop_servers()
+   791→        log("bridge stopped")
+   792→
+   793→
+   794→async def _monitor_servers(bridge: Bridge) -> None:
+   795→    failures: Dict[str, int] = {}
+   796→    next_try: Dict[str, float] = {}
+   797→
+   798→    def _state() -> Tuple[Tuple[str, bool], ...]:
+   799→        return tuple(sorted((s.server_id, s.alive) for s in bridge.servers.values()))
+   800→
+   801→    last_state = _state()
+   802→    while True:
+   803→        await asyncio.sleep(5)
+   804→        for server in list(bridge.servers.values()):
+   805→            sid = server.server_id
+   806→            if server.alive:
+   807→                failures.pop(sid, None)
+   808→                next_try.pop(sid, None)
+   809→                continue
+   810→            if time.monotonic() < next_try.get(sid, 0.0):
+   811→                continue
+   812→            count = failures.get(sid, 0)
+   813→            if count < 3 or count % 20 == 0:
+   814→                log(f"[{sid}] MCP server disconnected; restarting (attempt {count + 1}).")
+   815→            try:
+   816→                ok = await server.start()
+   817→            except Exception as error:
+   818→                server.error = str(error)
+   819→                log(f"[{sid}] unexpected restart error: {error}")
+   820→                ok = False
+   821→            if ok:
+   822→                failures.pop(sid, None)
+   823→                next_try.pop(sid, None)
+   824→            else:
+   825→                failures[sid] = count + 1
+   826→                delay = min(300.0, 5.0 * (2 ** min(count, 6)))
+   827→                next_try[sid] = time.monotonic() + delay
+   828→        state = _state()
+   829→        if state != last_state:
+   830→            last_state = state
+   831→            bridge._rebuild_catalog()
+   832→            bridge._log_health()
+   833→            await bridge.broadcast(bridge._connected_message())
+   834→
+   835→
+   836→if __name__ == "__main__":
+   837→    try:
+   838→        asyncio.run(run())
+   839→    except (OSError, RuntimeError, ValueError) as error:
+   840→        log(f"FATAL: {error}")
+   841→        raise SystemExit(1)
+   842→

@@ -1,0 +1,2002 @@
+     1→     1→// SPDX-License-Identifier: GPL-3.0-or-later
+     2→     2→// core/main.js - the provider-agnostic agentic loop, UI and session state.
+     3→     3→// Drives any AI chat site through the ZSProvider interface (providers/*.js):
+     4→     4→// waits for the model's reply, parses snapgentV3 commands (ZSParse), asks the
+     5→     5→// background worker to execute them on the Roblox MCP bridge, and feeds the
+     6→     6→// result back. Camouflages the system prompt ("Starting Up") and tool JSON
+     7→     7→// behind animated chips, masks injected input, and exposes a Stop button.
+     8→     8→// The model ALWAYS receives an output.
+     9→     9→//
+    10→    10→// This file must NEVER touch the host site's DOM directly - everything
+    11→    11→// site-specific goes through P (the provider). Our OWN UI (panel, chips,
+    12→    12→// banners…) is plain DOM we create ourselves and is allowed here.
+    13→    13→
+    14→    14→(() => {
+    15→    15→  "use strict";
+    16→    16→  const P = ZSProvider;
+    17→    17→  const T = P.timings;
+    18→    18→  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    19→    19→  const log = (...a) => console.log("[snapgentV3]", ...a);
+    20→    20→
+    21→    21→  // ── Anti-bot mitigation (EXPERIMENTAL) ──────────────────────────────────
+    22→    22→  // Suspected contributor to Arena's captcha: the agentic loop sends turns
+    23→    23→  // back-to-back with near-zero, perfectly regular delay (~200ms settle),
+    24→    24→  // which behavioral risk-scoring (reCAPTCHA/Cloudflare) can read as a bot
+    25→    25→  // signal alongside the necessarily-synthetic input events. This adds a
+    26→    26→  // small randomized human-reaction-time delay before each send.
+    27→    27→  // REVERT: flip HUMANIZE_SEND to false - single toggle, no other changes needed.
+    28→    28→  const HUMANIZE_SEND = false; // didn't prevent Arena's captcha (fires on turn 1 already) - revert
+    29→    29→  const SEND_JITTER_MS = [400, 1400]; // [min, max] ms, randomized per send
+    30→    30→  function jitterBeforeSend() {
+    31→    31→    if (!HUMANIZE_SEND && P.id !== "deepseek") return Promise.resolve();
+    32→    32→    const [lo, hi] = P.id === "deepseek" ? [1500, 4000] : SEND_JITTER_MS;
+    33→    33→    return sleep(lo + Math.random() * (hi - lo));
+    34→    34→  }
+    35→    35→
+    36→    36→  // ── Diagnostics ───────────────────────────────────────────────────────────
+    37→    37→  // Persistent, lightweight breadcrumb log of the agentic loop's key decisions
+    38→    38→  // (sends, response kinds, tool start/end, resumes, stops). Read back from the
+    39→    39→  // console (filter "[zs-diag]") or window.__zsDiag (also mirrored onto a hidden
+    40→    40→  // DOM node for a main-world inspector). Each entry carries a turn snapshot.
+    41→    41→  const ZS_DIAG_MAX = 300;
+    42→    42→  const _diag = [];
+    43→    43→  function diag(event, data) {
+    44→    44→    const snap = { ...P.snapshot(), gen: P.isGenerating(), run: A.running };
+    45→    45→    const e = { t: Date.now(), iso: new Date().toISOString().slice(11, 23), event,
+    46→    46→                data: data || null, snap };
+    47→    47→    _diag.push(e);
+    48→    48→    if (_diag.length > ZS_DIAG_MAX) _diag.shift();
+    49→    49→    try { console.log("[zs-diag]", e.iso, event, JSON.stringify({ ...data, ...snap })); } catch {}
+    50→    50→    try {
+    51→    51→      let n = document.getElementById("zs-diag-log");
+    52→    52→      if (!n) { n = document.createElement("script"); n.type = "application/json"; n.id = "zs-diag-log"; (document.body || document.documentElement).appendChild(n); }
+    53→    53→      n.textContent = JSON.stringify(_diag);
+    54→    54→    } catch {}
+    55→    55→    try { window.__zsDiag = _diag; } catch {}
+    56→    56→  }
+    57→    57→  P.init({ diag });
+    58→    58→
+    59→    59→  // ── [TRACE] Main-thread stall detector ─────────────────────────────────────
+    60→    60→  // The reported bug ("tools spin 15-20s, the chip timer stops rising") can only
+    61→    61→  // be a SYNCHRONOUS block of the page's main thread: an async bridge/network wait
+    62→    62→  // yields, so the 200ms UI interval (and its chip timer) would keep ticking. This
+    63→    63→  // fires every 250ms and, whenever the ACTUAL gap since the last tick is far more
+    64→    64→  // than expected, logs the stall. A `stall.detected` with a big `ms` right when
+    65→    65→  // the user sees the freeze = the smoking gun; correlate its timestamp with the
+    66→    66→  // surrounding diag events (esp. code.snapAll / dom.read.slow) to see WHAT ran.
+    67→    67→  {
+    68→    68→    const EXPECT = 250, STALL = 800; // only log gaps beyond this many ms
+    69→    69→    let _lastTick = Date.now();
+    70→    70→    setInterval(() => {
+    71→    71→      const now = Date.now();
+    72→    72→      const gap = now - _lastTick;
+    73→    73→      _lastTick = now;
+    74→    74→      if (gap > STALL) {
+    75→    75→        diag("stall.detected", { ms: gap, overBy: gap - EXPECT,
+    76→    76→          toolRunning: A.toolRunning, running: A.running, injecting: A.injecting });
+    77→    77→      }
+    78→    78→    }, EXPECT);
+    79→    79→  }
+    80→    80→
+    81→    81→  // GitHub releases page - where users download the Bridge + start.bat.
+    82→    82→  const GITHUB_URL = "https://github.com/herdodp/snapgent-connector";
+    83→    83→  // AI chat sites snapgentV3 works on. Keep in sync with manifest.json
+    84→    84→  // content_scripts and background.js PROVIDER_URLS when adding a provider.
+    85→    85→  const AI_SITES = [
+    86→    86→    // { name: "DeepSeek", url: "https://chat.deepseek.com/" }, // hidden from UI bar (disabled, not deleted)
+    87→    87→    { name: "ChatGPT", url: "https://chatgpt.com/" },
+    88→    88→    { name: "Claude", url: "https://claude.ai/new" },
+    89→    89→    { name: "Gemini", url: "https://gemini.google.com/app" },
+    90→    90→    { name: "Kimi", url: "https://www.kimi.ai/" },
+    91→    91→    { name: "GLM", url: "https://chat.z.ai/" },
+    92→    92→    { name: "Qwen", url: "https://chat.qwen.ai/" },
+    93→    93→    { name: "Arena", url: "https://arena.ai/text/direct" },
+    94→    94→    { name: "Meta AI", url: "https://www.meta.ai/" },
+    95→    95→    { name: "Ptero", url: "https://ptero.pro/" },
+    96→    96→    { name: "Grok", url: "https://grok.com/" },
+    97→    97→    { name: "Mistral", url: "https://chat.mistral.ai/code" },
+    98→    98→  ];
+    99→    99→  const TARGET_STORAGE_KEY = "zsSelectedMcpTarget";
+   100→   100→
+   101→   101→  // ── Background (multi-tab) sessions ─────────────────────────────────────
+   102→   102→  // By default a session PARKS while its tab is hidden (see waitVisible): a
+   103→   103→  // hidden tab has no layout, so the first reads after unhide can come back
+   104→   104→  // stale and the agent loop must not act on them. That is the right default for
+   105→   105→  // a single session, but it also means that with several chats open only ONE
+   106→   106→  // of them can make progress - the others sit on "Paused · open this tab"
+   107→   107→  // indefinitely (user-reported).
+   108→   108→  //
+   109→   109→  // Opting in lets a hidden tab keep its session alive. It is deliberately NOT
+   110→   110→  // the default: reading a hidden tab is the stale-DOM case the parking was
+   111→   111→  // built for, so it must be an explicit choice. Off = previous behaviour,
+   112→   112→  // byte for byte.
+   113→   113→  const BACKGROUND_SESSIONS_KEY = "zsBackgroundSessions";
+   114→   114→  let backgroundSessions = false;
+   115→   115→  const backgroundSessionsLoaded = new Promise((resolve) => {
+   116→   116→    try {
+   117→   117→      chrome.storage.local.get(BACKGROUND_SESSIONS_KEY, (result) => {
+   118→   118→        const saved = result && result[BACKGROUND_SESSIONS_KEY];
+   119→   119→        if (saved === true) backgroundSessions = true;
+   120→   120→        resolve();
+   121→   121→      });
+   122→   122→    } catch (error) {
+   123→   123→      console.warn("[snapgentV3] Could not load background-session setting:", error);
+   124→   124→      resolve();
+   125→   125→    }
+   126→   126→  });
+   127→   127→  // Awaitable so a session that starts right after load does not race the flag.
+   128→   128→  async function backgroundSessionsReady() {
+   129→   129→    await backgroundSessionsLoaded;
+   130→   130→    return backgroundSessions;
+   131→   131→  }
+   132→   132→  // Writer for the flag: without this the setting could only be flipped by
+   133→   133→  // hand-editing chrome.storage.local in DevTools, so the multi-tab feature was
+   134→   134→  // unreachable for users. Kept in memory too, so a toggle takes effect on the
+   135→   135→  // NEXT waitVisible() of a running session without a page reload.
+   136→   136→  function setBackgroundSessions(on) {
+   137→   137→    backgroundSessions = on === true;
+   138→   138→    try { chrome.storage.local.set({ [BACKGROUND_SESSIONS_KEY]: backgroundSessions }); } catch {}
+   139→   139→    return backgroundSessions;
+   140→   140→  }
+   141→   141→
+   142→   142→  let selectedTargetId = "vscode";
+   143→   143→  try {
+   144→   144→    chrome.storage.local.get(TARGET_STORAGE_KEY, (result) => {
+   145→   145→      const saved = result && result[TARGET_STORAGE_KEY];
+   146→   146→      if (typeof saved === "string" && saved) {
+   147→   147→        selectedTargetId = saved;
+   148→   148→        refreshActiveToolNames();
+   149→   149→        if (ui.setTarget) {
+   150→   150→          ui.setTarget(saved);
+   151→   151→          bg({ type: "status" }).then((status) => status && ui.setStatus(status));
+   152→   152→        }
+   153→   153→      }
+   154→   154→    });
+   155→   155→  } catch (error) {
+   156→   156→    console.warn("[snapgentV3] Could not load selected MCP target:", error);
+   157→   157→  }
+   158→   158→
+   159→   159→  // ── MCP enable/disable toggles ──────────────────────────────────────────
+   160→   160→  // Persisted map { serverId: boolean }. A server that was never toggled counts
+   161→   161→  // as enabled. Disabled servers are hidden from the target dropdown AND are
+   162→   162→  // filtered out of everything the AI reads (tool lists, list_mcp_servers,
+   163→   163→  // list_commands) so their tool schemas never cost tokens.
+   164→   164→  const MCP_ENABLED_KEY = "zsMcpEnabled";
+   165→   165→  let mcpEnabled = {};
+   166→   166→  try {
+   167→   167→    chrome.storage.local.get(MCP_ENABLED_KEY, (result) => {
+   168→   168→      const saved = result && result[MCP_ENABLED_KEY];
+   169→   169→      if (saved && typeof saved === "object" && !Array.isArray(saved)) {
+   170→   170→        mcpEnabled = saved;
+   171→   171→        if (typeof ui !== "undefined" && ui.setTarget) ui.setTarget(selectedTargetId);
+   172→   172→      }
+   173→   173→    });
+   174→   174→  } catch (error) {
+   175→   175→    console.warn("[snapgentV3] Could not load MCP toggles:", error);
+   176→   176→  }
+   177→   177→  function isMcpEnabled(id) {
+   178→   178→    return mcpEnabled[id] !== false;
+   179→   179→  }
+   180→   180→  function setMcpEnabled(id, on) {
+   181→   181→    mcpEnabled = { ...mcpEnabled, [id]: !!on };
+   182→   182→    try { chrome.storage.local.set({ [MCP_ENABLED_KEY]: mcpEnabled }); } catch {}
+   183→   183→  }
+   184→   184→
+   185→   185→  const A = {
+   186→   186→    running: false,
+   187→   187→    stop: false,
+   188→   188→    // stopping: the user clicked Stop and we are winding the loop down. Set the
+   189→   189→    // instant the button is clicked so the bar can show immediate "Stopping…"
+   190→   190→    // feedback and keep the button steady (no flicker) until the loop's finally
+   191→   191→    // clears it - the live generation signal toggles off/on as the loop drains,
+   192→   192→    // which otherwise made the Stop button vanish then reappear.
+   193→   193→    stopping: false,
+   194→   194→    // held: a command is parked waiting for the scroll window to lapse (see
+   195→   195→    // waitScrollWindow). The Stop control must stay visible while it is set:
+   196→   196→    // scrollSuppressed() hides the button for the very same reason the command
+   197→   197→    // is being held, so without this the user would have no way to cancel.
+   198→   198→    held: false,
+   199→   199→    // userStopped: the user deliberately halted generation - via our "■ Stop"
+   200→   200→    // button OR the site's native stop. While set, the auto-resume watchdog
+   201→   201→    // must NOT relaunch or re-run a tool from the halted turn.
+   202→   202→    userStopped: false,
+   203→   203→    // lastGenAt: timestamp of the last moment the site was actively generating.
+   204→   204→    // The auto-resume watchdog only acts on a tool call from a RECENT live
+   205→   205→    // generation - never on a historical turn rendered by opening/scrolling.
+   206→   206→    lastGenAt: 0,
+   207→   207→    started: false,
+   208→   208→    starting: false,
+   209→   209→    // The conversation a bootstrap belongs to + a generation counter. If the user
+   210→   210→    // navigates to another chat mid/post-bootstrap, syncSessionState bumps the
+   211→   211→    // counter (invalidating the in-flight startSession) and clears `starting`, so
+   212→   212→    // the new chat shows its own state instead of a stale "Starting…".
+   213→   213→    startingKey: null,
+   214→   214→    startGen: 0,
+   215→   215→    // The conversation a RUNNING loop is bound to. If the user opens a new, empty
+   216→   216→    // chat via the site's own button, syncSessionState abandons the loop so the
+   217→   217→    // fresh chat shows "Start", not a stale "Agent active".
+   218→   218→    loopKey: null,
+   219→   219→    // Identity of the assistant turn ALREADY present when the current session
+   220→   220→    // started. A page reload can RESTORE an in-progress generation (e.g. an
+   221→   221→    // execute_luau that was mid-stream in an A/B turn); that restored turn looks
+   222→   222→    // like a fresh live tool finish to the auto-resume watchdog, which then ran it
+   223→   223→    // into the NEW conversation the user had just opened (validated live, 2026-06).
+   224→   224→    // autoResume never resumes the turn whose id matches this baseline.
+   225→   225→    bootBaselineId: null,
+   226→   226→    injecting: false,
+   227→   227→    toolRunning: false,
+   228→   228→    toolStart: 0,
+   229→   229→    toolName: "",
+   230→   230→    toolItem: null,
+   231→   231→    toolArg: "",
+   232→   232→    toolList: [],
+   233→   233→    toolNames: new Set(),
+   234→   234→    // Successful tool calls since the last command-list reminder. DeepSeek (and
+   235→   235→    // others) can drift away from the exact command names over a long session,
+   236→   236→    // so we re-inject the list every REMIND_TOOLS_EVERY calls (see agentLoop).
+   237→   237→    toolCallsSinceReminder: 0,
+   238→   238→    // When the system prompt was last re-stated. Diagnostic only - whether one
+   239→   239→    // is OWED is derived from the conversation itself, never from a counter
+   240→   240→    // (see sinceLastSys / sysResendDue).
+   241→   241→    sysResendAt: 0,
+   242→   242→    // This page outlived its extension build - nothing works until a reload.
+   243→   243→    // Latched (never cleared): the context cannot come back. See bg().
+   244→   244→    staleExtension: false,
+   245→   245→    bridge: { connected: false, mcpAlive: false, tools: 0 },
+   246→   246→    // Images from the most recent tool result, stashed by runTool for the
+   247→   247→    // upcoming submitAndGetBase/typeAndSend call to attach as the LAST step
+   248→   248→    // before sending (see the comment in runTool's r.images branch).
+   249→   249→    pendingImages: null,
+   250→   250→    // BARE names of tools observed to return images at least once this session.
+   251→   251→    // For the KNOWN Roblox vision tool (screen_capture) toolCategory already
+   252→   252→    // gives the "screen" chip optimistically at run time; a custom MCP tool's
+   253→   253→    // name tells us nothing, so we can't predict it - but once we've SEEN it
+   254→   254→    // return an image we can be optimistic on its NEXT call. Populated in the
+   255→   255→    // agent loop's result branch when A.pendingImages lands.
+   256→   256→    imageTools: new Set(),
+   257→   257→    // True while the loop is parked waiting for this tab to come back to the
+   258→   258→    // foreground (see waitVisible/parkHidden). Drives the bar's "Paused" state.
+   259→   259→    parked: false,
+   260→   260→    // Timestamp of the last successful tool-catalogue refresh (see ensureTools).
+   261→   261→    toolsAt: 0,
+   262→   262→  };
+   263→   263→
+   264→   264→  async function waitFor(pred, timeout) {
+   265→   265→    const t0 = Date.now();
+   266→   266→    while (Date.now() - t0 < timeout) {
+   267→   267→      if (pred()) return true;
+   268→   268→      await sleep(120);
+   269→   269→    }
+   270→   270→    return false;
+   271→   271→  }
+   272→   272→
+   273→   273→  // Park until the AI tab is the FOREGROUND tab of its window again (or the user
+   274→   274→  // halts). Deliberately has NO time cap: a tab minimized/backgrounded for an
+   275→   275→  // hour must resume cleanly, not silently time out into a "could not send /
+   276→   276→  // not run" failure. (A plain waitFor with a finite timeout returned false on a
+   277→   277→  // long minimize, which broke the send loop and ended the agent loop.) Returns
+   278→   278→  // false ONLY if the user stopped while we were parked, so callers can break.
+   279→   279→  // EVENT-DRIVEN, not polled. A chained setTimeout loop is subject to Chrome's
+   280→   280→  // "intensive throttling": once a tab has been hidden >5 min, chained timers are
+   281→   281→  // clamped to ONE tick per minute, so a sleep(300) poll could take up to a full
+   282→   282→  // minute to notice the tab came back - the user sees the bar sit on "Paused"
+   283→   283→  // long after they returned. visibilitychange fires immediately on unhide, so we
+   284→   284→  // race it against a slow stop-poll (the stop path is not latency-critical).
+   285→   285→  async function waitVisible() {
+   286→   286→    if (!document.hidden || A.stop) return !A.stop;
+   287→   287→    // Multi-tab opt-in: a hidden tab may keep working. Read the flag through the
+   288→   288→    // awaitable so a session started immediately after load cannot race it.
+   289→   289→    if (await backgroundSessionsReady()) {
+   290→   290→      // Mark the state for the diagnostics only; never place a cover over a tab
+   291→   291→      // the user cannot see anyway.
+   292→   292→      diag("park.skipped.background", { configured: true });
+   293→   293→      return !A.stop;
+   294→   294→    }
+   295→   295→    A.parked = true;
+   296→   296→    try { ui.setStarting(); } catch {}
+   297→   297→    try {
+   298→   298→      await new Promise((resolve) => {
+   299→   299→        const done = () => {
+   300→   300→          document.removeEventListener("visibilitychange", onVis);
+   301→   301→          clearInterval(iv);
+   302→   302→          resolve();
+   303→   303→        };
+   304→   304→        const onVis = () => { if (!document.hidden) done(); };
+   305→   305→        document.addEventListener("visibilitychange", onVis);
+   306→   306→        // Safety net only: covers a stop click while parked, and the (unlikely)
+   307→   307→        // case of a missed visibilitychange event.
+   308→   308→        const iv = setInterval(() => { if (A.stop || !document.hidden) done(); }, 1000);
+   309→   309→      });
+   310→   310→    } finally {
+   311→   311→      A.parked = false;
+   312→   312→      try { ui.setStarting(); } catch {}
+   313→   313→    }
+   314→   314→    return !A.stop;
+   315→   315→  }
+   316→   316→
+   317→   317→  // Park while the tab is hidden and report how long we were parked, so callers
+   318→   318→  // can slide their timers forward by that amount. Without this, every deadline
+   319→   319→  // inside waitForResponse (inactivity timeout, warm-up, text-stability) keeps
+   320→   320→  // ticking while nothing can be read - which is what turned "user switched to
+   321→   321→  // Studio for 5 minutes" into "No response from <site>, the loop has stopped"
+   322→   322→  // and left the pending command showing a grey "not run".
+   323→   323→  async function parkHidden() {
+   324→   324→    if (!document.hidden || A.stop) return 0;
+   325→   325→    const t0 = Date.now();
+   326→   326→    await waitVisible();
+   327→   327→    const parked = Date.now() - t0;
+   328→   328→    diag("park.resumed", { parkedMs: parked });
+   329→   329→    // Give the site a beat to repaint: a tab that was hidden has no layout, so
+   330→   330→    // the first reads after unhide can come back stale/blank.
+   331→   331→    if (!A.stop) await sleep(400);
+   332→   332→    return parked;
+   333→   333→  }
+   334→   334→
+   335→   335→  // Submit `text` as a new turn, masking the input while we type. Returns the
+   336→   336→  // assistant-item count BEFORE the reply (waitForResponse waits beyond it).
+   337→   337→  // Snapshot the identity of the assistant turn present BEFORE we send. Paired
+   338→   338→  // with waitForResponse, this lets "a new reply turn exists" be tested by node
+   339→   339→  // identity rather than a raw count - the latter is unreliable on providers that
+   340→   340→  // virtualize the message list, where the count stays flat as a new
+   341→   341→  // turn appears and old ones detach. Captured at every send site (tool feedback,
+   342→   342→  // user message, bootstrap). Providers without lastAssistantId fall back to count.
+   343→   343→  function captureSendToken() {
+   344→   344→    A.sendToken = P.lastAssistantId ? P.lastAssistantId() : undefined;
+   345→   345→  }
+   346→   346→
+   347→   347→  async function submitAndGetBase(text, images) {
+   348→   348→    captureSendToken();
+   349→   349→    diag("send", { text: String(text).slice(0, 60), busy: P.isBusyNow() });
+   350→   350→    A.injecting = true;
+   351→   351→    ui.inputCover(true);
+   352→   352→    try {
+   353→   353→      // Quick 2-point settle: sample the previous response's stream length before
+   354→   354→      // and after a 200ms yield. A one-shot React batch flush (the common case)
+   355→   355→      // shows no second growth and costs only 200ms. A genuinely still-generating
+   356→   356→      // stream shows growth → fall back to the full idle wait.
+   357→   357→      const _settleItem = P.lastAssistant();
+   358→   358→      const _settleLen0 = _settleItem ? P.streamLen(_settleItem) : 0;
+   359→   359→      await sleep(200);
+   360→   360→      if (_settleItem && _settleItem === P.lastAssistant() &&
+   361→   361→          P.streamLen(_settleItem) > _settleLen0) {
+   362→   362→        await waitFor(() => !P.isGenerating(), 4000);
+   363→   363→      }
+   364→   364→      const base = P.assistantCount();
+   365→   365→      const preUser = P.userCount();
+   366→   366→      // Arm the optimistic pre-hide for the result turn we're about to inject:
+   367→   367→      // the very next NEW user turn is ours, so preHideWholeItems can mask it on
+   368→   368→      // creation instead of waiting for its "Output of '…'" caption to render
+   369→   369→      // (which lands a tick after the node - especially with an attached image -
+   370→   370→      // and would otherwise flash the raw output for the 200/700ms until a sweep
+   371→   371→      // nudge catches it). See preHideWholeItems.
+   372→   372→      A.injectPreUser = preUser;
+   373→   373→      A.injectHideUntil = Date.now() + 2500;
+   374→   374→      // "Landed" = a new turn appeared in the DOM. In long chats, list
+   375→   375→      // virtualisation can keep counts flat even when our message landed - the
+   376→   376→      // textarea-cleared signal below is the primary fast gate.
+   377→   377→      const landed = () => P.userCount() > preUser || P.assistantCount() > base;
+   378→   378→      // CRITICAL: never type/send while the tab is HIDDEN. Background tabs throttle
+   379→   379→      // rendering, which made the landed-check unreliable and caused the SAME
+   380→   380→      // feedback to be sent several times. Send ONLY while visible.
+   381→   381→      let tries = 0;
+   382→   382→      let messageSent = false;
+   383→   383→      const maxTries = Number.isInteger(P.sendRetryLimit) && P.sendRetryLimit > 0
+   384→   384→        ? P.sendRetryLimit
+   385→   385→        : 4;
+   386→   386→      while (!messageSent && !landed() && tries < maxTries && !A.stop) {
+   387→   387→        if (document.hidden) {
+   388→   388→          diag("send.waitVisible", { tries });
+   389→   389→          if (!(await waitVisible()) || A.stop) break; // park (no cap) until foreground; break only on user stop
+   390→   390→        }
+   391→   391→        await jitterBeforeSend();
+   392→   392→        diag("submit.typeAndSend", { hasImages: !!(images && images.length) });
+   393→   393→        await P.typeAndSend(text, images);
+   394→   394→        // Re-arm the pre-hide window NOW that typeAndSend has returned (the send
+   395→   395→        // was just clicked, so our result turn is about to render). The initial
+   396→   396→        // arm above can EXPIRE during an image upload - typeAndSend blocks ~3-6s
+   397→   397→        // uploading the capture before the turn appears, past the 2.5s window - so
+   398→   398→        // without this re-arm the raw "Output of…" + a still-loading (0-byte)
+   399→   399→        // thumbnail flash for image feedbacks until a sweep chip lands. Safe: the
+   400→   400→        // input is covered and the loop owns this send, so no user turn can slip
+   401→   401→        // into the window, and the pre-hide is one-shot (consumes the first turn).
+   402→   402→        A.injectHideUntil = Date.now() + 2500;
+   403→   403→        // The site clears the textarea as soon as the send is accepted - faster
+   404→   404→        // and more reliable than waiting for a DOM turn count change.
+   405→   405→        await waitFor(() => {
+   406→   406→          if (P.editorText().trim() === "") messageSent = true;
+   407→   407→          return messageSent || landed();
+   408→   408→        }, 3500);
+   409→   409→        tries++;
+   410→   410→      }
+   411→   411→      if (messageSent) diag("send.cleared", { tries });
+   412→   412→      // All retries exhausted with NO evidence the message landed (textarea never
+   413→   413→      // cleared, no new turn). Silently returning here left the loop waiting for
+   414→   414→      // a reply that will never come (~60s "empty" timeout) with zero explanation
+   415→   415→      // - the reported "the tool result just never gets injected" symptom. Tell
+   416→   416→      // the user what actually happened so they can nudge the conversation
+   417→   417→      // themselves instead of watching a stuck bar.
+   418→   418→      if (!messageSent && !landed() && !A.stop) {
+   419→   419→        diag("send.failed", { tries });
+   420→   420→        ui.banner("warn", "Message could not be sent",
+   421→   421→          `Send "continue" to resume.`);
+   422→   422→      }
+   423→   423→      return base;
+   424→   424→    } finally {
+   425→   425→      // During Starting Up / the agent loop, the bootstrap or loop owns the cover
+   426→   426→      // for the whole phase, so don't lift it here between an injection and the
+   427→   427→      // next waitForResponse - it stays up until the loop / bootstrap ends.
+   428→   428→      if (!A.starting && !A.running) ui.inputCover(false);
+   429→   429→      setTimeout(() => (A.injecting = false), 400);
+   430→   430→      // Camouflage the turn we just injected without waiting on the rAF observer
+   431→   431→      // (paused in a background tab). A couple of nudges cover the render.
+   432→   432→      setTimeout(scheduleSweep, 200);
+   433→   433→      setTimeout(scheduleSweep, 700);
+   434→   434→    }
+   435→   435→  }
+   436→   436→
+   437→   437→  // ════════════════════════════════════════════════════════════════════════
+   438→   438→  //  RESPONSE WATCHER  (generating-flag driven - robust to DOM churn)
+   439→   439→  // ════════════════════════════════════════════════════════════════════════
+   440→   440→  // Shared wording for the 2026-11 placeholder turn, used by both the Start flow
+   441→   441→  // and agentLoop so the user sees one explanation, not two dialects.
+   442→   442→  const FALLBACK_TURN_TEXT =
+   443→   443→    "ChatGPT returned an empty placeholder reply for this conversation - open a new chat and Start again.";
+   444→   444→
+   445→   445→  async function waitForResponse(base) {
+   446→   446→    const t0 = Date.now();
+   447→   447→    // INACTIVITY timeout (not total-elapsed): the loop only gives up after this
+   448→   448→    // long with NO streaming AND no text change. lastActiveAt is refreshed every
+   449→   449→    // tick the model is generating or the reply text grows, so an arbitrarily
+   450→   450→    // LONG but still-active response never trips it (the old total-elapsed cap
+   451→   451→    // wrongly fired "No response" while the model was still writing past 300s).
+   452→   452→    const TIMEOUT = T.RESPONSE_TIMEOUT_MS;
+   453→   453→    let lastActiveAt = Date.now();
+   454→   454→    const STABLE_MS = T.STABLE_MS; // generating-flag stuck ON but text frozen → done
+   455→   455→    let started = false, doneSince = 0, lastLimitScan = 0;
+   456→   456→    let lastText = null, lastChangeAt = Date.now(), genFalseSince = 0;
+   457→   457→    // ── DIAG: finalisation-latency instrumentation (multi_edit "slow" probe) ──
+   458→   458→    // genOffFirstAt: the FIRST moment gen went false after streaming began (does
+   459→   459→    // NOT reset on flicker, unlike genFalseSince). genFlickers: how many times gen
+   460→   460→    // flipped back true after having been false - a high count means post-stop DOM
+   461→   461→    // churn (or a wedged stop button) is what keeps the watcher alive. waitedBlock/
+   462→   462→    // waitedFlicker: iterations spent waiting because effectiveBlock held vs because
+   463→   463→    // gen was (re)true. These pinpoint which gate causes any tail latency.
+   464→   464→    let genOffFirstAt = 0, genFlickers = 0, prevGen = null;
+   465→   465→    let waitedBlock = 0, waitedFlicker = 0;
+   466→   466→    const finalizeDiag = (kind) => {
+   467→   467→      const now = Date.now();
+   468→   468→      diag("stopGoneToResp", {
+   469→   469→        kind,
+   470→   470→        stopGoneToRespMs: genOffFirstAt ? now - genOffFirstAt : null,
+   471→   471→        genStableForMs: genFalseSince ? now - genFalseSince : null,
+   472→   472→        lastChangeAgoMs: now - lastChangeAt,
+   473→   473→        genFlickers, waitedBlock, waitedFlicker,
+   474→   474→        totalMs: now - t0,
+   475→   475→      });
+   476→   476→    };
+   477→   477→    let preStartSilent = 0; // nothing produced AND not generating
+   478→   478→    let curItem = null, sawContent = false, warmSince = 0; // per-turn "warming up"
+   479→   479→    // Last NON-EMPTY reply read for the CURRENT turn. Sites re-render a turn's
+   480→   480→    // subtree (React/Monaco churn) and a read can come back "" for a frame at
+   481→   481→    // the exact moment the watcher finalizes - the turn then ended as
+   482→   482→    // kind:"empty" even though a (possibly cut-off) command was sitting there a
+   483→   483→    // tick earlier, leaving a DEAD turn: no parse_error feedback, and the
+   484→   484→    // autoResume dedupe (zResume) blocks any later retry (validated live on a
+   485→   485→    // Qwen post-stop regenerate, 2026-07). Classify on this fallback instead of
+   486→   486→    // declaring empty. Reset whenever the turn NODE changes so a new turn can
+   487→   487→    // never inherit the previous turn's text.
+   488→   488→    let lastGoodReply = "";
+   489→   489→    let reasonSince = 0; // reasoning written but no answer yet (loading phase)
+   490→   490→    let noTurnSince = 0; // finalize attempted before this send's reply turn exists
+   491→   491→    let unsettledSince = 0; // command-shaped reply whose read is not yet stable
+   492→   492→    const WARMUP_MS = T.WARMUP_MS;
+   493→   493→    const REASON_NOREPLY_MS = T.REASON_NOREPLY_MS;
+   494→   494→    const NO_TURN_GRACE_MS = 30000;
+   495→   495→    // Upper bound on holding off a parse verdict while a provider reports its
+   496→   496→    // read is unsettled (Qwen A/B dual turn still landing). A genuinely stuck
+   497→   497→    // read still resolves after this and is parsed as-is.
+   498→   498→    const UNSETTLED_GRACE_MS = 8000;
+   499→   499→    // Once the generating flag has been OFF this long, the model has clearly
+   500→   500→    // stopped streaming - so an "open tool block" reading is a DOM-churn/parse
+   501→   501→    // artifact, not live output, and must not keep the watcher waiting. Provider
+   502→   502→    // -neutral: while a model is genuinely streaming, gen stays true and this is
+   503→   503→    // never reached.
+   504→   504→    const GEN_STOP_GRACE_MS = 2500;
+   505→   505→
+   506→   506→    while (Date.now() - lastActiveAt < TIMEOUT) {
+   507→   507→      if (A.stop) return { kind: "stopped" };
+   508→   508→      // SCROLL-AWAY RULE: while the user scrolls up, NOTHING is read or run.
+   509→   509→      // Hold here (and keep the inactivity clock alive, since this is the user
+   510→   510→      // browsing, not a stalled model) so no scroll-rendered history can be
+   511→   511→      // interpreted as a fresh command. Resumes as soon as the gesture window
+   512→   512→      // lapses; a genuine run that was already in flight is untouched.
+   513→   513→      if (scrollSuppressed()) {
+   514→   514→        lastActiveAt = Date.now();
+   515→   515→        await sleep(250);
+   516→   516→        continue;
+   517→   517→      }
+   518→   518→      // NEVER let a deadline expire while the tab is in the background. A hidden
+   519→   519→      // tab has no layout (innerText reads come back "", getBoundingClientRect is
+   520→   520→      // 0x0) and Chrome throttles its timers, so every read here is unreliable -
+   521→   521→      // and the site may legitimately keep streaming for as long as the user is
+   522→   522→      // away in Studio. Park until the tab is foreground again, then slide EVERY
+   523→   523→      // deadline forward by the time we were parked so nothing that was mid-flight
+   524→   524→      // when the user switched away expires the moment they come back. This is the
+   525→   525→      // fix for "I switched to Studio, came back and the command says 'not run'":
+   526→   526→      // the loop used to burn its 5-minute inactivity budget off-screen, end with
+   527→   527→      // "No response from <site>", and orphan the pending command.
+   528→   528→      if (document.hidden && !A.stop && !(await backgroundSessionsReady())) {
+   529→   529→        const parked = await parkHidden();
+   530→   530→        if (A.stop) return { kind: "stopped" };
+   531→   531→        if (parked) {
+   532→   532→          lastActiveAt += parked; lastChangeAt += parked;
+   533→   533→          if (doneSince) doneSince += parked;
+   534→   534→          if (genFalseSince) genFalseSince += parked;
+   535→   535→          if (preStartSilent) preStartSilent += parked;
+   536→   536→          if (warmSince) warmSince += parked;
+   537→   537→          if (reasonSince) reasonSince += parked;
+   538→   538→          if (noTurnSince) noTurnSince += parked;
+   539→   539→          if (unsettledSince) unsettledSince += parked;
+   540→   540→          if (genOffFirstAt) genOffFirstAt += parked;
+   541→   541→        }
+   542→   542→        continue; // re-read everything now that the tab has layout again
+   543→   543→      }
+   544→   544→      const gen = P.isGenerating();
+   545→   545→      if (gen) lastActiveAt = Date.now(); // actively generating ⇒ never time out
+   546→   546→      const d = P.readAssistant();
+   547→   547→      // Sites virtualize their lists, so the absolute assistant count can DROP
+   548→   548→      // even as a new reply is added. A count increase still proves a new turn
+   549→   549→      // appeared; the generating flag is the reliable "reply has begun" signal.
+   550→   550→      // A new reply turn exists. Prefer node IDENTITY (virtualization-proof) when
+   551→   551→      // the provider exposes it: the last assistant turn's id differs from the one
+   552→   552→      // captured at send time. Fall back to the count test otherwise. Without this,
+   553→   553→      // a provider's list virtualisation can keep assistantCount() <= base for a
+   554→   554→      // fresh reply, so the reliableCounts gate below waits out the full NO_TURN_GRACE
+   555→   555→      // (~30s) before finalising a multi_edit - the "input box stuck until I scroll
+   556→   556→      // up" symptom (scrolling re-attached old turns and bumped the count).
+   557→   557→      const curTok = P.lastAssistantId ? P.lastAssistantId() : undefined;
+   558→   558→      // A NULL token means the provider could not read an identity for the
+   559→   559→      // CURRENT last turn (not that the provider lacks ids - that's undefined).
+   560→   560→      // Treating null as "no new reply" wedged the watcher on Qwen: a
+   561→   561→      // REGENERATED turn is rebuilt WITHOUT the id attribute the normal turns
+   562→   562→      // carry, so curTok stayed null, `started` never latched, and the loop
+   563→   563→      // sat in the pre-start branch for the full 60s before ending "empty" -
+   564→   564→      // the regenerated command (complete in the net tap) was never run and
+   565→   565→      // zResume then blocked any retry (validated live via empty.why, 2026-07).
+   566→   566→      // Fall back to the count test instead, exactly as for a provider with no
+   567→   567→      // lastAssistantId at all.
+   568→   568→      const newReply = (curTok !== undefined && curTok !== null)
+   569→   569→        ? (curTok !== A.sendToken)
+   570→   570→        : P.assistantCount() > base;
+   571→   571→
+   572→   572→      // Track whether the CURRENT turn has produced anything. Reset when the
+   573→   573→      // turn node changes (the PREVIOUS turn's content never counts).
+   574→   574→      if (d.item !== curItem) { curItem = d.item; sawContent = false; warmSince = 0; lastGoodReply = ""; }
+   575→   575→      if ((d.reply && d.reply.length) || (d.thinking && d.thinking.length)) sawContent = true;
+   576→   576→      if (d.reply && d.reply.length) lastGoodReply = d.reply;
+   577→   577→
+   578→   578→      if (!started) {
+   579→   579→        // CRITICAL: a bare count increase is NOT enough - the empty turn
+   580→   580→        // CONTAINER can appear seconds before the first token. Require actual
+   581→   581→        // CONTENT (or the generating flag).
+   582→   582→        const hasText = !!((d.reply && d.reply.length) || (d.thinking && d.thinking.length));
+   583→   583→        if (gen || (newReply && hasText)) { started = true; }
+   584→   584→        else {
+   585→   585→          // The site can be slow to even CREATE the reply turn. Keep waiting -
+   586→   586→          // only give up after a long fully-silent window.
+   587→   587→          if (!preStartSilent) preStartSilent = Date.now();
+   588→   588→          // diag: WHICH empty-branch fired matters - a dead post-regenerate turn
+   589→   589→          // on Qwen kept ending "empty" with a complete command in the net tap,
+   590→   590→          // and without the branch name the cause was unfindable from the log.
+   591→   591→          if (Date.now() - preStartSilent > 60000) { diag("empty.why", { branch: "preStart", rep: (d.reply||"").length }); return { kind: "empty" }; }
+   592→   592→          await sleep(200);
+   593→   593→          continue;
+   594→   594→        }
+   595→   595→      }
+   596→   596→
+   597→   597→      // Track text stability (independent of the generating flag). Compare the
+   598→   598→      // NORMALISED reply (collapsed whitespace) so cosmetic re-renders of a large
+   599→   599→      // reply - React re-creating the hidden tool <pre>, syntax-highlight passes,
+   600→   600→      // copy-bar text churn - don't count as real "changes" and keep resetting
+   601→   601→      // lastChangeAt. A churn-poisoned lastChangeAt was stalling finalisation of
+   602→   602→      // big multi_edit blocks ~30s (stuckDone never fired); this can only ever
+   603→   603→      // reduce false changes, so short replies / other providers are unaffected.
+   604→   604→      const replyNorm = (d.reply || "").replace(/\s+/g, " ").trim();
+   605→   605→      if (replyNorm !== lastText) { lastText = replyNorm; lastChangeAt = Date.now(); lastActiveAt = Date.now(); }
+   606→   606→      // How long the generating flag has been OFF. A mid-stream flicker resets
+   607→   607→      // this the instant growth resumes and gen flips back on.
+   608→   608→      if (gen) genFalseSince = 0; else if (!genFalseSince) genFalseSince = Date.now();
+   609→   609→      // DIAG: first gen-off, and count flickers back to true after a gen-off.
+   610→   610→      if (started && !gen && !genOffFirstAt) genOffFirstAt = Date.now();
+   611→   611→      if (prevGen === false && gen && genOffFirstAt) genFlickers++;
+   612→   612→      prevGen = gen;
+   613→   613→
+   614→   614→      if (Date.now() - lastLimitScan > 1000) {
+   615→   615→        lastLimitScan = Date.now();
+   616→   616→        const ctx = P.scanError();
+   617→   617→        if (ctx) return { kind: "context_limit", detail: ctx };
+   618→   618→      }
+   619→   619→
+   620→   620→      // Keep waiting while a tool command is still being streamed (opener written
+   621→   621→      // but no end marker yet) so we never parse/finalize half a command.
+   622→   622→      const blockActive = ZSParse.hasOpenToolBlock(d.reply) && Date.now() - lastChangeAt < 6000;
+   623→   623→      // ...but once generation has clearly stopped (stop indicator gone past the
+   624→   624→      // grace window), stop honoring an "open block" - it is DOM churn, not live
+   625→   625→      // streaming. Lets a finished big block finalise in seconds instead of
+   626→   626→      // waiting out ~30s of re-render churn. Safe: real streaming keeps gen true.
+   627→   627→      const genStopped = !gen && genFalseSince && Date.now() - genFalseSince > GEN_STOP_GRACE_MS;
+   628→   628→      const effectiveBlock = blockActive && !genStopped;
+   629→   629→
+   630→   630→      // Fallback: generating flag stuck ON (e.g. a wedged stop button - seen
+   631→   631→      // live on Gemini after a mid-write halt) but the text has been frozen for
+   632→   632→      // a while → stop waiting and finalize. This must BYPASS the gen branch
+   633→   633→      // below entirely: falling through while gen stays true used to reset
+   634→   634→      // doneSince every iteration, so the watcher never finalized at all.
+   635→   635→      // ...but NEVER treat a still-OPEN command block as "done" while the site is
+   636→   636→      // genuinely still generating. A model writing a big command (a 3799-char
+   637→   637→      // execute_luau seen live on GLM) can pause >STABLE_MS between tokens - that
+   638→   638→      // is a mid-write gap, NOT a wedged stop button on a COMPLETE reply. Firing
+   639→   639→      // here parsed the half-written JSON and stamped a false "bad JSON" error
+   640→   640→      // while GLM was still typing. RESPONSE_TIMEOUT still bounds a truly stuck one.
+   641→   641→      const stuckDone = started && d.reply && Date.now() - lastChangeAt > STABLE_MS &&
+   642→   642→        !(gen && ZSParse.hasOpenToolBlock(d.reply));
+   643→   643→      if ((gen || effectiveBlock) && !stuckDone) {
+   644→   644→        // DIAG: attribute this wait. genOffFirstAt set ⇒ we are PAST first stop,
+   645→   645→        // so any wait here is tail latency: either gen flickered back on, or an
+   646→   646→        // (effective) open-block reading is holding us.
+   647→   647→        if (genOffFirstAt) { if (gen) waitedFlicker++; else if (effectiveBlock) waitedBlock++; }
+   648→   648→        doneSince = 0;
+   649→   649→        await sleep(160);
+   650→   650→        continue;
+   651→   651→      }
+   652→   652→      if (stuckDone && gen) log("generating flag stuck - falling back to text stability");
+   653→   653→
+   654→   654→      // On providers whose turn counts are RELIABLE (semantic elements, no
+   655→   655→      // list virtualisation - Gemini), never finalize before the reply turn
+   656→   656→      // for THIS send exists. The generating flag can flicker off in the gap
+   657→   657→      // between the send and the new <model-response> node spawning, and the
+   658→   658→      // watcher used to finalize on the PREVIOUS turn's stable text - a
+   659→   659→      // premature loop.end rescued only by autoResume 30-45s later (diag
+   660→   660→      // showed `response kind:text` ~2.4s after loop.start with rp unchanged).
+   661→   661→      // Bounded so a genuinely dead send still ends the turn.
+   662→   662→      if (P.reliableCounts && !newReply) {
+   663→   663→        if (!noTurnSince) noTurnSince = Date.now();
+   664→   664→        // [TRACE] This is the 30s NO_TURN_GRACE gate. If a Qwen tool turn sits here
+   665→   665→        // ~30s EVERY turn, newReply is wrongly stuck false: log the identity values
+   666→   666→        // that decide it so we can see whether curTok is null (id missing on the new
+   667→   667→        // turn -> count fallback) or equal to sendToken (last turn not advancing).
+   668→   668→        const _waited = Date.now() - noTurnSince;
+   669→   669→        if (_waited > 800 && (!A._noTurnLoggedAt || Date.now() - A._noTurnLoggedAt > 3000)) {
+   670→   670→          A._noTurnLoggedAt = Date.now();
+   671→   671→          diag("noTurnGrace.wait", {
+   672→   672→            waitedMs: _waited,
+   673→   673→            curTok: (P.lastAssistantId ? P.lastAssistantId() : undefined),
+   674→   674→            sendToken: A.sendToken,
+   675→   675→            assistantCount: P.assistantCount ? P.assistantCount() : undefined,
+   676→   676→            base, gen, started, replyLen: (d.reply || "").length });
+   677→   677→        }
+   678→   678→        if (Date.now() - noTurnSince < NO_TURN_GRACE_MS) { await sleep(200); continue; }
+   679→   679→      } else {
+   680→   680→        noTurnSince = 0;
+   681→   681→        A._noTurnLoggedAt = 0;
+   682→   682→      }
+   683→   683→
+   684→   684→      if (!doneSince) doneSince = Date.now();
+   685→   685→      if (Date.now() - doneSince < 500) {  // 500ms settle – DOM is stable
+   686→   686→        await sleep(120);
+   687→   687→        continue;
+   688→   688→      }
+   689→   689→
+   690→   690→      // A turn that has produced NOTHING yet is still warming up - never
+   691→   691→      // finalize it as empty/truncated/text (a premature retry interrupts it).
+   692→   692→      if (!sawContent) {
+   693→   693→        // 2026-11 ChatGPT: a saturated conversation answers with a PLACEHOLDER
+   694→   694→        // turn that never gains content. Its only marker is the search-unit key
+   695→   695→        //   data-content-search-unit-key="fallback-turn-0:2:assistant"
+   696→   696→        // and the bubble holds nothing but "ChatGPT said:". Measured live: the
+   697→   697→        // reply text was present in the page's own text but never rendered into
+   698→   698→        // the turn, so the loop waited the full WARMUP_MS (45 s) and then blamed
+   699→   699→        // the DOM ("empty"). Detect the placeholder immediately and say what it
+   700→   700→        // actually is, so the user is told to open a new chat instead of losing
+   701→   701→        // an hour to a stuck chip.
+   702→   702→        try {
+   703→   703→          const it = d && d.item;
+   704→   704→          const marker = it && it.querySelector
+   705→   705→            ? it.querySelector('[data-content-search-unit-key^="fallback-turn"]')
+   706→   706→            : null;
+   707→   707→          if (marker && !(d.reply || "").length) {
+   708→   708→            if (!warmSince) warmSince = Date.now();
+   709→   709→            if (Date.now() - warmSince > 2500) {
+   710→   710→              diag("empty.why", { branch: "fallbackTurn", rep: 0 });
+   711→   711→              return { kind: "fallback_turn" };
+   712→   712→            }
+   713→   713→            await sleep(200);
+   714→   714→            continue;
+   715→   715→          }
+   716→   716→        } catch {}
+   717→   717→        if (!warmSince) warmSince = Date.now();
+   718→   718→        if (Date.now() - warmSince < WARMUP_MS) { await sleep(200); continue; }
+   719→   719→        diag("empty.why", { branch: "warmup", rep: (d.reply||"").length, lastGood: lastGoodReply.length });
+   720→   720→        return { kind: "empty" };
+   721→   721→      }
+   722→   722→
+   723→   723→      // Still REASONING / loading: thinking written but no answer yet. Don't
+   724→   724→      // finalize - wait for the reply, bounded. A manually-stopped turn is
+   725→   725→      // exempt so a real stop still ends.
+   726→   726→      if (d.thinking && d.thinking.length && !(d.reply && d.reply.length) && !P.turnHalted(d.item)) {
+   727→   727→        if (!reasonSince) reasonSince = Date.now();
+   728→   728→        if (Date.now() - reasonSince < REASON_NOREPLY_MS) { await sleep(200); continue; }
+   729→   729→      } else {
+   730→   730→        reasonSince = 0;
+   731→   731→      }
+   732→   732→
+   733→   733→      // Blank-read guard: if THIS read came back empty but the same turn had
+   734→   734→      // real text a tick ago, classify that text - see lastGoodReply above.
+   735→   735→      let r = d.reply;
+   736→   736→      if (!r && lastGoodReply) { r = lastGoodReply; diag("reply.blankReadFallback", { len: r.length }); }
+   737→   737→      // "Conversation too long" / "server busy" notices are always SHORT system
+   738→   738→      // messages; gating on a short reply stops the model's own long output
+   739→   739→      // (which may quote those phrases) from tripping them.
+   740→   740→      if (r.length < 400 && P.isTooLongMsg(r)) return { kind: "too_long" };
+   741→   741→      // Hold off on any "unparseable command" verdict while the provider reports
+   742→   742→      // this turn's text is not yet a settled read. Qwen's A/B "dual" turn is the
+   743→   743→      // case: its network tap flips `done` the instant the SSE ends, but the
+   744→   744→      // candidate-1 DOM we parse can still be mid-render, so a real command looks
+   745→   745→      // half-written for a beat. Firing parse_error there sends an ERROR
+   746→   746→      // mid-generation and nags a model that did nothing wrong. Only guard when
+   747→   747→      // the reply already LOOKS like a command (so a plain-text answer is never
+   748→   748→      // delayed) and bound it with UNSETTLED_GRACE_MS. No-op on providers that
+   749→   749→      // don't implement replyUnsettled (DeepSeek/Gemini/GLM/Kimi/Arena).
+   750→   750→      const cmdShaped = P.replyUnsettled && (
+   751→   751→        ZSParse.hasToolSignature(r) ||
+   752→   752→        (ZSParse.LUA_END_RE.test(r) && !ZSParse.LUA_START_RE.test(r)) ||
+   753→   753→        (/"(?:datamodel_type|edits|old_string|new_string|file_path|target_file)"\s*:/.test(r) &&
+   754→   754→          !/"command"\s*:/.test(r))
+   755→   755→      );
+   756→   756→      if (cmdShaped && P.replyUnsettled(d.item)) {
+   757→   757→        if (!unsettledSince) unsettledSince = Date.now();
+   758→   758→        if (Date.now() - unsettledSince < UNSETTLED_GRACE_MS) { await sleep(250); continue; }
+   759→   759→      } else {
+   760→   760→        unsettledSince = 0;
+   761→   761→      }
+   762→   762→      // A/B "carousel" turn (Qwen): while it is unresolved the site REMOVES the
+   763→   763→      // composer from the DOM (validated live: getEditor() is null), so we can't
+   764→   764→      // send the tool result until a candidate is picked - and the read reply is a
+   765→   765→      // partial candidate, so a command there looks "cut off". Per the product rule
+   766→   766→      // we use the FIRST candidate: wait for BOTH candidates to finish generating
+   767→   767→      // (you can't select mid-stream), then auto-select Response 1. That collapses
+   768→   768→      // the carousel to a normal turn - composer returns - and the normal parse/run
+   769→   769→      // path below handles it. Never a parse_error here (the model didn't truncate).
+   770→   770→      // No-op for every provider except Qwen. RESPONSE_TIMEOUT still bounds a truly
+   771→   771→      // stuck carousel, so this cannot hang.
+   772→   772→      if (P.isComparisonTurn && P.isComparisonTurn(d.item)) {
+   773→   773→        if (P.isGenerating()) { await sleep(250); continue; }   // both still writing
+   774→   774→        if (P.resolveComparison && P.resolveComparison()) {
+   775→   775→          diag("carousel.resolved");
+   776→   776→          await sleep(400); continue;                            // let it collapse, re-read
+   777→   777→        }
+   778→   778→        await sleep(250); continue;                              // button not ready yet
+   779→   779→      }
+   780→   780→      if (ZSParse.hasToolSignature(r)) {
+   781→   781→        const calls = ZSParse.parseToolCalls(r);
+   782→   782→        if (calls.length) { finalizeDiag("tool"); return { kind: "tool", calls, item: d.item }; }
+   783→   783→        // A half-written command + the site's "Continue" button means the command
+   784→   784→        // was truncated mid-stream → resume it rather than reporting bad JSON.
+   785→   785→        if (P.findContinueBtn()) return { kind: "truncated", text: r, item: d.item };
+   786→   786→        // Only fire parse_error if explicit markers were present.
+   787→   787→        if (r.includes(ZSParse.START_M) || ZSParse.LUA_START_RE.test(r)) return { kind: "parse_error", reason: "malformed", raw: r, item: d.item };
+   788→   788→        // A command opener with no closer (a JSON object that never closed -
+   789→   789→        // the model was halted mid-write and there is no Continue affordance):
+   790→   790→        // ask the model to rewrite it instead of silently ending the turn.
+   791→   791→        // ...unless ONLY the trailing closers were lost (the model hit its
+   792→   792→        // output limit with the payload complete - seen live on Qwen: a big
+   793→   793→        // multi_edit missing exactly one final "}"). salvageCutOff auto-closes
+   794→   794→        // and runs it instead of burning a whole retry turn; it refuses any
+   795→   795→        // cut that amputated real content (mid-string / deep deficit), which
+   796→   796→        // still falls through to the parse_error feedback. Safe to run here:
+   797→   797→        // generation has ended (the open-block branch above kept waiting
+   798→   798→        // while it streamed).
+   799→   799→        if (ZSParse.hasOpenToolBlock(r)) {
+   800→   800→          const saved = ZSParse.salvageCutOff(r);
+   801→   801→          if (saved) {
+   802→   802→            diag("tool.salvaged", { name: saved.tool });
+   803→   803→            finalizeDiag("tool");
+   804→   804→            return { kind: "tool", calls: [saved], item: d.item };
+   805→   805→          }
+   806→   806→          return { kind: "parse_error", reason: "unclosed", raw: r, item: d.item };
+   807→   807→        }
+   808→   808→        // A closed-looking JSON command envelope that NAMES A REAL TOOL but failed
+   809→   809→        // to parse - typically an unescaped " inside a code/string param broke the
+   810→   810→        // JSON (seen live on Kimi's execute_blender_code: `name = "Camera_System"`
+   811→   811→        // mid-code). Unlike execute_luau there is NO ###LUA### fallback, so the
+   812→   812→        // command silently dropped and the loop finalized the turn as a plain-text
+   813→   813→        // answer with no result and no error - a dead turn. Fire a parse_error so
+   814→   814→        // the model can fix its JSON. GATED on a known command name so prose that
+   815→   815→        // merely quotes {"command":"..."} (a DeepSeek-style explanation, or a
+   816→   816→        // placeholder like "command_name") is NOT misread as a broken command and
+   817→   817→        // looped on - only a real tool name means a genuine failed call.
+   818→   818→        const nm = ZSParse.toolNameFromText(r);
+   819→   819→        if (nm && nm !== "command" && (A.toolNames.has(nm) || A.toolNames.has(bareToolName(nm)))) {
+   820→   820→          return { kind: "parse_error", reason: "malformed", raw: r, item: d.item };
+   821→   821→        }
+   822→   822→      }
+   823→   823→      // The model answered in its OWN native tool-call markup instead of a
+   824→   824→      // snapgentV3 command - DeepSeek's DSML invoke/parameter tags (reported by
+   825→   825→      // users, 2026-08; DeepSeek is the only provider seen doing it). It carries
+   826→   826→      // no "command"/"tool" key and no ###...### markers, so hasToolSignature is
+   827→   827→      // false and every guard below misses it too: the turn finalized as a
+   828→   828→      // plain-text answer, the tool never ran, and the loop ended on a dead agent.
+   829→   829→      // Checked FIRST among the fallthrough guards because the marker is
+   830→   830→      // unambiguous - unlike the guards below it needs no known-tool gate, which
+   831→   831→      // matters because the degenerate form seen in the wild carries no tool name
+   832→   832→      // at all (a bare tool_calls opener followed by prose).
+   833→   833→      if (ZSParse.DSML_RE.test(r)) {
+   834→   834→        diag("cmd.dsml", { len: r.length });
+   835→   835→        return { kind: "parse_error", reason: "dsml", raw: r, item: d.item };
+   836→   836→      }
+   837→   837→      // Malformed execute_luau: the model wrote the ###END_LUA### closer but
+   838→   838→      // FORGOT the ###LUA### opener, so hasToolSignature missed it and the block
+   839→   839→      // never ran (seen on Gemini). Don't silently treat it as a final answer -
+   840→   840→      // nudge a rewrite instead of leaving the user stuck on a dead turn.
+   841→   841→      if (ZSParse.LUA_END_RE.test(r) && !ZSParse.LUA_START_RE.test(r) && !r.includes(ZSParse.START_M)) {
+   842→   842→        return { kind: "parse_error", reason: "luaOpener", raw: r, item: d.item };
+   843→   843→      }
+   844→   844→      // Malformed command: the model emitted a tool's RAW ARGUMENTS as a bare JSON
+   845→   845→      // object (e.g. {"datamodel_type":...,"edits":[...],"file_path":...}) instead of
+   846→   846→      // the required {"command":...,"params":...} envelope - it treated the tool as a
+   847→   847→      // real callable function (seen on Gemini). Those argument keys never appear in a
+   848→   848→      // normal prose answer, so nudge a rewrite rather than ending the turn silently.
+   849→   849→      if (/"(?:datamodel_type|edits|old_string|new_string|file_path|target_file)"\s*:/.test(r) &&
+   850→   850→          !/"command"\s*:/.test(r)) {
+   851→   851→        return { kind: "parse_error", reason: "envelope", raw: r, item: d.item };
+   852→   852→      }
+   853→   853→      // Malformed command, function-calling flavour: the model named a REAL tool
+   854→   854→      // but under the WRONG KEY - {"toolName": "get_studio_state", "studio_id": …}
+   855→   855→      // instead of {"command": …, "params": {…}}. It reads as a deliberate call,
+   856→   856→      // yet hasToolSignature never fires (no "command" key, no markers) and the
+   857→   857→      // argument keys are the tool's own, so neither guard above catches it: the
+   858→   858→      // turn finalized as a plain-text answer and the loop ENDED with the user
+   859→   859→      // watching a dead agent (seen live on ChatGPT, long session, 2026-08).
+   860→   860→      // GATED on the value being a tool we actually have - same reasoning as the
+   861→   861→      // toolNameFromText gate above, so prose that merely mentions a tool name in
+   862→   862→      // some JSON example is never looped on.
+   863→   863→      const wrongKey = /"(?:toolName|tool_name|tool|name|function|action)"\s*:\s*"([A-Za-z0-9_.\/-]+)"/.exec(r);
+   864→   864→      if (wrongKey && !/"command"\s*:/.test(r)) {
+   865→   865→        const wk = wrongKey[1];
+   866→   866→        const hit = knownTool(wk);
+   867→   867→        // Log the miss too: the gate depends on how the bridge ADVERTISES names
+   868→   868→        // (they can be prefixed per server on a collision), so a silent no-match
+   869→   869→        // is exactly the case that is impossible to diagnose after the fact.
+   870→   870→        diag("cmd.wrongKey", { name: wk, known: hit, catalogue: A.toolNames.size });
+   871→   871→        if (hit) return { kind: "parse_error", reason: "toolKey", raw: r, item: d.item };
+   872→   872→      }
+   873→   873→      // NOTE: a site "server busy / something went wrong" notice is deliberately
+   874→   874→      // NOT special-cased. It falls through to kind:"text" below and simply ENDS
+   875→   875→      // the loop as a final answer - no auto-retry. Retrying risked an infinite
+   876→   876→      // re-answer loop when the model's OWN prose said "try again", and treating
+   877→   877→      // busy as a normal terminal turn is cleaner: the user just re-sends if the
+   878→   878→      // site actually hiccuped. (P.isBusyMsg stays on the provider interface,
+   879→   879→      // unused by the core, in case a future flow wants it.)
+   880→   880→      // The site caps output length and shows a native "Continue" button when it
+   881→   881→      // truncates. We try clicking it directly (same turn) in the loop.
+   882→   882→      if (P.findContinueBtn()) return { kind: "truncated", text: r, item: d.item };
+   883→   883→      if (r === "") { diag("empty.why", { branch: "finalBlank" }); return { kind: "empty" }; }
+   884→   884→      return { kind: "text", text: r };
+   885→   885→    }
+   886→   886→    return { kind: "timeout" };
+   887→   887→  }
+   888→   888→
+   889→   889→  // ════════════════════════════════════════════════════════════════════════
+   890→   890→  //  TOOL EXECUTION  (always returns a feedback string for the model)
+   891→   891→  // ════════════════════════════════════════════════════════════════════════
+   892→   892→  // An ORPHANED content script: the extension was reloaded, updated or disabled
+   893→   893→  // while this page stayed open, so the script still running here belongs to a
+   894→   894→  // version of the extension that no longer exists. Chrome tears down its
+   895→   895→  // messaging port, and every chrome.runtime call then fails INSTANTLY with
+   896→   896→  // "Extension context invalidated".
+   897→   897→  //
+   898→   898→  // This must be told apart from a real bridge outage. They are opposite
+   899→   899→  // problems with opposite fixes: a bridge outage is fixed by start.bat and
+   900→   900→  // resolves itself, while this one can ONLY be fixed by reloading the page and
+   901→   901→  // never recovers on its own. Lumping them together (the old behaviour) told
+   902→   902→  // the model "the local snapgentV3 bridge is unreachable", which sent the user
+   903→   903→  // to check a bridge that was perfectly healthy. Diagnosed 2026-08-14 by the
+   904→   904→  // giveaway timing: a genuine outage takes 8s (background.js `send` waits via
+   905→   905→  // waitForConnection first), an invalidated context comes back in ~1ms.
+   906→   906→  //
+   907→   907→  // Every user meets this eventually - Chrome auto-updates extensions under
+   908→   908→  // open tabs - so it is worth its own message.
+   909→   909→  const isContextInvalidated = (m) =>
+   910→   910→    /Extension context invalidated|Receiving end does not exist|message port closed/i.test(m || "");
+   911→   911→
+   912→   912→  function bg(msg) {
+   913→   913→    return new Promise((resolve) => {
+   914→   914→      const fail = (m) => resolve({
+   915→   915→        ok: false,
+   916→   916→        kind: isContextInvalidated(m) ? "stale-extension" : "disconnected",
+   917→   917→        error: m,
+   918→   918→      });
+   919→   919→      try {
+   920→   920→        chrome.runtime.sendMessage(msg, (resp) => {
+   921→   921→          if (chrome.runtime.lastError) fail(chrome.runtime.lastError.message);
+   922→   922→          else resolve(resp || { ok: false, kind: "disconnected", error: "no response from background" });
+   923→   923→        });
+   924→   924→      } catch (e) {
+   925→   925→        fail(String(e && e.message || e));
+   926→   926→      }
+   927→   927→    });
+   928→   928→  }
+   929→   929→
+   930→   930→  // 'subagent' is always blocked (long-running, hangs the loop). 'screen_capture'
+   931→   931→  // is only blocked on providers whose underlying model can't see images
+   932→   932→  // (P.supportsVision === false) - see providers/*.js for the per-site flag.
+   933→   933→  // Both are filtered out of the advertised command list AND refused in runTool.
+   934→   934→  // Addon servers (Blender, Sketchfab, ...) can ALSO ship an image-returning
+   935→   935→  // tool under any name we don't know in advance - rather than guess names,
+   936→   936→  // any tool result carrying images is caught generically at the point results
+   937→   937→  // are handled (see the `r.images.length` branch) and turned into a plain
+   938→   938→  // error on non-vision providers, so nothing needs to be predicted here.
+   939→   939→  const ALWAYS_BLOCKED_TOOLS = new Set(["subagent"]);
+   940→   940→  const VISION_TOOLS = new Set(["screen_capture"]);
+   941→   941→  const bareToolName = (name) => (name && name.includes("/") ? name.split("/").pop() : name) || "";
+   942→   942→  // Is `name` a tool we actually have? The bridge ADVERTISES names that may carry
+   943→   943→  // a per-server prefix when two MCP servers expose the same tool (see
+   944→   944→  // list_tools in bridge.py), while the model always writes the bare name - so a
+   945→   945→  // plain `A.toolNames.has(bare)` misses, and so does bareToolName(bare), which
+   946→   946→  // cannot re-add a prefix it never had. Compare bare-to-bare in BOTH directions.
+   947→   947→  const bareKey = (n) => String(n || "").split("/").pop().split(".").pop();
+   948→   948→  function knownTool(name) {
+   949→   949→    if (!name || !A.toolNames.size) return false;
+   950→   950→    if (A.toolNames.has(name) || A.toolNames.has(bareToolName(name))) return true;
+   951→   951→    const b = bareKey(name);
+   952→   952→    for (const t of A.toolNames) if (bareKey(t) === b) return true;
+   953→   953→    return false;
+   954→   954→  }
+   955→   955→  const isBlockedTool = (name) => {
+   956→   956→    const bare = bareToolName(name);
+   957→   957→    if (ALWAYS_BLOCKED_TOOLS.has(bare)) return true;
+   958→   958→    if (VISION_TOOLS.has(bare) && !P.supportsVision) return true;
+   959→   959→    return false;
+   960→   960→  };
+   961→   961→
+   962→   962→  // ── Learned image tools (reload-proof "screen" chip) ──────────────────────
+   963→   963→  // The known Roblox vision tool (screen_capture) is themed "screen" by name via
+   964→   964→  // ZS.toolCategory. A custom MCP tool's NAME reveals nothing, so we learn which
+   965→   965→  // ones return images and persist that across reloads: with it, a revisited or
+   966→   966→  // reloaded conversation still shows the image-capture chip (not the generic
+   967→   967→  // wrench), and the NEXT call of a known image tool is optimistic from the start.
+   968→   968→  // The marker below is the exact tail runTool appends to a feedback that carries
+   969→   969→  // an image (see runTool's r.images branch) - the reload-proof signal, readable
+   970→   970→  // straight from the injected result turn's text even when no loop is running.
+   971→   971→  const IMAGE_FEEDBACK_RE = /image is attached to THIS message/i;
+   972→   972→  function rememberImageTool(name) {
+   973→   973→    const bare = bareToolName(name);
+   974→   974→    if (!bare || A.imageTools.has(bare)) return;
+   975→   975→    A.imageTools.add(bare);
+   976→   976→    diag("imageTool.remember", { name: bare, total: A.imageTools.size });
+   977→   977→    try { chrome.storage.local.set({ zsImageTools: [...A.imageTools].slice(-200) }); } catch {}
+   978→   978→  }
+   979→   979→  try {
+   980→   980→    chrome.storage.local.get("zsImageTools", (r) => {
+   981→   981→      if (r && Array.isArray(r.zsImageTools)) for (const n of r.zsImageTools) A.imageTools.add(n);
+   982→   982→      diag("imageTool.loaded", { tools: [...A.imageTools] });
+   983→   983→    });
+   984→   984→  } catch {}
+   985→   985→
+   986→   986→  // How long a fetched catalogue stays good enough to reuse without a round trip.
+   987→   987→  const TOOLS_TTL_MS = 30000;
+   988→   988→
+   989→   989→  function activeTools() {
+   990→   990→    if (!isMcpEnabled(selectedTargetId)) return [];
+   991→   991→    return A.toolList.filter((tool) => (tool.server || "roblox") === selectedTargetId);
+   992→   992→  }
+   993→   993→
+   994→   994→  function refreshActiveToolNames() {
+   995→   995→    A.toolNames = new Set(activeTools().map((tool) => tool.name));
+   996→   996→  }
+   997→   997→
+   998→   998→  // Refresh the tool catalogue - but never pay for it twice in a row.
+   999→   999→  //
+  1000→  1000→  // DEGRADED MODE (Roblox Studio closed, running on an addon server like Blender)
+  1001→  1001→  // is where this used to hurt: a list_tools whose Roblox half is dead blocks the
+  1002→  1002→  // bridge until it gives up, and the extension waited the FULL background timeout
+  1003→  1003→  // for it. The boot sequence calls this three times in a row - startSession(),
+  1004→  1004→  // then the model's list_commands, then list_mcp_servers - so the user watched
+  1005→  1005→  // ~a minute of dead air with the model's reply already finished on screen
+  1006→  1006→  // ("the first commands take forever even though the model clearly stopped
+  1007→  1007→  // writing"). A short TTL collapses those three calls into one, and the caller
+  1008→  1008→  // keeps the catalogue it already has instead of stalling for a fresh one.
+  1009→  1009→  async function ensureTools(force) {
+  1010→  1010→    if (!force && A.toolList.length && Date.now() - A.toolsAt < TOOLS_TTL_MS) {
+  1011→  1011→      diag("tools.cached", { age: Date.now() - A.toolsAt, n: A.toolList.length });
+  1012→  1012→      return A.toolList;
+  1013→  1013→    }
+  1014→  1014→    const t0 = Date.now();
+  1015→  1015→    const r = await bg({ type: "list_tools" });
+  1016→  1016→    diag("tools.fetched", { ms: Date.now() - t0, n: (r && r.tools && r.tools.length) || 0 });
+  1017→  1017→    if (r && r.tools && r.tools.length) {
+  1018→  1018→      const tools = r.tools.filter((t) => !isBlockedTool(t.name));
+  1019→  1019→      A.toolList = tools;
+  1020→  1020→      refreshActiveToolNames();
+  1021→  1021→      A.toolsAt = Date.now();
+  1022→  1022→    }
+  1023→  1023→    return A.toolList;
+  1024→  1024→  }
+  1025→  1025→
+  1026→  1026→  async function runTool(call) {
+  1027→  1027→    const name = call.tool;
+  1028→  1028→    const args = call.arguments || {};
+  1029→  1029→    if (!name) return ZS.FEEDBACK.parseError("malformed");
+  1030→  1030→    // SCROLL-AWAY RULE (final choke point): while the user is scrolling up
+  1031→  1031→    // through history nothing is executed - but the command is HELD, not
+  1032→  1032→    // cancelled. It used to return "skipped: conversation scrolled up", which
+  1033→  1033→    // dropped the call entirely: if the user happened to scroll just as a
+  1034→  1034→    // command became ready, the model was told its work had not run and the
+  1035→  1035→    // task stalled. The PR describes a hold, so wait the suppression window out
+  1036→  1036→    // and then proceed. A Stop still wins, and the wait is bounded.
+  1037→  1037→    if (scrollSuppressed()) {
+  1038→  1038→      diag("tool.holdScrolling", { name });
+  1039→  1039→      // Mark the hold so the busy surface keeps the Stop control visible while
+  1040→  1040→      // we wait; scrollSuppressed() would otherwise hide it for the whole wait.
+  1041→  1041→      A.held = true;
+  1042→  1042→      renderBar();
+  1043→  1043→      let waited = false;
+  1044→  1044→      try {
+  1045→  1045→        waited = await waitScrollWindow();
+  1046→  1046→      } finally {
+  1047→  1047→        A.held = false;
+  1048→  1048→      }
+  1049→  1049→      renderBar();
+  1050→  1050→      if (!waited) {
+  1051→  1051→        // Stopped by the user while parked - do not run the command.
+  1052→  1052→        return "ERROR: the command was not run - stopped by the user.";
+  1053→  1053→      }
+  1054→  1054→      diag("tool.resumeAfterScroll", { name });
+  1055→  1055→    }
+  1056→  1056→    // ── Fast liveness probe ────────────────────────────────────────────────
+  1057→  1057→    // A dead bridge used to cost the full tool budget before the loop learned it
+  1058→  1058→    // was offline, so the chat felt far slower than on other providers for the
+  1059→  1059→    // SAME work. A local bridge answers a ping in single-digit milliseconds when
+  1060→  1060→    // the socket is WARM - but a COLD/reconnecting socket was measured at 4314ms,
+  1061→  1061→    // so the budget must be generous (a false "offline" is far worse than a slow
+  1062→  1062→    // probe) and one retry is allowed before giving up. The probe is paid only
+  1063→  1063→    // when the cache is cold (>15s), so normal runs cost nothing.
+  1064→  1064→    if (!A._bridgeProbeOkAt || Date.now() - A._bridgeProbeOkAt > 15000) {
+  1065→  1065→      const probeOnce = (budget) => Promise.race([
+  1066→  1066→        bg({ type: "ping" }),
+  1067→  1067→        new Promise((res) => setTimeout(() => res({ ok: false, kind: "timeout" }), budget)),
+  1068→  1068→      ]);
+  1069→  1069→      let probe = await probeOnce(6000);
+  1070→  1070→      let probeOk = probe && (probe.ok !== false) && probe.kind !== "disconnected" && probe.kind !== "timeout";
+  1071→  1071→      if (!probeOk) {
+  1072→  1072→        // One more chance: a socket that was mid-reconnect on the first attempt
+  1073→  1073→        // is usually settled a couple of seconds later.
+  1074→  1074→        probe = await probeOnce(8000);
+  1075→  1075→        probeOk = probe && (probe.ok !== false) && probe.kind !== "disconnected" && probe.kind !== "timeout";
+  1076→  1076→      }
+  1077→  1077→      if (!probeOk) {
+  1078→  1078→        diag("bridge.preflightFail", { name, kind: (probe && probe.kind) || "none" });
+  1079→  1079→        A._bridgeProbeOkAt = 0;
+  1080→  1080→        ui.banner("warn", "Bridge offline",
+  1081→  1081→          "snapgentV3 bridge is unreachable - start it and keep the selected target app open.");
+  1082→  1082→        return ZS.FEEDBACK.bridgeOffline;
+  1083→  1083→      }
+  1084→  1084→      A._bridgeProbeOkAt = Date.now();
+  1085→  1085→    }
+  1086→  1086→    // NEVER execute while the AI tab is backgrounded/minimized. This is the single
+  1087→  1087→    // choke point for ALL execution (agentLoop's tool dispatch AND the bootstrap's
+  1088→  1088→    // list_commands), so it closes the hole the loop-entry gate alone left open:
+  1089→  1089→    // the tab is foreground when a cycle starts, the model then generates for
+  1090→  1090→    // 30-120s, the user minimizes MID-generation, and waitForResponse returns a
+  1091→  1091→    // tool call that fired into Studio off-screen (observed live: GLM minimized
+  1092→  1092→    // still ran execute_luau). Parking here (no time cap) means the call runs the
+  1093→  1093→    // moment the tab is foreground again, instead of being lost or run blind.
+  1094→  1094→    if (document.hidden && !A.stop) {
+  1095→  1095→      diag("tool.waitVisible", { name });
+  1096→  1096→      // Only reachable via a user Stop while parked; agentLoop's post-runTool
+  1097→  1097→      // A.stop check breaks the loop and discards this, so it just needs to be
+  1098→  1098→      // a non-crashing, clearly-labelled string.
+  1099→  1099→      if (!(await waitVisible()) || A.stop) return "ERROR: the command was not run - stopped by the user.";
+  1100→  1100→    }
+  1101→  1101→    // Blocked commands: refuse up-front with a clear, tailored error so the
+  1102→  1102→    // model abandons it and continues instead of wasting/hanging a turn.
+  1103→  1103→    const bareName = bareToolName(name);
+  1104→  1104→    if (isBlockedTool(name)) {
+  1105→  1105→      if (VISION_TOOLS.has(bareName)) {
+  1106→  1106→        return `ERROR: '${bareName}' is unavailable here - this assistant cannot see images. Do NOT call it again. Inspect the place programmatically instead (e.g. inspect_instance, get_studio_state, search_game_tree, script_read).`;
+  1107→  1107→      }
+  1108→  1108→      return `ERROR: the '${bareName}' command timed out and is unavailable in this environment. Do NOT call it again - complete the task yourself using the other commands (execute_luau, multi_edit, etc.).`;
+  1109→  1109→    }
+  1110→  1110→    // Virtual command: list the MCP server(s) snapgentV3 is currently connected
+  1111→  1111→    // to, with each one's REAL per-server health (from the bridge, never the
+  1112→  1112→    // merged tool count - a dead server must not borrow another's numbers).
+  1113→  1113→    if (name === "list_mcp_servers") {
+  1114→  1114→      await ensureTools();
+  1115→  1115→      // Isolation: the AI only ever sees the server selected in the dropdown (and only
+  1116→  1116→      // if its toggle is on). Other servers, enabled or not, are invisible to it.
+  1117→  1117→      const servers = ((A.bridge && A.bridge.servers) || [])
+  1118→  1118→        .filter((sv) => sv.id === selectedTargetId && isMcpEnabled(sv.id));
+  1119→  1119→      const lines = servers.length
+  1120→  1120→        ? servers.map((sv) => {
+  1121→  1121→            const label = sv.id === "vscode"
+  1122→  1122→              ? "VS Code (default target)"
+  1123→  1123→              : sv.id === "roblox" ? "Roblox Studio" : `${sv.id} (addon)`;
+  1124→  1124→            return `- ${sv.id}: ${label} - ${sv.alive ? `${sv.tools || 0} commands available` : "offline (no tools)"}`;
+  1125→  1125→          })
+  1126→  1126→        : ["- vscode: VS Code (default target) - unknown (bridge did not report server health)"];
+  1127→  1127→      return (
+  1128→  1128→        `Output of 'list_mcp_servers':\n` +
+  1129→  1129→        `Connected MCP servers (${lines.length}):\n${lines.join("\n")}\n` +
+  1130→  1130→        `Use list_commands with a "server" param (one of the ids above) to see that server's exact commands. Without "server", list_commands defaults to "${selectedTargetId}".`
+  1131→  1131→      );
+  1132→  1132→    }
+  1133→  1133→    // Virtual command: list available commands with full details. Defaults to
+  1134→  1134→    // the primary Roblox server - a DIFFERENT server's tools only ever show up
+  1135→  1135→    // if the model explicitly asks via {"server": "<id>"} (see list_mcp_servers).
+  1136→  1136→    if (name === "list_commands" || name === "list_tools") {
+  1137→  1137→      await ensureTools();
+  1138→  1138→      const target = (selectedTargetId || "vscode").trim();
+  1139→  1139→      const asked = typeof args.server === "string" ? args.server.trim() : "";
+  1140→  1140→      // Isolation: only the server selected in the dropdown can be listed. A request
+  1141→  1141→      // for any other server gets a generic refusal that does not reveal whether that
+  1142→  1142→      // server exists, is connected, or is toggled on.
+  1143→  1143→      if (asked && asked !== target) {
+  1144→  1144→        return `Output of '${name}':\nERROR: server "${asked}" is not available. Only the selected target "${target}" can be used in this session. Do NOT try other servers; ask the user to switch the target in the snapgentV3 selector if needed.`;
+  1145→  1145→      }
+  1146→  1146→      const requested = target;
+  1147→  1147→      if (!isMcpEnabled(requested)) {
+  1148→  1148→        return `Output of '${name}':\nERROR: MCP server "${requested}" is disabled by the user. Do NOT use it. Tell the user to enable it in the MCP settings if it is needed.`;
+  1149→  1149→      }
+  1150→  1150→      // The MCP proxy keeps advertising Roblox's catalogue even with no Studio
+  1151→  1151→      // attached, so list_commands would hand back the full command list and read
+  1152→  1152→      // as "Roblox is fine" - then every command silently fails. When Roblox is
+  1153→  1153→      // actually unusable, short-circuit the DEFAULT (roblox) listing into a plain
+  1154→  1154→      // "Roblox is down" note that points the model at the other server(s), so it
+  1155→  1155→      // can keep working in degraded mode instead of firing dead Roblox commands.
+  1156→  1156→      if (requested === "roblox") {
+  1157→  1157→        const s = A.bridge || {};
+  1158→  1158→        const srv = s.servers || [];
+  1159→  1159→        const rbx = srv.find((x) => x.id === "roblox");
+  1160→  1160→        const rbxAlive = rbx ? !!rbx.alive : (!!s.mcpAlive || srv.some((x) => x.alive));
+  1161→  1161→        const rbxUsable = !!s.connected && rbxAlive && s.studio !== false;
+  1162→  1162→        if (!rbxUsable) {
+  1163→  1163→          // Isolation: never reveal other servers here.
+  1164→  1164→          const otherStr = "Do NOT try other servers; wait for the user to fix the target or switch it in the snapgentV3 selector.";
+  1165→  1165→          return `Output of '${name}':\nRoblox Studio is currently OFFLINE (closed, no place open, or its MCP server disabled), so its commands cannot run. This is an environment problem on the user's machine, not your mistake. Tell the user in one short sentence to open their place in Roblox Studio and enable its MCP server. ${otherStr}`;
+  1166→  1166→        }
+  1167→  1167→      }
+  1168→  1168→      const known = new Set(A.toolList.map((t) => t.server).filter(Boolean));
+  1169→  1169→      // Tools from a bridge that doesn't tag "server" yet (old version) have no
+  1170→  1170→      // .server field at all - treat those as the primary server rather than
+  1171→  1171→      // hiding everything.
+  1172→  1172→      const scoped = A.toolList.filter((t) => (t.server || "roblox") === requested);
+  1173→  1173→      if (!A.toolList.length) return `Output of '${name}':\nNo commands available - the bridge or selected MCP server may be offline.`;
+  1174→  1174→      if (!scoped.length) {
+  1175→  1175→        return `Output of '${name}':\nERROR: the selected server "${requested}" has no commands available (it may be offline). Do NOT try other servers; tell the user to check the target in the snapgentV3 selector.`;
+  1176→  1176→      }
+  1177→  1177→      const lines = scoped.map((t) => {
+  1178→  1178→        const props = (t.inputSchema && t.inputSchema.properties) || {};
+  1179→  1179→        const req = new Set((t.inputSchema && t.inputSchema.required) || []);
+  1180→  1180→        // Two buckets: simple scalar params get packed onto ONE compact line;
+  1181→  1181→        // params that need real explanation (array-of-object shape, or a long
+  1182→  1182→        // description) keep their own line so nothing structurally important
+  1183→  1183→        // gets flattened away (that per-item shape is what fixed "Unknown …
+  1184→  1184→        // action: nil" bugs on user_keyboard_input/user_mouse_input).
+  1185→  1185→        const compact = [];
+  1186→  1186→        const detailed = [];
+  1187→  1187→        for (const [k, v] of Object.entries(props)) {
+  1188→  1188→          const items = v.items && typeof v.items === "object" ? v.items : null;
+  1189→  1189→          const itemProps = items && items.properties;
+  1190→  1190→          const mark = req.has(k) ? "" : "?";
+  1191→  1191→          if (v.type === "array" && itemProps) {
+  1192→  1192→            const itemReq = new Set(items.required || []);
+  1193→  1193→            const fields = Object.entries(itemProps).map(([ik, iv]) => {
+  1194→  1194→              const en = Array.isArray(iv.enum) && iv.enum.length <= 12 ? `(${iv.enum.join("|")})` : (iv.type || "any");
+  1195→  1195→              return `${ik}${itemReq.has(ik) ? "" : "?"}:${en}`;
+  1196→  1196→            });
+  1197→  1197→            detailed.push(`    ${k}${mark}: array [each item: {${fields.join(", ")}}]${v.description ? " - " + v.description : ""}`);
+  1198→  1198→          } else if (v.description && v.description.length > 45) {
+  1199→  1199→            detailed.push(`    ${k}${mark}: ${v.type || "any"} - ${v.description}`);
+  1200→  1200→          } else {
+  1201→  1201→            const ty = Array.isArray(v.enum) && v.enum.length <= 8 ? `(${v.enum.join("|")})` : (v.type || "any");
+  1202→  1202→            compact.push(`${k}${mark}:${ty}${v.description ? ` "${v.description}"` : ""}`);
+  1203→  1203→          }
+  1204→  1204→        }
+  1205→  1205→        const paramLines = [compact.length ? `    ${compact.join(", ")}` : "", ...detailed].filter(Boolean).join("\n");
+  1206→  1206→        // Tested usage note for the error-prone commands - kept full-length
+  1207→  1207→        // (these are validated fixes for real bugs, not filler).
+  1208→  1208→        const note = ZS.TOOL_NOTES[bareToolName(t.name)];
+  1209→  1209→        const noteStr = note ? `\n    ⚠ ${note}` : "";
+  1210→  1210→        return `${t.name}: ${(t.description || "").split("\n")[0]}${paramLines ? "\n" + paramLines : ""}${noteStr}`;
+  1211→  1211→      });
+  1212→  1212→      return `Output of '${name}':\n${requested} commands (${scoped.length}):\n\n${lines.join("\n\n")}`;
+  1213→  1213→    }
+  1214→  1214→    // Isolation: execution is hard-limited to the server selected in the dropdown.
+  1215→  1215→    // 1) the selected target must be toggled on,
+  1216→  1216→    // 2) an explicit "server/tool" prefix may only name the selected target,
+  1217→  1217→    // 3) the tool must exist in the selected server's own catalogue (never skipped,
+  1218→  1218→    //    even when that catalogue is empty).
+  1219→  1219→    // The name sent to the bridge is NOT rewritten: the bridge only knows a "server/"
+  1220→  1220→    // prefix for tools whose names collide across servers.
+  1221→  1221→    if (!isMcpEnabled(selectedTargetId)) {
+  1222→  1222→      return `ERROR: the selected MCP server "${selectedTargetId}" is disabled by the user, so '${name}' was not run. Do NOT retry. Tell the user to enable it in the MCP settings.`;
+  1223→  1223→    }
+  1224→  1224→    if (name.includes("/") && name.split("/")[0] !== selectedTargetId) {
+  1225→  1225→      return `ERROR: '${name}' was not run. Only the selected target "${selectedTargetId}" can be used in this session. Use plain command names from list_commands.`;
+  1226→  1226→    }
+  1227→  1227→    if (!A.toolNames.size) await ensureTools();
+  1228→  1228→    if (!knownTool(name)) {
+  1229→  1229→      return ZS.FEEDBACK.unknownTool(name, [...A.toolNames]);
+  1230→  1230→    }
+  1231→  1231→    // The Roblox MCP REQUIRES datamodel_type on execute_luau (enum Edit/Client/
+  1232→  1232→    // Server). The ###LUA### parser already fills it in, but the model may also
+  1233→  1233→    // write the JSON form without it - default to "Edit" so the call never
+  1234→  1234→    // soft-fails with "datamodel_type is required".
+  1235→  1235→    if (bareName === "execute_luau" && !args.datamodel_type) args.datamodel_type = "Edit";
+  1236→  1236→    // The player-input tools only run against the Client datamodel (play mode) and
+  1237→  1237→    // "Client" is the sole allowed value, so default it when the model omits it -
+  1238→  1238→    // it can only be right. (It still needs the game RUNNING; that's documented.)
+  1239→  1239→    if ((bareName === "user_keyboard_input" || bareName === "user_mouse_input") && !args.datamodel_type)
+  1240→  1240→      args.datamodel_type = "Client";
+  1241→  1241→    const timeout = name === "execute_luau" ? 20000 : 120000;
+  1242→  1242→    // Hard watchdog: even if the background worker never answers, the loop
+  1243→  1243→    // gets a definitive result and continues.
+  1244→  1244→    const hardCap = new Promise((res) =>
+  1245→  1245→      setTimeout(() => res({ ok: false, kind: "timeout", error: "no response from the extension worker" }), timeout + 30000));
+  1246→  1246→    // Stop watcher: a blocking tool (e.g. wait_job_finished) would otherwise keep
+  1247→  1247→    // the loop awaiting the bridge for up to minutes, leaving the input locked and
+  1248→  1248→    // the Stop button stuck. When the user halts (A.stop), abandon the wait within
+  1249→  1249→    // ~150ms so the loop breaks and its finally unlocks everything. The in-flight
+  1250→  1250→    // bridge call may still finish in the background; its result is just ignored.
+  1251→  1251→    let stopTimer;
+  1252→  1252→    const stopWatch = new Promise((res) => {
+  1253→  1253→      stopTimer = setInterval(() => { if (A.stop) res({ ok: false, kind: "stopped" }); }, 150);
+  1254→  1254→    });
+  1255→  1255→    let r = await Promise.race([bg({ type: "call_tool", name, arguments: args, timeout, server: selectedTargetId }), hardCap, stopWatch]);
+  1256→  1256→    clearInterval(stopTimer);
+  1257→  1257→    if (r && r.kind === "stopped") return "(stopped by user)";
+  1258→  1258→    if (!r) return ZS.FEEDBACK.bridgeOffline;
+  1259→  1259→    // The MCP server answers SUCCESSFULLY (ok:true) when no Studio is attached
+  1260→  1260→    // (Studio closed / no place / MCP option disabled) - with an explanatory
+  1261→  1261→    // text instead of a result. Surface it as a proper environment ERROR so the
+  1262→  1262→    // model stops and tells the user, instead of treating it as tool output.
+  1263→  1263→    if (r.ok && selectedTargetId === "roblox" && /Unable to find an active Studio instance|previously active Studio has disconnected/i.test(r.text || "")) {
+  1264→  1264→      ui.banner("warn", "Studio offline",
+  1265→  1265→        "Open a place, enable MCP.");
+  1266→  1266→      return ZS.FEEDBACK.studioOffline;
+  1267→  1267→    }
+  1268→  1268→    // The Roblox MCP reports missing/invalid required parameters as a SUCCESS
+  1269→  1269→    // whose text is just the complaint (e.g. "datamodel_type is required").
+  1270→  1270→    // Re-shape those into a real ERROR so the model corrects the call instead
+  1271→  1271→    // of misreading it as tool output.
+  1272→  1272→    if (r.ok && r.text && /^[\w .'"-]{0,60}\bis (required|not available|invalid)\b[\w .'"-]{0,80}$/i.test(r.text.trim())) {
+  1273→  1273→      return `ERROR calling '${name}': ${r.text.trim()}.\nA required or invalid parameter - check the command's parameters with list_commands, fix the call and retry.`;
+  1274→  1274→    }
+  1275→  1275→    // The Roblox MCP also reports Luau PARSE/RUNTIME errors as a SUCCESS whose
+  1276→  1276→    // text is the executor's own stack trace ("…ExecuteLuauTool:139: …
+  1277→  1277→    // CommandExecution:54: <real error>" - validated live). Genuine script
+  1278→  1278→    // output never contains those internal paths. Re-shape into a real ERROR so
+  1279→  1279→    // the model gets the fix-it hints below and the chip settles red, not ✓
+  1280→  1280→    // green - and strip the internal frames so only the useful part remains.
+  1281→  1281→    if (r.ok && bareName === "execute_luau" && r.text &&
+  1282→  1282→        /\b(?:ExecuteLuauTool|CommandExecution):\d+:/.test(r.text)) {
+  1283→  1283→      r = { ok: false, error: r.text.replace(/^(?:\S*(?:ExecuteLuauTool|CommandExecution):\d+:\s*)+/, "").trim() || r.text };
+  1284→  1284→    }
+  1285→  1285→    if (r.ok) {
+  1286→  1286→      if (r.images && r.images.length && !P.supportsVision) {
+  1287→  1287→        // Any tool from ANY connected server can turn out to return images -
+  1288→  1288→        // we don't try to predict this from its name in advance. This is the
+  1289→  1289→        // generic catch: whatever just ran, if it handed back images and this
+  1290→  1290→        // provider's model can't see them, refuse cleanly instead of silently
+  1291→  1291→        // attaching a file it will never actually process.
+  1292→  1292→        return `ERROR: '${bareName}' returned an image, but this assistant cannot see images. Do NOT call it again. Use a different command to get the information as text instead.`;
+  1293→  1293→      }
+  1294→  1294→      if (r.images && r.images.length) {
+  1295→  1295→        // Show the capture in a left-hand snapgentV3 popup (from the in-memory
+  1296→  1296→        // base64 - simple and reliable on every site; no DOM-embedded preview).
+  1297→  1297→        ui.showImages(r.images, name);
+  1298→  1298→        // Do NOT attach the image here: submitAndGetBase/typeAndSend types the
+  1299→  1299→        // feedback text into the editor LATER, and on providers whose editor is
+  1300→  1300→        // rebuilt via select-all + insertText (e.g. Gemini's setEditorText),
+  1301→  1301→        // that wipe severs the site's internal binding between "pending upload"
+  1302→  1302→        // and "message being composed" - the file then sits in the composer
+  1303→  1303→        // forever while only the text goes out (validated live: Gemini kept
+  1304→  1304→        // the file attached+unsent across the whole turn). Stash the images and
+  1305→  1305→        // let the provider attach them as the LAST step, right before the send
+  1306→  1306→        // click, so nothing mutates the editor afterward.
+  1307→  1307→        A.pendingImages = r.images;
+  1308→  1308→        diag("images.stashed", { count: r.images.length });
+  1309→  1309→        const caption = r.text && r.text.trim()
+  1310→  1310→          ? r.text.trim()
+  1311→  1311→          : `${r.images.length} image(s) captured.`;
+  1312→  1312→        return `Output of '${name}':\n${caption}\n(The image is attached to THIS message - you can see it directly. Analyse it and continue.)`;
+  1313→  1313→      }
+  1314→  1314→      const text = r.text && r.text.length ? r.text : "(tool returned an empty result)";
+  1315→  1315→      return `Output of '${name}':\n${text}`;
+  1316→  1316→    }
+  1317→  1317→    // Orphaned content script - a page reload is the only cure, so say exactly
+  1318→  1318→    // that instead of blaming the bridge (see bg / isContextInvalidated).
+  1319→  1319→    if (r.kind === "stale-extension") {
+  1320→  1320→      ui.banner("warn", "Reload page",
+  1321→  1321→        "Updated. Press F5.");
+  1322→  1322→      diag("bridge.staleExtension", { name, error: r.error });
+  1323→  1323→      return ZS.FEEDBACK.staleExtension;
+  1324→  1324→    }
+  1325→  1325→    if (r.kind === "disconnected") {
+  1326→  1326→      // A socket that is mid-reconnect reports "disconnected" even though the
+  1327→  1327→      // bridge is alive (measured: reconnect takes ~4.3s). Retry ONCE after a
+  1328→  1328→      // short settle before declaring the bridge offline - a false "offline"
+  1329→  1329→      // makes the model stop working and shows "tool failed" to the user.
+  1330→  1330→      //
+  1331→  1331→      // BUT only when the request provably never left. The rule lives in
+  1332→  1332→      // ZSGuard so the tested logic IS the running logic: `sent === false` means
+  1333→  1333→      // the bridge cannot have run it; `sent === true` may already have executed
+  1334→  1334→      // write_file / run_command / git_commit. A reply WITHOUT the field (an
+  1335→  1335→      // older bridge) is treated as unsafe for the same reason - re-sending a
+  1336→  1336→      // write that did land is worse than reporting the ambiguity.
+  1337→  1337→      if (!ZSGuard.mayRetryAfterDisconnect(r)) {
+  1338→  1338→        diag("bridge.noRetryAfterSend", { name, sent: r.sent });
+  1339→  1339→        ui.banner("warn", "Connection dropped",
+  1340→  1340→          `The bridge stopped answering while '${name}' was in flight. It may already have run - check the result before repeating it.`);
+  1341→  1341→        return ZSGuard.inFlightFailure(name);
+  1342→  1342→      }
+  1343→  1343→      diag("bridge.disconnectedRetry", { name });
+  1344→  1344→      await new Promise((res) => setTimeout(res, 1200));
+  1345→  1345→      const retry = await Promise.race([
+  1346→  1346→        bg({ type: "call_tool", name, arguments: args, timeout, server: selectedTargetId }),
+  1347→  1347→        hardCap,
+  1348→  1348→      ]);
+  1349→  1349→      // The retry itself has to be judged by the same rule. A second attempt
+  1350→  1350→      // that goes out and then drops must NOT be reported as "bridge offline":
+  1351→  1351→      // the tool may have run, and the model would retry it again.
+  1352→  1352→      if (retry && retry.kind === "disconnected" && !ZSGuard.mayRetryAfterDisconnect(retry)) {
+  1353→  1353→        diag("bridge.noRetryAfterSend", { name, sent: retry.sent, attempt: 2 });
+  1354→  1354→        ui.banner("warn", "Connection dropped",
+  1355→  1355→          `The bridge stopped answering while '${name}' was in flight. It may already have run - check the result before repeating it.`);
+  1356→  1356→        return ZSGuard.inFlightFailure(name);
+  1357→  1357→      }
+  1358→  1358→      if (retry && retry.kind !== "disconnected") {
+  1359→  1359→        r = retry;
+  1360→  1360→      } else {
+  1361→  1361→        // Record WHY we are declaring the bridge offline. Every path (socket closed,
+  1362→  1362→        // never opened, worker gave no answer) ends in the same message otherwise,
+  1363→  1363→        // so an "unreachable while the bridge is open" report could not be traced.
+  1364→  1364→        diag("bridge.offlineVerdict", {
+  1365→  1365→          name,
+  1366→  1366→          firstError: r && r.error,
+  1367→  1367→          firstSent: r && r.sent,
+  1368→  1368→          retryKind: retry ? retry.kind : null,
+  1369→  1369→          retryError: retry ? retry.error : "no response",
+  1370→  1370→          retrySent: retry ? retry.sent : null,
+  1371→  1371→        });
+  1372→  1372→        return ZS.FEEDBACK.bridgeOffline;
+  1373→  1373→      }
+  1374→  1374→    }
+  1375→  1375→    if (r.kind === "timeout") {
+  1376→  1376→      return `ERROR: tool '${name}' timed out after ${name === "execute_luau" ? 20 : 120}s.\n${r.error}\nTry a shorter/simpler call or check that the selected target app is open and responsive.`;
+  1377→  1377→    }
+  1378→  1378→    if (name === "execute_luau") {
+  1379→  1379→      const err = r.error || "";
+  1380→  1380→      // "Failed to parse command code" is StudioMCP's GENERIC parse rejection: an
+  1381→  1381→      // empty/mis-marked block is only ONE of its causes. The others are ordinary
+  1382→  1382→      // Luau syntax errors and - seen live on Meta AI 2026-08-13 - code that is
+  1383→  1383→      // syntactically fine but too big for the parser: a `return 1+1+1+…` chain
+  1384→  1384→      // ran at ~500 terms (1006 chars) and was rejected at ~1000 (2006 chars).
+  1385→  1385→      // Telling the model its block was empty when we DID send it a full code
+  1386→  1386→      // string sends it to fix something that isn't broken; it retries the same
+  1387→  1387→      // payload and fails again (the reported spam of parse errors). Only give the
+  1388→  1388→      // marker advice when the code we actually sent really was empty.
+  1389→  1389→      const luaCode = args.code || "";
+  1390→  1390→      const hint = err.includes("Failed to parse command code")
+  1391→  1391→        ? !luaCode.trim()
+  1392→  1392→          ? "Your code block was empty or the marker was wrong. Use exactly ###LUA### (three hashes) - never ###LUA---. The code must be between ###LUA### and ###END_LUA###."
+  1393→  1393→          : `Roblox refused to PARSE the code (${luaCode.length} chars sent, so it was not empty). Either the Luau syntax is invalid, or the code is too large/complex for the parser - a single huge expression or a very long script can be rejected outright. Check the syntax first; if it looks correct, split the work into several smaller calls.`
+  1394→  1394→        : err.includes("attempt to") || err.includes("nil value")
+  1395→  1395→          ? "Lua runtime error. Check that the API you are calling exists (use game:GetService() to access services). Make sure you use 'return' to output values, not 'print()'."
+  1396→  1396→          : "Check your Lua syntax, make sure you use 'return' to output values (not 'print()'), and that all APIs you call exist in the current Roblox Studio context.";
+  1397→  1397→      return `ERROR in execute_luau: ${err}\n\n${hint}\n\nFix the code and retry.`;
+  1398→  1398→    }
+  1399→  1399→    return `ERROR calling '${name}': ${r.error}\nRead the error carefully, fix the call or try a different approach.`;
+  1400→  1400→  }
+  1401→  1401→
+  1402→  1402→  function argSummary(call) {
+  1403→  1403→    if (!call) return "";
+  1404→  1404→    if (call.tool === "execute_luau") {
+  1405→  1405→      const code = (call.arguments && call.arguments.code) || "";
+  1406→  1406→      const first = code.split("\n").map((s) => s.trim()).filter(Boolean)[0] || "";
+  1407→  1407→      return first.slice(0, 46);
+  1408→  1408→    }
+  1409→  1409→    const a = call.arguments || {};
+  1410→  1410→    const k = Object.keys(a)[0];
+  1411→  1411→    if (!k) return "";
+  1412→  1412→    let v = String(a[k]);
+  1413→  1413→    if (v.length > 34) v = v.slice(0, 31) + "…";
+  1414→  1414→    return `${k}: ${v}`;
+  1415→  1415→  }
+  1416→  1416→
+  1417→  1417→  // An MCP tool can report its OWN failure as a NORMAL result ("Output of '…':
+  1418→  1418→  // Error executing code: …") instead of our ERROR wrapper - so a
+  1419→  1419→  // startsWith("ERROR") test alone paints a FAILED call ✓ green and shows the
+  1420→  1420→  // error as its summary (seen live on Blender's execute_blender_code, and it
+  1421→  1421→  // will hit EVERY future MCP server the same way). Treat a result whose FIRST
+  1422→  1422→  // line opens with an error lead-in as failed too. Deliberately PHRASE-based,
+  1423→  1423→  // not the bare words "error"/"failed", so a genuine success line like
+  1424→  1424→  // "Failed: 0" / "Error count: 0" is NOT misread as a failure.
+  1425→  1425→  const BODY_ERR_RE =
+  1426→  1426→    /^\s*(error executing|error:|erreur|exception|traceback|communication error|failed to|could ?not|cannot |unable to|fatal)\b/i;
+  1427→  1427→  const stripOutputPrefix = (feedback) => feedback.replace(/^Output of '[^']*':\n?/, "");
+  1428→  1428→  function bodyLooksFailed(feedback) {
+  1429→  1429→    if (!feedback || feedback.startsWith("ERROR")) return false; // wrapper already flags it
+  1430→  1430→    const first = stripOutputPrefix(feedback).split("\n").map((s) => s.trim()).find(Boolean) || "";
+  1431→  1431→    return BODY_ERR_RE.test(first);
+  1432→  1432→  }
+  1433→  1433→  // True failure = OUR wrapper prefix OR an MCP tool's in-body error lead-in.
+  1434→  1434→  const feedbackIsError = (feedback) => feedback.startsWith("ERROR") || bodyLooksFailed(feedback);
+  1435→  1435→
+  1436→  1436→  // Some tools answer with raw JSON on one line, and a 44-char slice of it makes
+  1437→  1437→  // a chip that says nothing: list_roblox_studios read
+  1438→  1438→  // `{"studios":[{"id":"8521cfad-f8d9-46f4-8cbe-2`. Summarise the SHAPE instead,
+  1439→  1439→  // in the same spirit as the boot chip's "25 commands". Returns null when the
+  1440→  1440→  // body isn't JSON, so plain-text outputs keep their first line unchanged.
+  1441→  1441→  function jsonSummary(body) {
+  1442→  1442→    if (!/^[[{]/.test(body) || body.length > 200000) return null;
+  1443→  1443→    let v;
+  1444→  1444→    try { v = JSON.parse(body); } catch { return null; }
+  1445→  1445→    if (Array.isArray(v)) return `${v.length} item${v.length === 1 ? "" : "s"}`;
+  1446→  1446→    if (!v || typeof v !== "object") return null;
+  1447→  1447→    const keys = Object.keys(v);
+  1448→  1448→    // The common MCP shape: one wrapper key holding the list. Its name is already
+  1449→  1449→    // plural ("studios", "scripts"), so it reads correctly as-is - just drop the
+  1450→  1450→    // trailing "s" when there is exactly one, so it says "1 studio".
+  1451→  1451→    if (keys.length === 1 && Array.isArray(v[keys[0]])) {
+  1452→  1452→      const n = v[keys[0]].length;
+  1453→  1453→      const word = n === 1 ? keys[0].replace(/s$/, "") : keys[0];
+  1454→  1454→      return `${n} ${word}`;
+  1455→  1455→    }
+  1456→  1456→    // Otherwise show the scalar fields - that's what a human would read off.
+  1457→  1457→    const scalars = keys
+  1458→  1458→      .filter((k) => v[k] === null || typeof v[k] !== "object")
+  1459→  1459→      .map((k) => `${k}: ${v[k]}`);
+  1460→  1460→    if (scalars.length) return scalars.join(", ").slice(0, 44);
+  1461→  1461→    return `${keys.length} field${keys.length === 1 ? "" : "s"}`;
+  1462→  1462→  }
+  1463→  1463→
+  1464→  1464→  function outSummary(feedback) {
+  1465→  1465→    if (!feedback) return "";
+  1466→  1466→    const isErr = feedbackIsError(feedback);
+  1467→  1467→    const body = stripOutputPrefix(feedback).trim();
+  1468→  1468→    if (!body) return "";
+  1469→  1469→    // Errors are prose and read fine as-is; only reshape successful JSON.
+  1470→  1470→    if (!isErr) { const j = jsonSummary(body); if (j) return j; }
+  1471→  1471→    const all = body.split("\n").map((l) => l.trim()).filter(Boolean);
+  1472→  1472→    const lines = all.length;
+  1473→  1473→    // On SUCCESS, skip a leading non-fatal warning/note some MCP tools print
+  1474→  1474→    // before the real status so the chip shows the useful line, not the noise.
+  1475→  1475→    let first = all[0] || "";
+  1476→  1476→    if (!isErr && lines > 1 && /^(warning|warn|note|deprecat|info)\b/i.test(first)) {
+  1477→  1477→      first = all.find((l) => !/^(warning|warn|note|deprecat|info)\b/i.test(l)) || first;
+  1478→  1478→    }
+  1479→  1479→    first = first.slice(0, 44);
+  1480→  1480→    if (isErr) return first;
+  1481→  1481→    return lines > 1 ? `${first} · ${lines} lines` : first;
+  1482→  1482→  }
+  1483→  1483→
+  1484→  1484→  // Full args / code, shown in a tool chip's expandable body.
+  1485→  1485→  function callBody(call) {
+  1486→  1486→    const a = call.arguments || {};
+  1487→  1487→    if (call.tool === "execute_luau") return (a.code || "").trim();
+  1488→  1488→    try { return JSON.stringify(a, null, 2); } catch { return String(a); }
+  1489→  1489→  }
+  1490→  1490→
+  1491→  1491→  // ════════════════════════════════════════════════════════════════════════
+  1492→  1492→  //  AGENTIC LOOP
+  1493→  1493→  // ════════════════════════════════════════════════════════════════════════
+  1494→  1494→  async function agentLoop(base) {
+  1495→  1495→    if (A.running) return;
+  1496→  1496→    A.running = true;
+  1497→  1497→    A.resumeArmed = false; // loop now owns the turn; drop the regenerate grace
+  1498→  1498→    A.stop = false;
+  1499→  1499→    A.stopping = false; // clean slate: never inherit a stale "Stopping…" from a
+  1500→  1500→                        // Stop click that landed before this loop actually started
+  1501→  1501→    A.loopKey = null; // pinned by syncSessionState once this chat has an id + content
+  1502→  1502→    let truncCount = 0;
+  1503→  1503→    const MAX_TRUNC = 6;
+  1504→  1504→    // Re-send the command list after this many successful tool calls. Kept high
+  1505→  1505→    // so the reminder does not bloat the context too often.
+  1506→  1506→    const REMIND_TOOLS_EVERY = 20;
+  1507→  1507→    ui.showStop(true);
+  1508→  1508→    P.setInputLock(true); // prevent user from typing while the agent is active
+  1509→  1509→    ui.inputCover(true);  // keep the "Agent is working" cover up for the WHOLE loop
+  1510→  1510→    diag("loop.start", { base });
+  1511→  1511→    // Watchdog: if the tab is visible, no tool is running and NOTHING has changed
+  1512→  1512→    // (turn counts, stream length, generating flag) for WD_STALL_MS, the loop is
+  1513→  1513→    // stuck waiting. Stop it so the cover and Stop button are released by the
+  1514→  1514→    // finally block below, and tell the user instead of leaving a dead bar.
+  1515→  1515→    const WD_STALL_MS = 180000;
+  1516→  1516→    let _wdSig = "", _wdAt = Date.now();
+  1517→  1517→    const _wd = setInterval(() => {
+  1518→  1518→      if (!A.running) return;
+  1519→  1519→      if (document.hidden || A.parked || A.toolRunning || A.injecting) { _wdAt = Date.now(); return; }
+  1520→  1520→      const sig = [P.assistantCount(), P.userCount(), P.streamLen ? P.streamLen() : 0, P.isGenerating() ? 1 : 0].join("|");
+  1521→  1521→      if (sig !== _wdSig) { _wdSig = sig; _wdAt = Date.now(); return; }
+  1522→  1522→      if (Date.now() - _wdAt > WD_STALL_MS) {
+  1523→  1523→        diag("loop.watchdog", { sig });
+  1524→  1524→        ui.banner("warn", "Agent stopped waiting", "No progress for 3 min. Send continue to resume.");
+  1525→  1525→        A.stop = true;
+  1526→  1526→        _wdAt = Date.now();
+  1527→  1527→      }
+  1528→  1528→    }, 5000);
+  1529→  1529→    try {
+  1530→  1530→      while (!A.stop) {
+  1531→  1531→        // Gate the WHOLE cycle on tab visibility. We only advance - read the
+  1532→  1532→        // reply, PARSE it, EXECUTE a tool, inject the result - while the AI tab
+  1533→  1533→        // is the FOREGROUND tab of its Edge window. document.visibilityState
+  1534→  1534→        // (mirrored by document.hidden) is the right signal, NOT window focus:
+  1535→  1535→        //  - Edge loses OS focus but the AI tab stays the active tab (user is
+  1536→  1536→        //    working in Roblox Studio) -> still "visible" -> the agent keeps
+  1537→  1537→        //    running, exactly as wanted.
+  1538→  1538→        //  - The AI tab is backgrounded (another tab in front) or the window is
+  1539→  1539→        //    minimized -> "hidden" -> pause here. Background tabs throttle
+  1540→  1540→        //    rendering/timers, which made DOM reads unreliable (misparse,
+  1541→  1541→        //    duplicate sends - see the send-side guard in submitAndGetBase).
+  1542→  1542→        // Parking here means we never START a parse/exec cycle off-screen; the
+  1543→  1543→        // send step re-checks too, so a switch-away mid-generation is covered.
+  1544→  1544→        if (document.hidden && !A.stop) {
+  1545→  1545→          diag("loop.waitVisible");
+  1546→  1546→          ui.inputCover(true); // keep the "Agent is working" cover up while parked
+  1547→  1547→          if (!(await waitVisible()) || A.stop) break; // park (no cap) until foreground; break only on user stop
+  1548→  1548→          diag("loop.visibleAgain");
+  1549→  1549→        }
+  1550→  1550→        const res = await waitForResponse(base);
+  1551→  1551→        diag("response", { kind: res.kind });
+  1552→  1552→        if (A.stop || res.kind === "stopped") break;
+  1553→  1553→
+  1554→  1554→        if (res.kind === "context_limit") {
+  1555→  1555→          ui.banner("limit", `${P.displayName} reached its context limit`,
+  1556→  1556→            (res.detail || "") + " New chat.");
+  1557→  1557→          break;
+  1558→  1558→        }
+  1559→  1559→        if (res.kind === "too_long") {
+  1560→  1560→          ui.banner("limit", "Conversation too long",
+  1561→  1561→            `Too long. Start a new chat.`);
+  1562→  1562→          break;
+  1563→  1563→        }
+  1564→  1564→        if (res.kind === "timeout") {
+  1565→  1565→          ui.banner("warn", `No response from ${P.displayName}`,
+  1566→  1566→            `Timed out. Agent stopped.`);
+  1567→  1567→          break;
+  1568→  1568→        }
+  1569→  1569→        // 2026-11 ChatGPT saturation: the turn is a PLACEHOLDER (fallback-turn-*)
+  1570→  1570→        // that never renders its text. Only the Start flow used to handle this,
+  1571→  1571→        // so a session that saturated mid-conversation fell through every branch
+  1572→  1572→        // and re-entered with an unchanged base - reading the same placeholder
+  1573→  1573→        // every ~2.5s: no send, no banner, and (on a hidden tab) no watchdog to
+  1574→  1574→        // end it. Stop with the same banner Start shows.
+  1575→  1575→        if (res.kind === "fallback_turn") {
+  1576→  1576→          diag("fallback_turn.end");
+  1577→  1577→          ui.banner("warn", "Conversation stopped responding", FALLBACK_TURN_TEXT);
+  1578→  1578→          break;
+  1579→  1579→        }
+  1580→  1580→
+  1581→  1581→        // A genuinely empty turn is effectively never produced (the warm-up guard
+  1582→  1582→        // waits out slow starts). It DOES happen when the site drops a reply, and
+  1583→  1583→        // ending the loop silently is what made this the single most confusing
+  1584→  1584→        // failure: the pending command just settles to a grey "not run" with no
+  1585→  1585→        // explanation anywhere. Say what happened.
+  1586→  1586→        if (res.kind === "empty") {
+  1587→  1587→          diag("empty.end");
+  1588→  1588→          ui.banner("warn", `${P.displayName} returned an empty reply`,
+  1589→  1589→            `Nothing received. Try again.`);
+  1590→  1590→          break;
+  1591→  1591→        }
+  1592→  1592→
+  1593→  1593→        // The turn stopped with the site's "Continue" affordance.
+  1594→  1594→        if (res.kind === "truncated") {
+  1595→  1595→          // If the turn carries the halted marker (a stop - user OR self-halt),
+  1596→  1596→          // respect it and do NOT auto-resume.
+  1597→  1597→          if (P.turnHalted(res.item)) { diag("truncated.halted"); break; }
+  1598→  1598→          // Otherwise it truncated by length → continue the SAME turn. Prefer
+  1599→  1599→          // the native Continue button; fall back to a continuation message.
+  1600→  1600→          if (truncCount < MAX_TRUNC) {
+  1601→  1601→            truncCount++;
+  1602→  1602→            if (P.clickContinueBtn() && await waitFor(() => P.isGenerating(), 2500)) {
+  1603→  1603→              diag("truncated.continued");
+  1604→  1604→              continue; // same turn resumes (base unchanged)
+  1605→  1605→            }
+  1606→  1606→            diag("truncated.sendFallback");
+  1607→  1607→            ui.toast("Resuming…");
+  1608→  1608→            base = await submitAndGetBase(ZS.FEEDBACK.truncated);
+  1609→  1609→            continue;
+  1610→  1610→          }
+  1611→  1611→          if (res.text) break; // give up resuming; keep what we have as the answer
+  1612→  1612→          ui.banner("warn", "Reply kept getting cut off",
+  1613→  1613→            "Too long. Try shorter.");
+  1614→  1614→          break;
+  1615→  1615→        }
+  1616→  1616→        truncCount = 0;
+  1617→  1617→
+  1618→  1618→        if (res.kind === "parse_error") {
+  1619→  1619→          // The command turn ended in a parse error - it NEVER ran. Paint its chip
+  1620→  1620→          // as an error (owned, so the sweep won't repaint it the green ✓ "done" it
+  1621→  1621→          // stamps on any command-shaped turn once generation ends - the misleading
+  1622→  1622→          // "chip says OK, result says error" state seen live on GLM's truncated
+  1623→  1623→          // execute_blender_code).
+  1624→  1624→          const failName = ZSParse.toolNameFromText(res.raw || "") || "command";
+  1625→  1625→          if (res.item) {
+  1626→  1626→            const detail = res.reason === "unclosed" ? "cut off"
+  1627→  1627→              : res.reason === "luaOpener" ? "missing ###LUA###"
+  1628→  1628→              : res.reason === "envelope" ? "bad format"
+  1629→  1629→              // DSML is not JSON at all - it is DeepSeek's own markup - so the
+  1630→  1630→              // default "bad JSON" would send the user (and anyone reading a bug
+  1631→  1631→              // report) looking for a syntax slip that does not exist.
+  1632→  1632→              : res.reason === "dsml" ? "wrong format"
+  1633→  1633→              : "bad JSON";
+  1634→  1634→            decorate.toolBox(res.item, failName, "err", detail, true, "", ZS.toolCategory(failName));
+  1635→  1635→          }
+  1636→  1636→          // Pass the detected command name so the feedback only offers the
+  1637→  1637→          // ###LUA### block when it actually applies (execute_luau) - never for a
+  1638→  1638→          // truncated/broken execute_blender_code or other JSON-only command.
+  1639→  1639→          base = await submitAndGetBase(ZS.FEEDBACK.parseError(res.reason, failName));
+  1640→  1640→          continue;
+  1641→  1641→        }
+  1642→  1642→        if (res.kind === "text") break; // final answer
+  1643→  1643→
+  1644→  1644→        if (res.kind === "tool") {
+  1645→  1645→          const calls = res.calls;
+  1646→  1646→          if (calls.length > 1) {
+  1647→  1647→            base = await submitAndGetBase(ZS.FEEDBACK.multiTool(calls.map((c) => c.tool || "?")));
+  1648→  1648→            continue;
+  1649→  1649→          }
+  1650→  1650→          const call = calls[0];
+  1651→  1651→          // A tool ALREADY seen to return an image this session gets the "screen"
+  1652→  1652→          // chip optimistically at run time (parity with the known screen_capture),
+  1653→  1653→          // even though its name alone wouldn't reveal it. First-ever call of an
+  1654→  1654→          // unknown image tool stays generic here and upgrades at result time below.
+  1655→  1655→          const learnedImg = A.imageTools.has(bareToolName(call.tool));
+  1656→  1656→          const category = learnedImg ? "screen" : ZS.toolCategory(call.tool);
+  1657→  1657→          diag("tool.runCat", { name: call.tool, learnedImg, category });
+  1658→  1658→
+  1659→  1659→          // Park BEFORE painting the chip / stamping the clock / marking the turn
+  1660→  1660→          // dispatched. runTool() gates on visibility too (it is the choke point
+  1661→  1661→          // that also covers the bootstrap), but parking only there would leave
+  1662→  1662→          // this block's side effects applied for the whole minimize:
+  1663→  1663→          //   - the chip spins "running" while nothing actually runs, and
+  1664→  1664→          //     elapsedOn(zsToolT0) counts the parked time, so a 20-min minimize
+  1665→  1665→          //     renders a bogus "1200.0s" on the call;
+  1666→  1666→          //   - rememberExecuted() would mark the turn dispatched before it ever
+  1667→  1667→          //     ran, so a reload/close while parked loses the command for good -
+  1668→  1668→          //     the auto-resume watchdog refuses to re-fire an "executed" turn.
+  1669→  1669→          // Parking first keeps all of that truthful: we only commit once we are
+  1670→  1670→          // foreground and about to really dispatch.
+  1671→  1671→          if (document.hidden && !A.stop) {
+  1672→  1672→            diag("tool.parkBeforeDispatch", { name: call.tool });
+  1673→  1673→            if (!(await waitVisible()) || A.stop) break;
+  1674→  1674→          }
+  1675→  1675→          // Loading chip with the real args (loop owns this item from here).
+  1676→  1676→          decorate.toolBox(res.item, call.tool, "run", argSummary(call), true, callBody(call), category);
+  1677→  1677→          A.toolSettle = null; // a fresh call: no settled outcome yet
+  1678→  1678→          A.toolRunning = true;
+  1679→  1679→          A.toolStart = Date.now();
+  1680→  1680→          A.toolName = call.tool;
+  1681→  1681→          A.toolItem = res.item;
+  1682→  1682→          A.toolArg = argSummary(call);
+  1683→  1683→          // Record this turn as dispatched OFF the DOM so the auto-resume
+  1684→  1684→          // watchdog never re-fires it after a scroll re-render wipes the node's
+  1685→  1685→          // zloop/zResume markers (see the `executed` map).
+  1686→  1686→          rememberExecuted(res.item);
+  1687→  1687→          diag("tool.start", { name: call.tool });
+  1688→  1688→          const feedback = await runTool(call);
+  1689→  1689→          A.toolRunning = false;
+  1690→  1690→          diag("tool.done", { name: call.tool, ok: !feedback.startsWith("ERROR"), out: feedback.slice(0, 50) });
+  1691→  1691→          if (A.stop) {
+  1692→  1692→            // User halted mid-tool: settle the spinning chip so it doesn't look
+  1693→  1693→            // stuck loading forever, and MARK the turn so the sweep classifier
+  1694→  1694→            // never repaints it ✓ done once generation ends (the real cause of a
+  1695→  1695→            // stopped call still going green a moment later).
+  1696→  1696→            if (res.item) { res.item.dataset.zStopped = "1"; rememberHalted(res.item); }
+  1697→  1697→            decorate.toolBox(res.item, call.tool, "err", "stopped", true, "", category);
+  1698→  1698→            break;
+  1699→  1699→          }
+  1700→  1700→          const isErr = feedbackIsError(feedback);
+  1701→  1701→          const outBody = stripOutputPrefix(feedback);
+  1702→  1702→          // Trace the chip's DERIVED phase vs summary. Blender (and any MCP whose
+  1703→  1703→          // output leads with a warning/diagnostic line) resolves ✓ done - the
+  1704→  1704→          // payload starts "Output of…", not "ERROR" - yet outSummary shows its
+  1705→  1705→          // FIRST line, which is the warning. Captures firstLine vs a later
+  1706→  1706→          // success line so we can see the mismatch without guessing.
+  1707→  1707→          {
+  1708→  1708→            const lns = outBody.split("\n").map((l) => l.trim()).filter(Boolean);
+  1709→  1709→            diag("tool.result", { name: call.tool, isErr, phase: isErr ? "err" : "done",
+  1710→  1710→              summary: outSummary(feedback), lineCount: lns.length,
+  1711→  1711→              firstLine: (lns[0] || "").slice(0, 90), lastLine: (lns[lns.length - 1] || "").slice(0, 90) });
+  1712→  1712→          }
+  1713→  1713→          // A tool (Roblox OR any custom MCP server) that actually RETURNED an
+  1714→  1714→          // image becomes a "screen" chip - even if its name never let us guess.
+  1715→  1715→          // Reactive, not predictive: A.pendingImages is set by runTool before it
+  1716→  1716→          // returns. Remember the name so its next call is optimistic (see above).
+  1717→  1717→          const hasImages = !!(A.pendingImages && A.pendingImages.length);
+  1718→  1718→          if (hasImages) rememberImageTool(call.tool);
+  1719→  1719→          const resultCat = hasImages ? "screen" : category;
+  1720→  1720→          decorate.toolBox(res.item, call.tool, isErr ? "err" : "done", outSummary(feedback),
+  1721→  1721→            true, outBody, resultCat);
+  1722→  1722→          // Snapshot the settled outcome. If the site swaps this turn's DOM node
+  1723→  1723→          // while we wait for the model's next turn (wiping the chip AND the
+  1724→  1724→          // zloop ownership dataset), the sweep re-owns the fresh node with this
+  1725→  1725→          // outcome instead of letting branch-3 classification re-spin a "run"
+  1726→  1726→          // chip on an already-executed call.
+  1727→  1727→          A.toolSettle = {
+  1728→  1728→            phase: isErr ? "err" : "done", detail: outSummary(feedback),
+  1729→  1729→            body: outBody, category: resultCat, count: P.assistantCount(),
+  1730→  1730→            // Node IDENTITY of the settled turn (virtualization-proof), when the
+  1731→  1731→            // provider exposes it. The count guard alone misfires on Qwen: the
+  1732→  1732→            // list virtualizes so assistantCount() doesn't grow for the model's
+  1733→  1733→            // NEXT turn, and back-to-back calls to the SAME tool defeat the name
+  1734→  1734→            // guard too - the sweep then re-owned the STREAMING next turn's chip
+  1735→  1735→            // with the previous done/err outcome (seen live: 5x chip.reown with
+  1736→  1736→            // gen:true, rp tiny).
+  1737→  1737→            id: P.lastAssistantId ? P.lastAssistantId() : undefined,
+  1738→  1738→          };
+  1739→  1739→
+  1740→  1740→          // Re-inject the command list every REMIND_TOOLS_EVERY successful calls.
+  1741→  1741→          // Appended UNDER the tool result and clearly marked as a reminder, so a
+  1742→  1742→          // model that has drifted from the exact command names gets re-anchored
+  1743→  1743→          // without it looking like a new result to act on. Errors don't count
+  1744→  1744→          // (they already restate what's wrong) and list_commands is redundant.
+  1745→  1745→          let toSend = feedback;
+  1746→  1746→          if (!isErr && call.tool !== "list_commands" && A.toolList.length) {
+  1747→  1747→            A.toolCallsSinceReminder++;
+  1748→  1748→            if (A.toolCallsSinceReminder >= REMIND_TOOLS_EVERY) {
+  1749→  1749→              A.toolCallsSinceReminder = 0;
+  1750→  1750→              // Scope the reminder to the primary Roblox server, exactly like
+  1751→  1751→              // list_commands: re-injecting EVERY connected server's tools (Blender
+  1752→  1752→              // etc.) merged flat would bloat the model's context - the opposite of
+  1753→  1753→              // what the model gets when it lists commands itself. Anti-drift only
+  1754→  1754→              // needs the primary Roblox set; addon commands were listed on demand
+  1755→  1755→              // and the bridge routes by name regardless.
+  1756→  1756→              toSend += ZS.toolsReminder(activeTools(), ui.getTargetName(), selectedTargetId);
+  1757→  1757→              if (selectedTargetId === "roblox") toSend += "\n" + ZS.memoryNudge();
+  1758→  1758→              diag("tools.reminder", { after: REMIND_TOOLS_EVERY });
+  1759→  1759→            }
+  1760→  1760→          }
+  1761→  1761→          // This result becomes a turn, so it counts toward the re-statement
+  1762→  1762→          // budget - context volume is what makes the site summarise, and the
+  1763→  1763→          // volume is overwhelmingly tool results, not how often the user types.
+  1764→  1764→          bumpSys("results");
+  1765→  1765→          // Ride the system-prompt re-statement out on this result if one is due
+  1766→  1766→          // and it fits (see withSysResend - the result itself is never trimmed).
+  1767→  1767→          toSend = withSysResend(toSend);
+  1768→  1768→          const images = A.pendingImages;
+  1769→  1769→          A.pendingImages = null;
+  1770→  1770→          diag("images.consumed", { count: images ? images.length : 0 });
+  1771→  1771→          base = await submitAndGetBase(toSend, images);
+  1772→  1772→        }
+  1773→  1773→      }
+  1774→  1774→    } catch (e) {
+  1775→  1775→      diag("loop.error", { msg: String((e && e.message) || e) });
+  1776→  1776→      ui.banner("warn", "Internal loop error", String((e && e.message) || e));
+  1777→  1777→    } finally {
+  1778→  1778→      A.running = false;
+  1779→  1779→      A.stop = false;
+  1780→  1780→      // Keep the "Stopping…" state while the site's stream is still draining
+  1781→  1781→      // after a user stop: the loop often ends BEFORE the native stop takes
+  1782→  1782→      // effect (loop.end fires with gen still true - seen live on DeepSeek),
+  1783→  1783→      // and clearing the flag here let the next sweep restore a clickable
+  1784→  1784→      // "■ Stop" for the last beat of the dying stream (the Stopping… → Stop →
+  1785→  1785→      // gone bounce). The sweep's self-heal clears it - and retries the native
+  1786→  1786→      // stop - once the site is actually quiet.
+  1787→  1787→      const draining = A.stopping && A.started && P.isHardGenerating();
+  1788→  1788→      if (A.stopping && draining) diag("stop.drain", { keptStopping: true });
+  1789→  1789→      A.stopping = draining;
+  1790→  1790→      A.toolRunning = false;
+  1791→  1791→      A.toolSettle = null;
+  1792→  1792→      A.loopKey = null;
+  1793→  1793→      ui.showStop(false);
+  1794→  1794→      clearInterval(_wd);
+  1795→  1795→      ui.inputCover(false); // lift the "Agent is working" cover when the loop ends
+  1796→  1796→      P.setInputLock(false); // always unlock, even on error or stop
+  1797→  1797→      diag("loop.end");
+  1798→  1798→    }
+  1799→  1799→  }
+  1800→  1800→
+  1801→  1801→  // Mark the current assistant turn as user-halted so the sweep classifier shows
+  1802→  1802→  // its command chip as "stopped" instead of repainting it ✓ done when
+  1803→  1803→  // generation ends. Cleared on a deliberate resume (native Continue).
+  1804→  1804→  //
+  1805→  1805→  // The dataset marker alone is NOT enough: sites re-render the whole history
+  1806→  1806→  // when the next user message lands (seen live on DeepSeek), replacing the
+  1807→  1807→  // halted turn's node and wiping dataset.zStopped - and since a fresh user
+  1808→  1808→  // message also clears the A.userStopped latch by design, nothing said
+  1809→  1809→  // "stopped" anymore and the chip went ✓ green. So halted turns are ALSO
+  1810→  1810→  // remembered here, keyed independently of the DOM node (conversation +
+  1811→  1811→  // position among assistant turns + a text prefix), and the sweep re-stamps
+  1812→  1812→  // the marker whenever the node was swapped.
+  1813→  1813→  const halted = new Map(); // "conv|turnKey" → text prefix at halt time
+  1814→  1814→  const assistantIdx = (item) => P.allItems().filter(P.isAssistantItem).indexOf(item);
+  1815→  1815→  // Virtualization-stable map key for the off-DOM executed/halted memories.
+  1816→  1816→  // assistantIdx is POSITIONAL within the currently-rendered window, so on a
+  1817→  1817→  // virtualized list (DeepSeek/Qwen/GLM/Arena) scrolling up renders a different
+  1818→  1818→  // set of turns and an OLD command turn takes a low index that COLLIDES with a
+  1819→  1819→  // current turn's key - the dedupe then misses and the watchdog re-fires the
+  1820→  1820→  // scrolled-back tool. Prefer the provider's stable per-turn id when it exposes
+  1821→  1821→  // one (P.itemKey); fall back to the index for non-virtualized providers.
+  1822→  1822→  const turnKey = (item) => {
+  1823→  1823→    if (P.itemKey) {
+  1824→  1824→      const k = P.itemKey(item);
+  1825→  1825→      if (k != null) return `k${k}`;
+  1826→  1826→    }
+  1827→  1827→    return String(assistantIdx(item));
+  1828→  1828→  };
+  1829→  1829→  function rememberHalted(item) {
+  1830→  1830→    try {
+  1831→  1831→      if (!item || assistantIdx(item) < 0) return;
+  1832→  1832→      const pref = (P.itemText(item) || "").slice(0, 60);
+  1833→  1833→      // A stop during the REASONING phase leaves the answer text EMPTY - an
+  1834→  1834→      // empty/short prefix would then startsWith-match ANY later turn at this
+  1835→  1835→      // index (seen live: a fresh streaming command went red "stopped" on the
+  1836→  1836→      // spot). Too little text to identify → rely on the dataset marker only.
+  1837→  1837→      if (pref.trim().length < 12) return;
+  1838→  1838→      halted.set(`${P.conversationKey()}|${turnKey(item)}`, pref);
+  1839→  1839→    } catch {}
+  1840→  1840→  }
+  1841→  1841→  function forgetHalted(item) {
+  1842→  1842→    if (!item || !halted.size) return;
+  1843→  1843→    try { halted.delete(`${P.conversationKey()}|${turnKey(item)}`); } catch {}
+  1844→  1844→  }
+  1845→  1845→  // The halt was recorded MID-stream, so the stored text is a PREFIX of the
+  1846→  1846→  // turn's final text - match on startsWith, never equality.
+  1847→  1847→  function isRememberedHalted(item, txt) {
+  1848→  1848→    if (!halted.size) return false;
+  1849→  1849→    try {
+  1850→  1850→      const pref = halted.get(`${P.conversationKey()}|${turnKey(item)}`);
+  1851→  1851→      return pref != null && (txt || "").startsWith(pref);
+  1852→  1852→    } catch { return false; }
+  1853→  1853→  }
+  1854→  1854→  function markStoppedTurn() {
+  1855→  1855→    const it = P.lastAssistant();
+  1856→  1856→    if (!it) return;
+  1857→  1857→    it.dataset.zStopped = "1";
+  1858→  1858→    rememberHalted(it);
+  1859→  1859→  }
+  1860→  1860→
+  1861→  1861→  // Off-DOM record of assistant turns whose command has ALREADY been dispatched
+  1862→  1862→  // (by the normal loop OR the auto-resume watchdog). The dataset markers that
+  1863→  1863→  // dedupe re-execution (zResume / zloop) live on the DOM NODE - but sites
+  1864→  1864→  // virtualize long conversations, so scrolling up DESTROYS and RECREATES a
+  1865→  1865→  // turn's node, wiping those markers. The fresh node then looks un-run, and the
+  1866→  1866→  // watchdog can re-fire the turn's tool with no live generation at all (the
+  1867→  1867→  // "tools execute when I scroll back" bug). Mirror the `halted` map exactly
+  1868→  1868→  // (keyed by conversation + assistant index + a text prefix, NOT the node) so
+  1869→  1869→  // the "already ran this" memory survives node recreation. This makes
+  1870→  1870→  // re-execution IDEMPOTENT regardless of any isGenerating/lastGenAt heuristic
+  1871→  1871→  // misfire - the hard part (is this a live turn?) can be wrong without harm.
+  1872→  1872→  const executed = new Map(); // "conv|turnKey" → text prefix at dispatch time
+  1873→  1873→  // ── Scroll-away suppression ───────────────────────────────────────────────
+  1874→  1874→  // The user's own rule, requested after the replay bug: while they scroll UP
+  1875→  1875→  // through history, nothing about the agent may look alive. Scrolling a
+  1876→  1876→  // virtualized transcript renders different turns, which makes the "last
+  1877→  1877→  // rendered turn" lie about liveness (bar shows Stop, watchdog thinks a reply
+  1878→  1878→  // is still coming). Rather than keeping a growing pile of per-turn heuristics,
+  1879→  1879→  // we detect the gesture itself and SUPPRESS the busy surface for a short
+  1880→  1880→  // window. This is a UI/`watchdog` gate only: it never cancels a real run, it
+  1881→  1881→  // just stops the indicators (and the resume logic) from acting on a scroll.
+  1882→  1882→  const SCROLL_SUPPRESS_MS = 4000;
+  1883→  1883→  let scrollUpAt = 0;
+  1884→  1884→  let scrollSuppressUntil = 0;
+  1885→  1885→  function noteScrollUp() {
+  1886→  1886→    const now = Date.now();
+  1887→  1887→    scrollUpAt = now;
+  1888→  1888→    scrollSuppressUntil = now + SCROLL_SUPPRESS_MS;
+  1889→  1889→  }
+  1890→  1890→  const scrollSuppressed = () => Date.now() < scrollSuppressUntil;
+  1891→  1891→  // Hold until the suppression window lapses (see core/guard.js: logistics live
+  1892→  1892→  // there so they can be tested in node without a DOM).
+  1893→  1893→  const waitScrollWindow = () =>
+  1894→  1894→    ZSGuard.holdUntilScrollLapses({
+  1895→  1895→      isSuppressed: scrollSuppressed,
+  1896→  1896→      isStopped: () => !!A.stop,
+  1897→  1897→      sleep: (ms) => new Promise((res) => setTimeout(res, ms)),
+  1898→  1898→      capMs: SCROLL_SUPPRESS_MS * 2 + 500,
+  1899→  1899→    });
+  1900→  1900→  function installScrollDetector() {
+  1901→  1901→    try {
+  1902→  1902→      // Position must be tracked PER SCROLLABLE ELEMENT. The listener is on
+  1903→  1903→      // `document` in the capture phase, so it sees the transcript, the sidebar,
+  1904→  1904→      // code blocks and textareas alike. A single shared _lastScrollTop compared
+  1905→  1905→      // a value from one element against a value from another: scrolling the
+  1906→  1906→      // sidebar down to 900 and then the transcript (at 400) looked like an
+  1907→  1907→      // upward move of 500px and suppressed execution for no reason. A WeakMap
+  1908→  1908→      // keeps one last position per element and lets them be collected.
+  1909→  1909→      const tracker = ZSGuard.createScrollTracker(24);
+  1910→  1910→      // Is this target part of the CONVERSATION transcript? Both listeners must
+  1911→  1911→      // answer the same question, otherwise the scroll and wheel paths disagree
+  1912→  1912→      // about what counts as "scrolling history".
+  1913→  1913→      //
+  1914→  1914→      // `main` is deliberately NOT used as a fallback: it matches nearly the
+  1915→  1915→      // whole page, which would let a sidebar or composer gesture through. The
+  1916→  1916→      // provider's message selector is the real signal; a plain article is the
+  1917→  1917→      // only generic fallback, and a composer/editor is always excluded.
+  1918→  1918→      //
+  1919→  1919→      // The two listeners get DIFFERENT kinds of target, so the test has to look
+  1920→  1920→      // in both directions:
+  1921→  1921→      //   wheel  -> the element under the cursor, a DESCENDANT of the transcript,
+  1922→  1922→      //             so `closest()` walking up finds it;
+  1923→  1923→      //   scroll -> the element that scrolled, normally the transcript CONTAINER
+  1924→  1924→      //             (an ancestor of every message), so `closest()` finds nothing
+  1925→  1925→      //             and the event has to be accepted when the target CONTAINS a
+  1926→  1926→      //             message instead. Window-level scrolling reports `document`,
+  1927→  1927→      //             which has no `closest` at all and is the provider's scroller
+  1928→  1928→      //             for some layouts, so it is accepted as the transcript too.
+  1929→  1929→      //
+  1930→  1930→      // A filter that only walked up silently dropped scrollbar, keyboard and
+  1931→  1931→      // touch scrolling while the wheel path kept working - a regression on the
+  1932→  1932→      // exact gesture the suppression exists for.
+  1933→  1933→      const inTranscript = (t) => {
+  1934→  1934→        if (!t) return false;
+  1935→  1935→        // The window/document scroller is the transcript for window-level
+  1936→  1936→        // layouts; a composer or editor is never the transcript.
+  1937→  1937→        if (t === document || t === document.documentElement || t === window) return true;
+  1938→  1938→        if (!t.closest) return false;
+  1939→  1939→        if (t.closest("textarea, input, .cm-editor, [contenteditable='true']")) return false;
+  1940→  1940→        const msgSel = P.msgSel || "[data-message-author-role]";
+  1941→  1941→        // Upward: the target sits inside a message (wheel, inner scrollables).
+  1942→  1942→        if (t.closest(msgSel) || t.closest("article")) return true;
+  1943→  1943→        // Downward: the target is the scroll container that holds messages.
+  1944→  1944→        return !!(typeof t.querySelector === "function" && (t.querySelector(msgSel) || t.querySelector("article")));
+  1945→  1945→      };
+  1946→  1946→      const topOf = (t) => {
+  1947→  1947→        if (t && typeof t.scrollTop === "number" && t !== document && t !== document.documentElement) {
+  1948→  1948→          return { key: t, top: t.scrollTop };
+  1949→  1949→        }
+  1950→  1950→        return { key: document.documentElement, top: window.scrollY || document.documentElement.scrollTop || 0 };
+  1951→  1951→      };
+  1952→  1952→      const onScroll = (ev) => {
+  1953→  1953→        const target = ev && ev.target;
+  1954→  1954→        // The same transcript-only rule as the wheel listener below.
+  1955→  1955→        if (!inTranscript(target)) return;
+  1956→  1956→        const { key, top } = topOf(target);
+  1957→  1957→        // Moving UP through a turn is the problematic gesture. The 24px
+  1958→  1958→        // threshold ignores layout jitter and stream-driven auto-scroll (which
+  1959→  1959→        // only ever moves DOWN as the reply grows).
+  1960→  1960→        if (tracker.observe(key, top)) noteScrollUp();
+  1961→  1961→      };
+  1962→  1962→      // capture:true - ChatGPT scrolls inner containers, not just the window.
+  1963→  1963→      document.addEventListener("scroll", onScroll, { capture: true, passive: true });
+  1964→  1964→      // WHEEL: only a gesture over the transcript counts. Scrolling up inside the
+  1965→  1965→      // sidebar, a code block or the composer is unrelated to replaying history,
+  1966→  1966→      // and used to hold execution as if the user had scrolled the conversation.
+  1967→  1967→      window.addEventListener("wheel", (ev) => {
+  1968→  1968→        if (!(ev && ev.deltaY < 0)) return;
+  1969→  1969→        if (!inTranscript(ev.target)) return;
+  1970→  1970→        noteScrollUp();
+  1971→  1971→      }, { passive: true });
+  1972→  1972→    } catch {}
+  1973→  1973→  }
+  1974→  1974→  installScrollDetector();
+  1975→  1975→  function rememberExecuted(item) {
+  1976→  1976→    if (!item) return;
+  1977→  1977→    try {
+  1978→  1978→      if (assistantIdx(item) < 0) return;
+  1979→  1979→      const pref = (P.itemText(item) || "").slice(0, 60);
+  1980→  1980→      // Same guard as rememberHalted: too little text to identify the turn (a
+  1981→  1981→      // command still streaming) would startsWith-match any later turn at this
+  1982→  1982→      // index. Fall back to the dataset marker until there is enough text.
+  1983→  1983→      if (pref.trim().length < 12) return;
+  1984→  1984→      executed.set(`${P.conversationKey()}|${turnKey(item)}`, pref);
+  1985→  1985→    } catch {}
+  1986→  1986→  }
+  1987→  1987→  function isRememberedExecuted(item, txt) {
+  1988→  1988→    if (!executed.size) return false;
+  1989→  1989→    try {
+  1990→  1990→      const pref = executed.get(`${P.conversationKey()}|${turnKey(item)}`);
+  1991→  1991→      return pref != null && (txt || "").startsWith(pref);
+  1992→  1992→    } catch { return false; }
+  1993→  1993→  }
+  1994→  1994→  function stopLoop() {
+  1995→  1995→    if (A.stopping) return; // already winding down - ignore double-clicks
+  1996→  1996→    diag("stopLoop");
+  1997→  1997→    A.stop = true;
+  1998→  1998→    A.stopping = true;
+  1999→  1999→    A.stopAt = Date.now(); // grace anchor for the regenerate-as-resume gates
+  2000→  2000→    // Baseline for the stop-retry growth gate (see the self-heal in the meter
+
+[showing lines 1-2000 of 2002; use offset=2001 with limit to continue reading]
