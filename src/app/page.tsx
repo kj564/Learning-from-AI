@@ -34,6 +34,7 @@ import SettingsDialog from '@/components/librechat/SettingsDialog';
 import CommandPalette from '@/components/librechat/CommandPalette';
 import KeyboardShortcutsHelp from '@/components/librechat/KeyboardShortcutsHelp';
 import { Button } from '@/components/ui/button';
+import { connectBridge, isBridgeConnected, runTool, useBridgeStatus, useAutoConnectBridge, extractSnapgentCommand } from '@/lib/snapgent-client';
 
 const genId = (p: string) => `${p}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 
@@ -88,6 +89,10 @@ export default function Page() {
   const toggleThink = store((s) => s.toggleThink);
   const snapgentEnabled = store((s) => s.snapgentEnabled);
   const toggleSnapgent = store((s) => s.toggleSnapgent);
+
+  // Bridge status — client-side WebSocket to ws://127.0.0.1:17613 on user's machine
+  useAutoConnectBridge();
+  const bridgeConnected = useBridgeStatus();
   const isGenerating = store((s) => s.isGenerating);
   const setIsGenerating = store((s) => s.setIsGenerating);
   const newConversation = store((s) => s.newConversation);
@@ -256,7 +261,7 @@ export default function Page() {
 
     const sessionId = sessionByConversation[convoId];
     const controller = streamChat(
-      { message: augmentedText, sessionId, conversationId: convoId, model: selectedModel, project: activeProject || undefined, assistant: activeAssistant ? { id: activeAssistant.id, name: activeAssistant.name, systemPrompt: activeAssistant.systemPrompt } : null, think: thinkEnabled, snapgent: snapgentEnabled },
+      { message: augmentedText, sessionId, conversationId: convoId, model: selectedModel, project: activeProject || undefined, assistant: activeAssistant ? { id: activeAssistant.id, name: activeAssistant.name, systemPrompt: activeAssistant.systemPrompt } : null, think: thinkEnabled, snapgent: snapgentEnabled && bridgeConnected },
       {
         onTextDelta: (delta) => updateMessage(convoId, pendingMsgId, (prev) => ({ content: (prev?.content || '') + delta })),
         onTextReplace: (text) => updateMessage(convoId, pendingMsgId, { content: text }),
@@ -291,6 +296,65 @@ export default function Page() {
           updateMessage(convoId, pendingMsgId, { streaming: false, pending: false });
           setIsGenerating(false);
           abortRef.current = null;
+
+          // === Client-side snapgent command detection ===
+          // After AI finishes streaming, check if the output contains a snapgent
+          // command ({"command":"...","params":{...}}). If yes and bridge is
+          // connected, execute it client-side and send the result back as a new
+          // user message — which triggers a new AI stream (the agentic loop).
+          if (snapgentEnabled && bridgeConnected) {
+            const msg = useStore.getState().messagesByConversation[convoId]?.find((m) => m.id === pendingMsgId);
+            if (msg?.content) {
+              const cmd = extractSnapgentCommand(msg.content);
+              if (cmd) {
+                // Strip the JSON from visible text
+                const visibleText = msg.content.replace(/\{[\s\S]*?"command"[\s\S]*?"params"[\s\S]*?\}/, '').trim();
+                updateMessage(convoId, pendingMsgId, { content: visibleText });
+
+                // Add tool execution card
+                updateMessage(convoId, pendingMsgId, (prev) => ({
+                  toolExecutions: [...(prev?.toolExecutions || []), { tool: cmd.command, args: cmd.params, success: false }],
+                }));
+
+                // Execute via bridge (client-side)
+                (async () => {
+                  const result = await runTool('vscode', cmd.command, cmd.params);
+                  // Update tool execution with result
+                  updateMessage(convoId, pendingMsgId, (prev) => {
+                    const execs = [...(prev?.toolExecutions || [])];
+                    for (let i = execs.length - 1; i >= 0; i--) {
+                      if (execs[i].tool === cmd.command && execs[i].success === false) {
+                        execs[i] = { ...execs[i], success: result.success, result: result.error || JSON.stringify(result.result).slice(0, 2000) };
+                        break;
+                      }
+                    }
+                    return { toolExecutions: execs };
+                  });
+
+                  // Send result back as a new user message — triggers new AI stream
+                  const resultText = result.success
+                    ? JSON.stringify(result.result).slice(0, 8000)
+                    : `Snapgent error: ${result.error}`;
+                  const followUpMsg = { id: genId('msg'), role: 'user' as const, content: `Output of '${cmd.command}': ${resultText}`, createdAt: Date.now() };
+                  addMessage(convoId, followUpMsg);
+
+                  // Trigger a new AI stream with the tool result
+                  const newPendingId = genId('msg');
+                  addMessage(convoId, { id: newPendingId, role: 'assistant', content: '', createdAt: Date.now(), pending: true, streaming: true });
+                  setIsGenerating(true);
+                  const sid = useStore.getState().sessionByConversation[convoId];
+                  streamChat(
+                    { message: `Output of '${cmd.command}': ${resultText}`, sessionId: sid, conversationId: convoId, model: selectedModel, snapgent: true },
+                    {
+                      onTextDelta: (delta) => updateMessage(convoId, newPendingId, (prev) => ({ content: (prev?.content || '') + delta })),
+                      onDone: (e) => { setSessionForConversation(convoId, e.sessionId); updateMessage(convoId, newPendingId, { streaming: false, pending: false }); setIsGenerating(false); },
+                      onError: (m) => { updateMessage(convoId, newPendingId, { streaming: false, pending: false, error: m }); setIsGenerating(false); },
+                    }
+                  );
+                })();
+              }
+            }
+          }
         },
         onError: (msg) => {
           updateMessage(convoId, pendingMsgId, { streaming: false, pending: false, error: msg });
@@ -554,8 +618,8 @@ export default function Page() {
                     <button onClick={toggleThink} className={`flex h-7 items-center gap-1 rounded-lg border px-2 text-xs ${thinkEnabled ? 'border-[var(--accent)]/40 bg-[var(--primary-btn)]/10 text-[var(--accent)]' : 'border-[var(--border-default)] text-[var(--text-secondary)] hover:bg-[var(--bg-surface)]'}`}>
                       <Brain size={12} /> Think
                     </button>
-                    <button onClick={toggleSnapgent} className={`flex h-7 items-center gap-1 rounded-lg border px-2 text-xs ${snapgentEnabled ? 'border-[var(--accent)]/40 bg-[var(--primary-btn)]/10 text-[var(--accent)]' : 'border-[var(--border-default)] text-[var(--text-secondary)] hover:bg-[var(--bg-surface)]'}`}>
-                      <Terminal size={12} /> VS Code
+                    <button onClick={() => { toggleSnapgent(); if (!bridgeConnected) connectBridge(); }} className={`flex h-7 items-center gap-1 rounded-lg border px-2 text-xs ${snapgentEnabled ? (bridgeConnected ? 'border-green-500/40 bg-green-500/10 text-green-400' : 'border-amber-500/40 bg-amber-500/10 text-amber-400') : 'border-[var(--border-default)] text-[var(--text-secondary)] hover:bg-[var(--bg-surface)]'}`} title={bridgeConnected ? 'Bridge connected' : 'Bridge offline — start start.bat on your machine'}>
+                      <Terminal size={12} /> VS Code{snapgentEnabled ? (bridgeConnected ? '' : ' (offline)') : ''}
                     </button>
                     <div className="flex-1" />
                     <button onClick={handleSend} disabled={!composerText.trim()} className="flex h-7 w-7 items-center justify-center rounded-full bg-[var(--primary-btn)] text-white disabled:opacity-40 hover:bg-[var(--accent-hover)] transition">
