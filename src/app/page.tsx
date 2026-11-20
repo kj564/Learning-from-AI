@@ -22,6 +22,7 @@ import {
   ChevronDown, FileCode, FileText, Folder, FolderOpen, ChevronRight,
   RefreshCw, Copy, Check, Trash2, Archive, ArchiveRestore, Pen,
   Settings, Sun, Moon, Star, Zap, MessageSquare, Share2,
+  Terminal,
 } from 'lucide-react';
 import { useTheme } from 'next-themes';
 import CodeWorkspace from '@/components/librechat/CodeWorkspace';
@@ -85,6 +86,8 @@ export default function Page() {
   const toggleWebSearch = store((s) => s.toggleWebSearch);
   const thinkEnabled = store((s) => s.thinkEnabled);
   const toggleThink = store((s) => s.toggleThink);
+  const snapgentEnabled = store((s) => s.snapgentEnabled);
+  const toggleSnapgent = store((s) => s.toggleSnapgent);
   const isGenerating = store((s) => s.isGenerating);
   const setIsGenerating = store((s) => s.setIsGenerating);
   const newConversation = store((s) => s.newConversation);
@@ -253,7 +256,7 @@ export default function Page() {
 
     const sessionId = sessionByConversation[convoId];
     const controller = streamChat(
-      { message: augmentedText, sessionId, conversationId: convoId, model: selectedModel, project: activeProject || undefined, assistant: activeAssistant ? { id: activeAssistant.id, name: activeAssistant.name, systemPrompt: activeAssistant.systemPrompt } : null, think: thinkEnabled },
+      { message: augmentedText, sessionId, conversationId: convoId, model: selectedModel, project: activeProject || undefined, assistant: activeAssistant ? { id: activeAssistant.id, name: activeAssistant.name, systemPrompt: activeAssistant.systemPrompt } : null, think: thinkEnabled, snapgent: snapgentEnabled },
       {
         onTextDelta: (delta) => updateMessage(convoId, pendingMsgId, (prev) => ({ content: (prev?.content || '') + delta })),
         onTextReplace: (text) => updateMessage(convoId, pendingMsgId, { content: text }),
@@ -550,6 +553,9 @@ export default function Page() {
                     </button>
                     <button onClick={toggleThink} className={`flex h-7 items-center gap-1 rounded-lg border px-2 text-xs ${thinkEnabled ? 'border-[var(--accent)]/40 bg-[var(--primary-btn)]/10 text-[var(--accent)]' : 'border-[var(--border-default)] text-[var(--text-secondary)] hover:bg-[var(--bg-surface)]'}`}>
                       <Brain size={12} /> Think
+                    </button>
+                    <button onClick={toggleSnapgent} className={`flex h-7 items-center gap-1 rounded-lg border px-2 text-xs ${snapgentEnabled ? 'border-[var(--accent)]/40 bg-[var(--primary-btn)]/10 text-[var(--accent)]' : 'border-[var(--border-default)] text-[var(--text-secondary)] hover:bg-[var(--bg-surface)]'}`}>
+                      <Terminal size={12} /> VS Code
                     </button>
                     <div className="flex-1" />
                     <button onClick={handleSend} disabled={!composerText.trim()} className="flex h-7 w-7 items-center justify-center rounded-full bg-[var(--primary-btn)] text-white disabled:opacity-40 hover:bg-[var(--accent-hover)] transition">

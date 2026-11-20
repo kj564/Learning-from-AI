@@ -24,6 +24,8 @@ import { NextRequest } from 'next/server';
 import ZAI from 'z-ai-web-dev-sdk';
 import { db } from '@/lib/db';
 import { TOOL_DEFINITIONS, toolsToSystemPrompt } from '@/lib/tool-definitions';
+import { buildSnapgentPrompt, extractSnapgentCommand } from '@/lib/snapgent-prompt';
+import { connectBridge, isBridgeConnected, runTool } from '@/lib/snapgent';
 
 export const AI_MODELS = [
   { id: 'glm-5.3', name: 'GLM-5.3', description: 'Most advanced — flagship model', glmModel: 'glm-5.3' },
@@ -104,7 +106,7 @@ To call a tool, respond with ONLY this JSON format and nothing else:
 
 The system will execute the tool and send the result back. Then you can explain what happened to the user.`;
 
-function buildSystemPrompt(project: any, assistant: any, tools = TOOL_DEFINITIONS): string {
+function buildSystemPrompt(project: any, assistant: any, tools = TOOL_DEFINITIONS, snapgent = false): string {
   let p = BASE_SYSTEM_PROMPT;
   if (assistant?.systemPrompt) {
     p += `\n\n# Assistant Persona\n\n${assistant.systemPrompt}`;
@@ -123,7 +125,14 @@ function buildSystemPrompt(project: any, assistant: any, tools = TOOL_DEFINITION
     }
     p += context;
   }
-  p += toolsToSystemPrompt(tools);
+  if (snapgent) {
+    // Snapgent mode: inject the snapgent VS Code MCP system prompt instead of
+    // the regular tool prompt. The AI outputs {"command":"...","params":{...}}
+    // which we parse and forward to the local bridge.
+    p += buildSnapgentPrompt();
+  } else {
+    p += toolsToSystemPrompt(tools);
+  }
   return p;
 }
 
@@ -313,7 +322,8 @@ export async function POST(req: NextRequest) {
     project,
     model,
     assistant,
-    think, // NEW: boolean — when true, SDK enables reasoning mode
+    think,
+    snapgent, // NEW: boolean — when true, inject snapgent VS Code MCP system prompt + parse commands
   } = body as {
     message: string;
     sessionId?: string;
@@ -322,6 +332,7 @@ export async function POST(req: NextRequest) {
     model?: string;
     assistant?: { id: string; name: string; systemPrompt: string } | null;
     think?: boolean;
+    snapgent?: boolean;
   };
 
   if (!message || typeof message !== 'string') {
@@ -364,7 +375,7 @@ export async function POST(req: NextRequest) {
   }
 
   const sid = sessionId || convoId || `chat_${Date.now()}`;
-  const systemPrompt = buildSystemPrompt(project, assistant);
+  const systemPrompt = buildSystemPrompt(project, assistant, TOOL_DEFINITIONS, snapgent);
 
   // Get or create the session's in-memory history
   sweepExpired();
@@ -396,6 +407,61 @@ export async function POST(req: NextRequest) {
           }
 
           const toolCall = extractToolCall(raw);
+
+          // === Snapgent mode: check for snapgent command format ===
+          // In snapgent mode, the AI outputs {"command":"read_file","params":{"path":"src/app.ts"}}
+          // instead of our regular {"tool":"file_read","args":{...}} format.
+          // We detect it, forward to the local bridge, and feed results back.
+          if (!toolCall && snapgent) {
+            const snapgentCmd = extractSnapgentCommand(raw);
+            if (snapgentCmd) {
+              // Strip the JSON from visible text
+              let visibleText = raw;
+              const trimmed = raw.trim();
+              if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
+                visibleText = '';
+              } else {
+                const found = findBalancedJson(raw);
+                if (found) visibleText = (raw.slice(0, found.start) + raw.slice(found.end)).trim();
+              }
+              sseEmit(controller, 'text-replace', { text: visibleText });
+
+              // Emit tool_use event (same format as regular tools)
+              const toolUseId = `snapgent_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+              sseEmit(controller, 'tool_use', { id: toolUseId, name: snapgentCmd.command, input: snapgentCmd.params });
+
+              // Ensure bridge is connected
+              if (!isBridgeConnected()) {
+                await connectBridge();
+              }
+
+              // Execute via bridge
+              const bridgeResult = await runTool('vscode', snapgentCmd.command, snapgentCmd.params);
+              toolExecutions.push({
+                tool: snapgentCmd.command,
+                args: snapgentCmd.params,
+                success: bridgeResult.success,
+              });
+
+              const resultStr = bridgeResult.success
+                ? JSON.stringify(bridgeResult.result).slice(0, 8000)
+                : `Snapgent error: ${bridgeResult.error || 'Unknown'}`;
+
+              sseEmit(controller, 'tool_result', {
+                tool_use_id: toolUseId,
+                tool: snapgentCmd.command,
+                success: bridgeResult.success,
+                result: resultStr,
+              });
+
+              // Feed result back to AI and continue the loop
+              history.push({ role: 'assistant', content: raw });
+              history.push({ role: 'user', content: `Output of '${snapgentCmd.command}': ${resultStr}` });
+              finalText = raw;
+              continue; // next round
+            }
+          }
+
           if (!toolCall) {
             finalText = raw;
             history.push({ role: 'assistant', content: raw });

@@ -237,6 +237,7 @@ export function streamChat(
     project?: Project;
     assistant?: { id: string; name: string; systemPrompt: string } | null;
     think?: boolean;
+    snapgent?: boolean;
   },
   cb: StreamChatCallbacks
 ): AbortController {
@@ -255,6 +256,7 @@ export function streamChat(
           project: opts.project,
           assistant: opts.assistant,
           think: opts.think,
+          snapgent: opts.snapgent,
         }),
         signal: controller.signal,
       });
