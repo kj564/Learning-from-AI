@@ -284,7 +284,7 @@ export default function Page() {
               const execs = [...(prev?.toolExecutions || [])];
               for (let i = execs.length - 1; i >= 0; i--) {
                 if (execs[i].tool === event.command && execs[i].success === false) {
-                  execs[i] = { ...execs[i], success: result.success, result: result.error || JSON.stringify(result.result).slice(0, 2000) };
+                  execs[i] = { ...execs[i], success: result.success, result: result.error || (result.text || '').slice(0, 2000) };
                   break;
                 }
               }
@@ -293,7 +293,7 @@ export default function Page() {
 
             // Send result back as a new user message — triggers new AI stream
             const resultText = result.success
-              ? JSON.stringify(result.result).slice(0, 8000)
+              ? result.text || JSON.stringify(result).slice(0, 8000)
               : `Snapgent error: ${result.error}`;
             addMessage(convoId, { id: genId('msg'), role: 'user', content: `Output of '${event.command}': ${resultText}`, createdAt: Date.now() });
 
@@ -318,13 +318,13 @@ export default function Page() {
                       const execs = [...(prev?.toolExecutions || [])];
                       for (let i = execs.length - 1; i >= 0; i--) {
                         if (execs[i].tool === ev.command && execs[i].success === false) {
-                          execs[i] = { ...execs[i], success: r2.success, result: r2.error || JSON.stringify(r2.result).slice(0, 2000) };
+                          execs[i] = { ...execs[i], success: r2.success, result: r2.error || (r2.text || '').slice(0, 2000) };
                           break;
                         }
                       }
                       return { toolExecutions: execs };
                     });
-                    const r2Text = r2.success ? JSON.stringify(r2.result).slice(0, 8000) : `Snapgent error: ${r2.error}`;
+                    const r2Text = r2.success ? r2.text || JSON.stringify(r2).slice(0, 8000) : `Snapgent error: ${r2.error}`;
                     addMessage(convoId, { id: genId('msg'), role: 'user', content: `Output of '${ev.command}': ${r2Text}`, createdAt: Date.now() });
                     const p3 = genId('msg');
                     addMessage(convoId, { id: p3, role: 'assistant', content: '', createdAt: Date.now(), pending: true, streaming: true });

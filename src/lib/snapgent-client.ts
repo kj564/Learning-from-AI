@@ -1,27 +1,30 @@
 /**
- * Snapgent bridge client — CLIENT-SIDE ONLY (runs in browser).
+ * Snapgent bridge client — CLIENT-SIDE ONLY (browser connects to user's bridge).
  *
- * The browser connects directly to ws://127.0.0.1:17613 on the USER's machine.
- * The server (cloud) cannot reach the user's local bridge, so all bridge
- * communication must happen from the browser.
+ * Protocol (from bridge.py — EXACT match):
+ *   → { "type": "ping", "id": N }
+ *   ← { "type": "pong", "id": N }
  *
- * Flow:
- *   1. Browser opens WebSocket to ws://127.0.0.1:17613
- *   2. If connected → snapgent mode is available
- *   3. Client detects snapgent commands in AI streamed text
- *   4. Client executes commands via bridge
- *   5. Client sends results back as new chat messages
+ *   → { "type": "call_tool", "id": N, "name": "read_file", "arguments": { "path": "..." }, "server": "vscode" }
+ *   ← { "type": "tool_result", "id": N, "ok": true, "text": "...", "images": [...] }
+ *   ← { "type": "tool_result", "id": N, "ok": false, "error": "..." }
+ *
+ *   → { "type": "list_tools", "id": N }
+ *   ← { "type": "tools", "id": N, "tools": [...], "servers": [...] }
+ *
+ *   On connect, bridge sends: { "type": "connected", "bridge_version": "...", "mcp_alive": bool, "tools": [...], "servers": [...] }
  */
 
 'use client';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect } from 'react';
 
 const BRIDGE_URL = 'ws://127.0.0.1:17613';
 const REQUEST_TIMEOUT = 130000;
 
 let ws: WebSocket | null = null;
 let connected = false;
+let bridgeReady = false; // true after "connected" message from bridge
 let nextId = 1;
 const pending = new Map<number, { resolve: (v: any) => void; reject: (e: any) => void; timer: any }>();
 let listeners: ((connected: boolean) => void)[] = [];
@@ -31,51 +34,38 @@ function notify() {
   for (const fn of listeners) { try { fn(connected); } catch {} }
 }
 
-/** Connect to the bridge (browser → ws://127.0.0.1:17613 on user's machine). */
 export function connectBridge(): Promise<boolean> {
   return new Promise((resolve) => {
     if (connected && ws && ws.readyState === WebSocket.OPEN) { resolve(true); return; }
     if (ws) { try { ws.close(); } catch {} }
-
-    try {
-      ws = new WebSocket(BRIDGE_URL);
-    } catch {
-      resolve(false);
-      return;
-    }
-
+    try { ws = new WebSocket(BRIDGE_URL); } catch { resolve(false); return; }
     const timeout = setTimeout(() => { if (!connected) resolve(false); }, 3000);
 
-    ws.onopen = () => {
-      clearTimeout(timeout);
-      connected = true;
-      if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
-      notify();
-      resolve(true);
-    };
-
+    ws.onopen = () => { clearTimeout(timeout); connected = true; if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; } notify(); resolve(true); };
     ws.onclose = () => {
-      clearTimeout(timeout);
-      connected = false;
-      ws = null;
+      clearTimeout(timeout); connected = false; bridgeReady = false; ws = null;
       for (const [id, req] of pending) { clearTimeout(req.timer); req.reject(new Error('disconnected')); pending.delete(id); }
       notify();
       if (!reconnectTimer) reconnectTimer = setTimeout(() => { reconnectTimer = null; connectBridge(); }, 5000);
       if (!connected) resolve(false);
     };
-
     ws.onerror = () => {};
-
     ws.onmessage = (event) => {
       try {
         const msg = JSON.parse(event.data);
+        // Handle "connected" message (bridge sends on connect)
+        if (msg.type === 'connected') { bridgeReady = true; return; }
+        // Handle response to our request
         const id = msg.id;
         if (id && pending.has(id)) {
           const req = pending.get(id)!;
           clearTimeout(req.timer);
           pending.delete(id);
-          if (msg.type === 'error' || msg.error) req.reject(new Error(msg.error || 'error'));
-          else req.resolve(msg.result ?? msg);
+          if (msg.ok === false || msg.type === 'error') {
+            req.reject(new Error(msg.error || msg.text || 'Bridge error'));
+          } else {
+            req.resolve(msg);
+          }
         }
       } catch {}
     };
@@ -85,17 +75,13 @@ export function connectBridge(): Promise<boolean> {
 export function disconnectBridge() {
   if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
   if (ws) { try { ws.close(); } catch {} ws = null; }
-  connected = false;
-  notify();
+  connected = false; bridgeReady = false; notify();
 }
 
-export function isBridgeConnected(): boolean {
-  return connected;
-}
+export function isBridgeConnected(): boolean { return connected && bridgeReady; }
 
 export function onBridgeStatus(fn: (connected: boolean) => void): () => void {
-  listeners.push(fn);
-  fn(connected);
+  listeners.push(fn); fn(isBridgeConnected());
   return () => { listeners = listeners.filter((f) => f !== fn); };
 }
 
@@ -115,26 +101,37 @@ export async function pingBridge(): Promise<boolean> {
 }
 
 export async function listServers(): Promise<any[]> {
-  try { const r = await bridgeRequest('list_mcp_servers'); return Array.isArray(r) ? r : (r?.servers || []); } catch { return []; }
+  try {
+    const r = await bridgeRequest('list_tools');
+    return r.servers || [];
+  } catch { return []; }
 }
 
 export async function listTools(server: string): Promise<any[]> {
-  try { const r = await bridgeRequest('list_tools', { server }); return Array.isArray(r) ? r : (r?.tools || []); } catch { return []; }
+  try {
+    const r = await bridgeRequest('list_tools');
+    return r.tools || [];
+  } catch { return []; }
 }
 
-export async function runTool(server: string, name: string, args: Record<string, unknown>): Promise<{ success: boolean; result?: any; error?: string }> {
+/** Execute a tool. Returns { success, text, images } matching bridge protocol. */
+export async function runTool(server: string, name: string, args: Record<string, unknown>): Promise<{ success: boolean; text?: string; images?: any[]; error?: string }> {
   try {
-    const r = await bridgeRequest('run_tool', { server, name, arguments: args });
-    if (r && typeof r === 'object' && 'success' in r) return r;
-    return { success: true, result: r };
+    const r = await bridgeRequest('call_tool', { name, arguments: args, server });
+    // Bridge returns: { type: "tool_result", id, ok: true/false, text, images, error }
+    return {
+      success: r.ok !== false,
+      text: r.text,
+      images: r.images,
+      error: r.error,
+    };
   } catch (e) {
     return { success: false, error: e instanceof Error ? e.message : String(e) };
   }
 }
 
-/** React hook for bridge status. */
 export function useBridgeStatus() {
-  const [status, setStatus] = useState(connected);
+  const [status, setStatus] = useState(isBridgeConnected());
   useEffect(() => {
     const unsub = onBridgeStatus(setStatus);
     return unsub;
@@ -142,13 +139,11 @@ export function useBridgeStatus() {
   return status;
 }
 
-/** Auto-connect on first client render. */
 export function useAutoConnectBridge() {
   useEffect(() => {
     connectBridge();
-    return () => { /* don't disconnect on unmount — keep for app lifetime */ };
+    return () => {};
   }, []);
 }
 
-/** Extract snapgent command from AI text (re-exported from snapgent-prompt). */
 export { extractSnapgentCommand } from './snapgent-prompt';
