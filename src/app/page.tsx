@@ -26,6 +26,7 @@ import {
 } from 'lucide-react';
 import { useTheme } from 'next-themes';
 import CodeWorkspace from '@/components/librechat/CodeWorkspace';
+import SnapgentBar, { dispatchSnapgentCommand } from '@/components/librechat/SnapgentBar';
 import Markdown from '@/components/librechat/Markdown';
 import CodeBlock from '@/components/librechat/CodeBlock';
 import ImageGenDialog from '@/components/librechat/ImageGenDialog';
@@ -266,84 +267,47 @@ export default function Page() {
         onTextDelta: (delta) => updateMessage(convoId, pendingMsgId, (prev) => ({ content: (prev?.content || '') + delta })),
         onTextReplace: (text) => updateMessage(convoId, pendingMsgId, { content: text }),
         onSnapgentCommand: (event) => {
-          // Server detected a snapgent command in AI output and emitted this event.
-          // The CLIENT (browser) executes it via its own WebSocket to the bridge.
-          // After execution, we send the result back as a new message → new AI stream.
-
-          // Add tool execution card to the pending message
+          // Dispatch to SnapgentBar for chip display + bridge execution
+          const chipId = dispatchSnapgentCommand(event.command, event.params);
+          // Also add to message tool cards
           updateMessage(convoId, pendingMsgId, (prev) => ({
             toolExecutions: [...(prev?.toolExecutions || []), { tool: event.command, args: event.params, success: false }],
           }));
-
-          // Execute via bridge (client-side WebSocket to ws://127.0.0.1:17613)
-          (async () => {
-            const result = await runTool('vscode', event.command, event.params);
-
-            // Update tool execution with result
+          // SnapgentBar handles execution + result — listen for result event
+          const resultHandler = async (e: CustomEvent) => {
+            const { command, result } = e.detail;
+            if (command !== event.command) return;
+            window.removeEventListener('snapgent:result' as any, resultHandler as EventListener);
+            // Update tool card
             updateMessage(convoId, pendingMsgId, (prev) => {
               const execs = [...(prev?.toolExecutions || [])];
               for (let i = execs.length - 1; i >= 0; i--) {
-                if (execs[i].tool === event.command && execs[i].success === false) {
+                if (execs[i].tool === command && execs[i].success === false) {
                   execs[i] = { ...execs[i], success: result.success, result: result.error || (result.text || '').slice(0, 2000) };
                   break;
                 }
               }
               return { toolExecutions: execs };
             });
-
-            // Send result back as a new user message — triggers new AI stream
-            const resultText = result.success
-              ? result.text || JSON.stringify(result).slice(0, 8000)
-              : `Snapgent error: ${result.error}`;
-            addMessage(convoId, { id: genId('msg'), role: 'user', content: `Output of '${event.command}': ${resultText}`, createdAt: Date.now() });
-
-            // Start a new AI stream with the tool result
+            // Send result back as new message → new AI stream
+            const resultText = result.success ? (result.text || '').slice(0, 8000) : `Snapgent error: ${result.error}`;
+            addMessage(convoId, { id: genId('msg'), role: 'user', content: `Output of '${command}': ${resultText}`, createdAt: Date.now() });
             const newPendingId = genId('msg');
             addMessage(convoId, { id: newPendingId, role: 'assistant', content: '', createdAt: Date.now(), pending: true, streaming: true });
             setIsGenerating(true);
             const sid = useStore.getState().sessionByConversation[convoId];
             streamChat(
-              { message: `Output of '${event.command}': ${resultText}`, sessionId: sid, conversationId: convoId, model: selectedModel, snapgent: snapgentEnabled && bridgeConnected },
+              { message: `Output of '${command}': ${resultText}`, sessionId: sid, conversationId: convoId, model: selectedModel, snapgent: snapgentEnabled && bridgeConnected },
               {
-                onTextDelta: (delta) => updateMessage(convoId, newPendingId, (prev) => ({ content: (prev?.content || '') + delta })),
-                onTextReplace: (text) => updateMessage(convoId, newPendingId, { content: text }),
-                onSnapgentCommand: (ev) => {
-                  // Nested snapgent command — same flow (recursive)
-                  updateMessage(convoId, newPendingId, (prev) => ({
-                    toolExecutions: [...(prev?.toolExecutions || []), { tool: ev.command, args: ev.params, success: false }],
-                  }));
-                  (async () => {
-                    const r2 = await runTool('vscode', ev.command, ev.params);
-                    updateMessage(convoId, newPendingId, (prev) => {
-                      const execs = [...(prev?.toolExecutions || [])];
-                      for (let i = execs.length - 1; i >= 0; i--) {
-                        if (execs[i].tool === ev.command && execs[i].success === false) {
-                          execs[i] = { ...execs[i], success: r2.success, result: r2.error || (r2.text || '').slice(0, 2000) };
-                          break;
-                        }
-                      }
-                      return { toolExecutions: execs };
-                    });
-                    const r2Text = r2.success ? r2.text || JSON.stringify(r2).slice(0, 8000) : `Snapgent error: ${r2.error}`;
-                    addMessage(convoId, { id: genId('msg'), role: 'user', content: `Output of '${ev.command}': ${r2Text}`, createdAt: Date.now() });
-                    const p3 = genId('msg');
-                    addMessage(convoId, { id: p3, role: 'assistant', content: '', createdAt: Date.now(), pending: true, streaming: true });
-                    const s3 = useStore.getState().sessionByConversation[convoId];
-                    streamChat(
-                      { message: `Output of '${ev.command}': ${r2Text}`, sessionId: s3, conversationId: convoId, model: selectedModel, snapgent: snapgentEnabled && bridgeConnected },
-                      {
-                        onTextDelta: (d) => updateMessage(convoId, p3, (prev) => ({ content: (prev?.content || '') + d })),
-                        onDone: (e) => { setSessionForConversation(convoId, e.sessionId); updateMessage(convoId, p3, { streaming: false, pending: false }); setIsGenerating(false); },
-                        onError: (m) => { updateMessage(convoId, p3, { streaming: false, pending: false, error: m }); setIsGenerating(false); },
-                      }
-                    );
-                  })();
-                },
+                onTextDelta: (d) => updateMessage(convoId, newPendingId, (prev) => ({ content: (prev?.content || '') + d })),
+                onTextReplace: (t) => updateMessage(convoId, newPendingId, { content: t }),
+                onSnapgentCommand: (ev) => { dispatchSnapgentCommand(ev.command, ev.params); },
                 onDone: (e) => { setSessionForConversation(convoId, e.sessionId); updateMessage(convoId, newPendingId, { streaming: false, pending: false }); setIsGenerating(false); },
                 onError: (m) => { updateMessage(convoId, newPendingId, { streaming: false, pending: false, error: m }); setIsGenerating(false); },
               }
             );
-          })();
+          };
+          window.addEventListener('snapgent:result' as any, resultHandler as EventListener);
         },
         onToolUse: (event) => {
           updateMessage(convoId, pendingMsgId, (prev) => ({ toolExecutions: [...(prev?.toolExecutions || []), { tool: event.name, args: event.input, success: false }] }));
@@ -606,6 +570,10 @@ export default function Page() {
             <div className="flex h-full flex-col items-center justify-center px-4 pb-24">
               <div className="w-full max-w-2xl">
                 <h1 className="mb-6 text-center text-2xl font-semibold text-[var(--text-primary)]">How can I help you today?</h1>
+                {/* Snapgent bar in welcome screen */}
+                {snapgentEnabled && <SnapgentBar onCommandResult={(cmd, result) => {
+                  window.dispatchEvent(new CustomEvent('snapgent:result', { detail: { command: cmd, result } }));
+                }} />}
                 {/* Composer in welcome screen */}
                 <div className="rounded-2xl border border-[var(--border-default)] bg-[var(--bg-surface)] p-3 shadow-lg">
                   <textarea
@@ -712,6 +680,11 @@ export default function Page() {
             </div>
           )}
         </div>
+
+        {/* Snapgent bar — shows above composer when snapgent enabled */}
+        {snapgentEnabled && <SnapgentBar onCommandResult={(cmd, result) => {
+          window.dispatchEvent(new CustomEvent('snapgent:result', { detail: { command: cmd, result } }));
+        }} />}
 
         {/* === COMPOSER (when messages exist) === */}
         {activeMessages.length > 0 && (
