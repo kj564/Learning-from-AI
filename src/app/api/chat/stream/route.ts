@@ -408,10 +408,20 @@ export async function POST(req: NextRequest) {
 
           const toolCall = extractToolCall(raw);
 
-          // === Snapgent mode: check for snapgent command format ===
-          // In snapgent mode, the AI outputs {"command":"read_file","params":{"path":"src/app.ts"}}
-          // instead of our regular {"tool":"file_read","args":{...}} format.
-          // We detect it, forward to the local bridge, and feed results back.
+          // === Snapgent mode: PASS commands through to client ===
+          // When snapgent=true, the AI outputs {"command":"...","params":{...}}.
+          // The SERVER does NOT execute these — the browser (client-side) has the
+          // WebSocket connection to the user's local bridge (ws://127.0.0.1:17613).
+          // The server cannot reach the bridge because it runs in the cloud.
+          //
+          // So the server just passes the raw AI text through to the client.
+          // The client detects the command in onDone, executes it via bridge,
+          // and sends the result back as a new message (which starts a new stream).
+          //
+          // We still strip the JSON from visible text and emit tool_use/tool_result
+          // events so the UI shows a clean tool card — but with a special
+          // "snapgent:true" flag that tells the client "you handle execution".
+
           if (!toolCall && snapgent) {
             const snapgentCmd = extractSnapgentCommand(raw);
             if (snapgentCmd) {
@@ -426,39 +436,19 @@ export async function POST(req: NextRequest) {
               }
               sseEmit(controller, 'text-replace', { text: visibleText });
 
-              // Emit tool_use event (same format as regular tools)
-              const toolUseId = `snapgent_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-              sseEmit(controller, 'tool_use', { id: toolUseId, name: snapgentCmd.command, input: snapgentCmd.params });
-
-              // Ensure bridge is connected
-              if (!isBridgeConnected()) {
-                await connectBridge();
-              }
-
-              // Execute via bridge
-              const bridgeResult = await runTool('vscode', snapgentCmd.command, snapgentCmd.params);
-              toolExecutions.push({
-                tool: snapgentCmd.command,
-                args: snapgentCmd.params,
-                success: bridgeResult.success,
+              // Emit a "snapgent_command" event — client detects this and executes
+              // the command via its own bridge WebSocket. Do NOT emit tool_result
+              // here (the server can't execute it).
+              sseEmit(controller, 'snapgent_command', {
+                command: snapgentCmd.command,
+                params: snapgentCmd.params,
               });
 
-              const resultStr = bridgeResult.success
-                ? JSON.stringify(bridgeResult.result).slice(0, 8000)
-                : `Snapgent error: ${bridgeResult.error || 'Unknown'}`;
-
-              sseEmit(controller, 'tool_result', {
-                tool_use_id: toolUseId,
-                tool: snapgentCmd.command,
-                success: bridgeResult.success,
-                result: resultStr,
-              });
-
-              // Feed result back to AI and continue the loop
-              history.push({ role: 'assistant', content: raw });
-              history.push({ role: 'user', content: `Output of '${snapgentCmd.command}': ${resultStr}` });
-              finalText = raw;
-              continue; // next round
+              // Stop the server-side loop — the client will send a new message
+              // with the tool result, which starts a fresh stream.
+              finalText = visibleText;
+              history.push({ role: 'assistant', content: visibleText || `[executed: ${snapgentCmd.command}]` });
+              break; // exit the tool loop — wait for client to send result
             }
           }
 

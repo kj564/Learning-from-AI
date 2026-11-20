@@ -265,6 +265,86 @@ export default function Page() {
       {
         onTextDelta: (delta) => updateMessage(convoId, pendingMsgId, (prev) => ({ content: (prev?.content || '') + delta })),
         onTextReplace: (text) => updateMessage(convoId, pendingMsgId, { content: text }),
+        onSnapgentCommand: (event) => {
+          // Server detected a snapgent command in AI output and emitted this event.
+          // The CLIENT (browser) executes it via its own WebSocket to the bridge.
+          // After execution, we send the result back as a new message → new AI stream.
+
+          // Add tool execution card to the pending message
+          updateMessage(convoId, pendingMsgId, (prev) => ({
+            toolExecutions: [...(prev?.toolExecutions || []), { tool: event.command, args: event.params, success: false }],
+          }));
+
+          // Execute via bridge (client-side WebSocket to ws://127.0.0.1:17613)
+          (async () => {
+            const result = await runTool('vscode', event.command, event.params);
+
+            // Update tool execution with result
+            updateMessage(convoId, pendingMsgId, (prev) => {
+              const execs = [...(prev?.toolExecutions || [])];
+              for (let i = execs.length - 1; i >= 0; i--) {
+                if (execs[i].tool === event.command && execs[i].success === false) {
+                  execs[i] = { ...execs[i], success: result.success, result: result.error || JSON.stringify(result.result).slice(0, 2000) };
+                  break;
+                }
+              }
+              return { toolExecutions: execs };
+            });
+
+            // Send result back as a new user message — triggers new AI stream
+            const resultText = result.success
+              ? JSON.stringify(result.result).slice(0, 8000)
+              : `Snapgent error: ${result.error}`;
+            addMessage(convoId, { id: genId('msg'), role: 'user', content: `Output of '${event.command}': ${resultText}`, createdAt: Date.now() });
+
+            // Start a new AI stream with the tool result
+            const newPendingId = genId('msg');
+            addMessage(convoId, { id: newPendingId, role: 'assistant', content: '', createdAt: Date.now(), pending: true, streaming: true });
+            setIsGenerating(true);
+            const sid = useStore.getState().sessionByConversation[convoId];
+            streamChat(
+              { message: `Output of '${event.command}': ${resultText}`, sessionId: sid, conversationId: convoId, model: selectedModel, snapgent: snapgentEnabled && bridgeConnected },
+              {
+                onTextDelta: (delta) => updateMessage(convoId, newPendingId, (prev) => ({ content: (prev?.content || '') + delta })),
+                onTextReplace: (text) => updateMessage(convoId, newPendingId, { content: text }),
+                onSnapgentCommand: (ev) => {
+                  // Nested snapgent command — same flow (recursive)
+                  updateMessage(convoId, newPendingId, (prev) => ({
+                    toolExecutions: [...(prev?.toolExecutions || []), { tool: ev.command, args: ev.params, success: false }],
+                  }));
+                  (async () => {
+                    const r2 = await runTool('vscode', ev.command, ev.params);
+                    updateMessage(convoId, newPendingId, (prev) => {
+                      const execs = [...(prev?.toolExecutions || [])];
+                      for (let i = execs.length - 1; i >= 0; i--) {
+                        if (execs[i].tool === ev.command && execs[i].success === false) {
+                          execs[i] = { ...execs[i], success: r2.success, result: r2.error || JSON.stringify(r2.result).slice(0, 2000) };
+                          break;
+                        }
+                      }
+                      return { toolExecutions: execs };
+                    });
+                    const r2Text = r2.success ? JSON.stringify(r2.result).slice(0, 8000) : `Snapgent error: ${r2.error}`;
+                    addMessage(convoId, { id: genId('msg'), role: 'user', content: `Output of '${ev.command}': ${r2Text}`, createdAt: Date.now() });
+                    const p3 = genId('msg');
+                    addMessage(convoId, { id: p3, role: 'assistant', content: '', createdAt: Date.now(), pending: true, streaming: true });
+                    const s3 = useStore.getState().sessionByConversation[convoId];
+                    streamChat(
+                      { message: `Output of '${ev.command}': ${r2Text}`, sessionId: s3, conversationId: convoId, model: selectedModel, snapgent: snapgentEnabled && bridgeConnected },
+                      {
+                        onTextDelta: (d) => updateMessage(convoId, p3, (prev) => ({ content: (prev?.content || '') + d })),
+                        onDone: (e) => { setSessionForConversation(convoId, e.sessionId); updateMessage(convoId, p3, { streaming: false, pending: false }); setIsGenerating(false); },
+                        onError: (m) => { updateMessage(convoId, p3, { streaming: false, pending: false, error: m }); setIsGenerating(false); },
+                      }
+                    );
+                  })();
+                },
+                onDone: (e) => { setSessionForConversation(convoId, e.sessionId); updateMessage(convoId, newPendingId, { streaming: false, pending: false }); setIsGenerating(false); },
+                onError: (m) => { updateMessage(convoId, newPendingId, { streaming: false, pending: false, error: m }); setIsGenerating(false); },
+              }
+            );
+          })();
+        },
         onToolUse: (event) => {
           updateMessage(convoId, pendingMsgId, (prev) => ({ toolExecutions: [...(prev?.toolExecutions || []), { tool: event.name, args: event.input, success: false }] }));
           if (event.name === 'file_write') {
@@ -296,65 +376,6 @@ export default function Page() {
           updateMessage(convoId, pendingMsgId, { streaming: false, pending: false });
           setIsGenerating(false);
           abortRef.current = null;
-
-          // === Client-side snapgent command detection ===
-          // After AI finishes streaming, check if the output contains a snapgent
-          // command ({"command":"...","params":{...}}). If yes and bridge is
-          // connected, execute it client-side and send the result back as a new
-          // user message — which triggers a new AI stream (the agentic loop).
-          if (snapgentEnabled && bridgeConnected) {
-            const msg = useStore.getState().messagesByConversation[convoId]?.find((m) => m.id === pendingMsgId);
-            if (msg?.content) {
-              const cmd = extractSnapgentCommand(msg.content);
-              if (cmd) {
-                // Strip the JSON from visible text
-                const visibleText = msg.content.replace(/\{[\s\S]*?"command"[\s\S]*?"params"[\s\S]*?\}/, '').trim();
-                updateMessage(convoId, pendingMsgId, { content: visibleText });
-
-                // Add tool execution card
-                updateMessage(convoId, pendingMsgId, (prev) => ({
-                  toolExecutions: [...(prev?.toolExecutions || []), { tool: cmd.command, args: cmd.params, success: false }],
-                }));
-
-                // Execute via bridge (client-side)
-                (async () => {
-                  const result = await runTool('vscode', cmd.command, cmd.params);
-                  // Update tool execution with result
-                  updateMessage(convoId, pendingMsgId, (prev) => {
-                    const execs = [...(prev?.toolExecutions || [])];
-                    for (let i = execs.length - 1; i >= 0; i--) {
-                      if (execs[i].tool === cmd.command && execs[i].success === false) {
-                        execs[i] = { ...execs[i], success: result.success, result: result.error || JSON.stringify(result.result).slice(0, 2000) };
-                        break;
-                      }
-                    }
-                    return { toolExecutions: execs };
-                  });
-
-                  // Send result back as a new user message — triggers new AI stream
-                  const resultText = result.success
-                    ? JSON.stringify(result.result).slice(0, 8000)
-                    : `Snapgent error: ${result.error}`;
-                  const followUpMsg = { id: genId('msg'), role: 'user' as const, content: `Output of '${cmd.command}': ${resultText}`, createdAt: Date.now() };
-                  addMessage(convoId, followUpMsg);
-
-                  // Trigger a new AI stream with the tool result
-                  const newPendingId = genId('msg');
-                  addMessage(convoId, { id: newPendingId, role: 'assistant', content: '', createdAt: Date.now(), pending: true, streaming: true });
-                  setIsGenerating(true);
-                  const sid = useStore.getState().sessionByConversation[convoId];
-                  streamChat(
-                    { message: `Output of '${cmd.command}': ${resultText}`, sessionId: sid, conversationId: convoId, model: selectedModel, snapgent: true },
-                    {
-                      onTextDelta: (delta) => updateMessage(convoId, newPendingId, (prev) => ({ content: (prev?.content || '') + delta })),
-                      onDone: (e) => { setSessionForConversation(convoId, e.sessionId); updateMessage(convoId, newPendingId, { streaming: false, pending: false }); setIsGenerating(false); },
-                      onError: (m) => { updateMessage(convoId, newPendingId, { streaming: false, pending: false, error: m }); setIsGenerating(false); },
-                    }
-                  );
-                })();
-              }
-            }
-          }
         },
         onError: (msg) => {
           updateMessage(convoId, pendingMsgId, { streaming: false, pending: false, error: msg });
