@@ -30,7 +30,9 @@ const FAST_TYPES = new Set(['ping', 'list_tools', 'list_mcp_servers', 'get_serve
 
 let ws: WebSocket | null = null;
 let connected = false;
-let bridgeReady = false;
+let bridgeReady = false; // true after "connected" message from bridge (optional — bridge sends it immediately)
+let bridgeVersion = '';
+let mcpAlive = false;
 let nextId = 1;
 let toolsCache: any[] = [];
 let serversCache: any[] = [];
@@ -40,7 +42,7 @@ let toolsListeners: ((tools: any[], servers: any[]) => void)[] = [];
 let reconnectTimer: any = null;
 
 function notify() {
-  for (const fn of listeners) { try { fn(connected && bridgeReady); } catch {} }
+  for (const fn of listeners) { try { fn(connected); } catch {} }
 }
 function notifyTools() {
   for (const fn of toolsListeners) { try { fn(toolsCache, serversCache); } catch {} }
@@ -107,7 +109,7 @@ export function disconnectBridge() {
   connected = false; bridgeReady = false; notify();
 }
 
-export function isBridgeConnected(): boolean { return connected && bridgeReady; }
+export function isBridgeConnected(): boolean { return connected; }
 export function getToolsCache(): any[] { return toolsCache; }
 export function getServersCache(): any[] { return serversCache; }
 
@@ -123,6 +125,14 @@ export function onToolsUpdate(fn: (tools: any[], servers: any[]) => void): () =>
 
 async function bridgeRequest(type: string, payload: Record<string, unknown> = {}): Promise<any> {
   if (!connected || !ws || ws.readyState !== WebSocket.OPEN) throw new Error('Bridge not connected');
+  // If bridge hasn't sent the 'connected' message yet, wait briefly for it
+  if (!bridgeReady && type !== 'ping') {
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    if (!bridgeReady) {
+      // Still no 'connected' message — but WebSocket is open, so try anyway
+      // The bridge may be an older version that doesn't send 'connected'
+    }
+  }
   const id = nextId++;
   const msg = JSON.stringify({ type, id, ...payload });
   const fast = FAST_TYPES.has(type);
