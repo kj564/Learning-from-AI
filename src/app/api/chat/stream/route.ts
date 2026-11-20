@@ -25,7 +25,6 @@ import ZAI from 'z-ai-web-dev-sdk';
 import { db } from '@/lib/db';
 import { TOOL_DEFINITIONS, toolsToSystemPrompt } from '@/lib/tool-definitions';
 import { buildSnapgentPrompt, extractSnapgentCommand } from '@/lib/snapgent-prompt';
-import { connectBridge, isBridgeConnected, runTool } from '@/lib/snapgent';
 
 export const AI_MODELS = [
   { id: 'glm-5.3', name: 'GLM-5.3', description: 'Most advanced — flagship model', glmModel: 'glm-5.3' },
