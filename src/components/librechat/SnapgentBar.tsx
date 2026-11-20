@@ -102,8 +102,34 @@ export default function SnapgentBar({
         id: chipId, tool: command, params, status: 'running', startTime: Date.now(),
       }]);
 
-      // Execute via bridge
-      const result = await runTool(selectedTarget, command, params);
+      // === Virtual commands — handled client-side, NOT sent to bridge ===
+      // (same as the extension's runTool() in core/main.js)
+      let result: { success: boolean; text?: string; error?: string; images?: any[] };
+
+      if (command === 'list_commands' || command === 'list_tools') {
+        // Format the tool catalogue (same as the extension)
+        const tools = await listTools();
+        const lines = tools.map((t: any) => {
+          const name = t.name || '?';
+          const desc = (t.description || '').split('\n')[0].trim();
+          const props = (t.inputSchema && t.inputSchema.properties) || {};
+          const args = Object.keys(props).join(', ');
+          return `  ${name}(${args}) - ${desc}`;
+        });
+        const text = `Output of '${command}':\nVS Code commands (${tools.length}):\n\n${lines.join('\n')}`;
+        result = { success: true, text };
+      } else if (command === 'list_mcp_servers') {
+        // List connected servers (filtered to selected target — isolation)
+        const servers = await listServers();
+        const alive = servers.filter((s: any) => s.alive);
+        const lines = alive.map((s: any) => `- ${s.id}: ${s.id} - ${s.tools || 0} commands available`);
+        const text = `Output of 'list_mcp_servers':\n${lines.join('\n') || 'No servers connected.'}`;
+        result = { success: true, text };
+      } else {
+        // Real MCP tool — send to bridge
+        result = await runTool(selectedTarget, command, params);
+      }
+
       const duration = Date.now() - (chips.find(c => c.id === chipId)?.startTime || Date.now());
 
       // Update chip
