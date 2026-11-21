@@ -19,8 +19,6 @@ import { NextRequest, NextResponse } from 'next/server';
 import { writeFile, readFile, mkdir, unlink } from 'fs/promises';
 import { existsSync } from 'fs';
 import path from 'path';
-import { exec, execFile } from 'child_process';
-import { promisify } from 'util';
 import { randomUUID } from 'crypto';
 import ZAI from 'z-ai-web-dev-sdk';
 import { db } from '@/lib/db';
@@ -30,9 +28,8 @@ import {
   resolveWorkspacePath, listWorkspaceFiles, readWorkspaceFile, writeWorkspaceFile,
   buildSandboxEnv, ensureWorkspaceForConversation,
 } from '@/lib/workspace';
+import { enqueueSandboxJob } from '@/lib/sandbox-client';
 
-const execAsync = promisify(exec);
-const execFileAsync = promisify(execFile);
 const WORKSPACE = '/home/z/my-project';
 
 function safePath(relPath: string): string | null {
@@ -163,7 +160,7 @@ export async function POST(req: NextRequest) {
           }, { status: 400 });
         }
       }
-      const response = await executeTool(tool, v.args);
+      const response = await executeTool(tool, v.args, { conversationId, sessionId });
       const status = response.status;
       const resultBytes = 0;
       if (status >= 200 && status < 300) {
@@ -204,7 +201,11 @@ export async function POST(req: NextRequest) {
 // Tool executor — the big switch. Called only after validation.
 // Returns NextResponse directly; the outer wrapper audits and forwards.
 // ============================================================
-async function executeTool(tool: string, args: Record<string, unknown>): Promise<NextResponse> {
+async function executeTool(
+  tool: string,
+  args: Record<string, unknown>,
+  ctx: { conversationId?: string | null; sessionId?: string | null } = {},
+): Promise<NextResponse> {
   switch (tool) {
       // === READ TOOLS ===
       case 'web_search': {
@@ -345,78 +346,82 @@ async function executeTool(tool: string, args: Record<string, unknown>): Promise
         const wsId = args.workspaceId as string;
         const code = args.code as string;
         const lang = (args.language as string) || 'javascript';
-        // Resolve the workspace root — code runs with cwd = workspace root, so
-        // it can only read/write inside its own workspace. Env is filtered to
-        // strip secrets (T17).
-        const res = await resolveWorkspacePath(wsId, '.', 'default', { followSymlinks: false });
-        if (!res.ok) {
+        // === P0-3: execution moved to sandbox-worker mini-service ===
+        // The API server does NOT execute code inline. We enqueue a job to the
+        // worker (mini-services/sandbox-worker/, port 3030) and await the result.
+        // The worker runs with the strongest isolation available (docker if
+        // detected, else process tier with empty env + timeout + maxBuffer).
+        try {
+          const result = await enqueueSandboxJob({
+            workspaceId: wsId,
+            conversationId: ctx.conversationId,
+            sessionId: ctx.sessionId,
+            toolName: 'run_code_sandbox',
+            args: { code, language: lang },
+          });
+          if (result.status === 'COMPLETED') {
+            return NextResponse.json({
+              success: true, workspaceId: wsId, language: lang,
+              stdout: result.stdout, stderr: result.stderr || undefined,
+              exitCode: result.exitCode,
+              isolationTier: result.isolationTier,
+              jobId: result.jobId,
+            });
+          }
           return NextResponse.json({
             success: false, is_error: true,
-            error: 'PATH_DENIED', accessDecision: res.accessDecision,
-            message: res.error,
-          }, { status: 400 });
-        }
-        const workspaceRoot = res.workspaceRoot;
-        // Sandbox temp files live INSIDE the workspace (under .tmp/) so cleanup
-        // is workspace-scoped and the sandbox can't write outside the workspace.
-        const tmpDir = path.join(workspaceRoot, '.tmp');
-        if (!existsSync(tmpDir)) await mkdir(tmpDir, { recursive: true });
-        // Filtered environment — no DATABASE_URL, no *_KEY/_TOKEN/_SECRET.
-        const sandboxEnv = buildSandboxEnv(workspaceRoot);
-
-        const runners: Record<string, { cmd: string; argsFn: (f: string) => string[]; ext: string }> = {
-          javascript: { cmd: 'node', argsFn: (f) => [f], ext: 'js' },
-          typescript: { cmd: 'bun', argsFn: (f) => ['run', f], ext: 'ts' },
-          python: { cmd: 'python3', argsFn: (f) => [f], ext: 'py' },
-        };
-        if (lang === 'bash' || lang === 'sh') {
-          try {
-            const { stdout, stderr } = await execAsync(code, {
-              cwd: workspaceRoot, timeout: 10000, maxBuffer: 1024 * 1024, env: sandboxEnv,
-            });
-            return NextResponse.json({ success: true, workspaceId: wsId, stdout, stderr: stderr || undefined });
-          } catch (e) {
-            const err = e as Error & { stdout?: string; stderr?: string };
-            return NextResponse.json({ success: false, error: err.message, stdout: err.stdout, stderr: err.stderr }, { status: 500 });
-          }
-        }
-        const runner = runners[lang];
-        if (!runner) return NextResponse.json({ error: `Language ${lang} not supported` }, { status: 400 });
-        const tmpFile = path.join(tmpDir, `${randomUUID()}.${runner.ext}`);
-        await writeFile(tmpFile, code, 'utf-8');
-        try {
-          const { stdout, stderr } = await execFileAsync(runner.cmd, runner.argsFn(tmpFile), {
-            cwd: workspaceRoot, timeout: 10000, maxBuffer: 1024 * 1024, env: sandboxEnv,
-          });
-          await unlink(tmpFile).catch(() => {});
-          return NextResponse.json({ success: true, workspaceId: wsId, language: lang, stdout, stderr: stderr || undefined });
-        } catch (e) {
-          await unlink(tmpFile).catch(() => {});
-          const err = e as Error & { stdout?: string; stderr?: string };
-          return NextResponse.json({ success: false, error: err.message, stdout: err.stdout, stderr: err.stderr }, { status: 500 });
+            error: result.status === 'TIMEOUT' ? 'TIMEOUT' : 'EXECUTION_FAILED',
+            message: result.errorMessage || result.stderr || `exit code ${result.exitCode}`,
+            stdout: result.stdout, stderr: result.stderr,
+            exitCode: result.exitCode,
+            isolationTier: result.isolationTier,
+            jobId: result.jobId,
+          }, { status: 500 });
+        } catch (e: any) {
+          return NextResponse.json({
+            success: false, is_error: true,
+            error: 'SANDBOX_WORKER_UNREACHABLE',
+            message: `sandbox worker is not running or errored: ${e.message || String(e)}. Start it with \`bun run dev\` in mini-services/sandbox-worker/.`,
+          }, { status: 503 });
         }
       }
 
       case 'run_shell': {
         const wsId = args.workspaceId as string;
         const command = args.command as string;
-        const res = await resolveWorkspacePath(wsId, '.', 'default', { followSymlinks: false });
-        if (!res.ok) {
+        // === P0-3: shell also runs in the sandbox worker ===
+        try {
+          const result = await enqueueSandboxJob({
+            workspaceId: wsId,
+            conversationId: ctx.conversationId,
+            sessionId: ctx.sessionId,
+            toolName: 'run_shell',
+            args: { command },
+          });
+          if (result.status === 'COMPLETED') {
+            return NextResponse.json({
+              success: true, workspaceId: wsId, command,
+              stdout: result.stdout, stderr: result.stderr || undefined,
+              exitCode: result.exitCode,
+              isolationTier: result.isolationTier,
+              jobId: result.jobId,
+            });
+          }
           return NextResponse.json({
             success: false, is_error: true,
-            error: 'PATH_DENIED', accessDecision: res.accessDecision,
-            message: res.error,
-          }, { status: 400 });
-        }
-        const sandboxEnv = buildSandboxEnv(res.workspaceRoot);
-        try {
-          const { stdout, stderr } = await execAsync(command, {
-            cwd: res.workspaceRoot, timeout: 15000, maxBuffer: 1024 * 1024, env: sandboxEnv,
-          });
-          return NextResponse.json({ success: true, workspaceId: wsId, command, stdout, stderr: stderr || undefined });
-        } catch (e) {
-          const err = e as Error & { stdout?: string; stderr?: string };
-          return NextResponse.json({ success: false, error: err.message, stdout: err.stdout, stderr: err.stderr }, { status: 500 });
+            error: result.status === 'TIMEOUT' ? 'TIMEOUT' : 'EXECUTION_FAILED',
+            message: result.errorMessage || result.stderr || `exit code ${result.exitCode}`,
+            stdout: result.stdout, stderr: result.stderr,
+            exitCode: result.exitCode,
+            isolationTier: result.isolationTier,
+            jobId: result.jobId,
+          }, { status: 500 });
+        } catch (e: any) {
+          return NextResponse.json({
+            success: false, is_error: true,
+            error: 'SANDBOX_WORKER_UNREACHABLE',
+            message: `sandbox worker is not running or errored: ${e.message || String(e)}.`,
+          }, { status: 503 });
         }
       }
 
@@ -451,22 +456,22 @@ async function executeTool(tool: string, args: Record<string, unknown>): Promise
       // to avoid recursion through POST (which would double-audit).
       // workspaceId is passed through so legacy calls stay workspace-scoped.
       case 'file_write': {
-        return executeTool('write_file', { workspaceId: args.workspaceId, path: args.path, content: args.content });
+        return executeTool('write_file', { workspaceId: args.workspaceId, path: args.path, content: args.content }, ctx);
       }
       case 'file_read': {
-        return executeTool('read_file', { workspaceId: args.workspaceId, path: args.path });
+        return executeTool('read_file', { workspaceId: args.workspaceId, path: args.path }, ctx);
       }
       case 'file_list': {
-        return executeTool('list_dir', { workspaceId: args.workspaceId, dir: args.dir || '.' });
+        return executeTool('list_dir', { workspaceId: args.workspaceId, dir: args.dir || '.' }, ctx);
       }
       case 'code_run': {
-        return executeTool('run_code_sandbox', { workspaceId: args.workspaceId, code: args.code, language: args.language || 'javascript' });
+        return executeTool('run_code_sandbox', { workspaceId: args.workspaceId, code: args.code, language: args.language || 'javascript' }, ctx);
       }
       case 'shell_run': {
-        return executeTool('run_shell', { workspaceId: args.workspaceId, command: args.command });
+        return executeTool('run_shell', { workspaceId: args.workspaceId, command: args.command }, ctx);
       }
       case 'knowledge_search': {
-        return executeTool('search_knowledge_base', { workspaceId: args.workspaceId, query: args.query, top_k: args.topK });
+        return executeTool('search_knowledge_base', { workspaceId: args.workspaceId, query: args.query, top_k: args.topK }, ctx);
       }
       case 'image_generate': {
         try {

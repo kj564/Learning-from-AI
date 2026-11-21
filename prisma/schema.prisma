@@ -261,10 +261,24 @@ model WorkspaceFile {
   workspaceId String
   // Relative path within the workspace (e.g. "documents/report.md").
   path        String
+  // MIME type from magic-byte sniffing (not just extension). Null until scanned.
+  sniffedMimeType String?
+  // Legacy MIME field (from extension) — kept for backward compat. Prefer sniffedMimeType.
   mimeType    String?
   sizeBytes   Int      @default(0)
   // SHA-256 checksum for dedup / integrity. Null if not computed.
   checksum    String?
+  // File lifecycle status (P1-3):
+  //   UPLOADED   — just received, not yet validated
+  //   SCANNING   — MIME sniff + blocklist check in progress
+  //   READY      — validated, safe for agent to read
+  //   INDEXED    — READY + added to RAG/knowledge base
+  //   QUARANTINED — failed validation (executable, suspicious MIME, oversize)
+  //   DELETED    — soft-deleted; not readable
+  status      String   @default("UPLOADED")
+  // If QUARANTINED, the reason (e.g. "executable_blocklist", "mime_mismatch",
+  // "oversize", "scan_error"). Null when READY/INDEXED.
+  quarantineReason String?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
@@ -272,4 +286,62 @@ model WorkspaceFile {
 
   @@unique([workspaceId, path])
   @@index([workspaceId])
+  @@index([status])
+}
+
+// === Sandbox Jobs (P0-2) ===
+// Every run_code_sandbox / run_shell call is enqueued as a job to the sandbox
+// worker mini-service. The API server does NOT execute code inline — it
+// creates a SandboxJob row (status QUEUED), POSTs to the worker, and polls
+// or streams the result.
+//
+// Status machine: QUEUED → RUNNING → COMPLETED | FAILED | TIMEOUT | CANCELLED
+//
+// Isolation tier (recorded in isolationTier):
+//   process  — code runs in a child process with empty env, cwd=workspace,
+//              timeout, maxBuffer. NOT OS-level isolation. Dev fallback when
+//              Docker is unavailable. Code CAN still read world-readable host
+//              files; the sandbox worker limits what it can do but a
+//              determined adversary could escape. Use only for trusted code.
+//   docker   — code runs in `docker run --network none --read-only --memory
+//              512m --cpus 1 --user nobody -v <workspace>:/workspace:rw --rm`.
+//              Strong isolation. Production minimum for untrusted code.
+//   gvisor   — gVisor sandbox (runsc). Stronger than docker runc.
+//   microvm  — Firecracker/Kata. Strongest.
+//
+// The worker auto-detects Docker at boot and records the highest tier
+// available; this field is set per-job so you can see what actually ran.
+model SandboxJob {
+  id              String   @id @default(cuid())
+  workspaceId     String
+  // The chat-stream turn that enqueued this job.
+  conversationId  String?
+  sessionId       String?
+  // Tool name: run_code_sandbox | run_shell
+  toolName        String
+  // Args the model sent (JSON): code, language, command, etc.
+  argsJson        String
+  // QUEUED | RUNNING | COMPLETED | FAILED | TIMEOUT | CANCELLED
+  status          String   @default("QUEUED")
+  // What isolation tier actually ran (see comment above).
+  isolationTier   String   @default("process")
+  // stdout / stderr captured by the worker (truncated to 1 MB total).
+  stdout          String   @default("")
+  stderr          String   @default("")
+  // Exit code from the process / container. Null while RUNNING or QUEUED.
+  exitCode        Int?
+  // If FAILED or TIMEOUT, the error message.
+  errorMessage    String?
+  // Timing: when the worker picked it up, when it finished.
+  startedAt       DateTime?
+  finishedAt      DateTime?
+  // Hard limits applied (recorded so audits can verify):
+  //   timeoutMs, maxBufferBytes, maxProcesses, memoryLimitMb, cpuLimit
+  limitsJson      String
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([workspaceId])
+  @@index([status])
+  @@index([createdAt])
 }

@@ -675,6 +675,192 @@ workspace.
 
 ---
 
+## L. Runtime isolation (T19–T30) — gating safety tests
+
+> These tests exercise the **sandbox worker** architecture (P0-1 to P0-5) and
+> the upload-security layer (P1-2, P1-3). They are **gating** — any failure
+> blocks a release.
+>
+> **Honest scope note**: tests T19, T20, T23, T24 assert OS-level isolation
+> that is only provided by the **docker** isolation tier. In the **process**
+> tier (dev fallback when Docker is unavailable), T19 and T24 partially pass
+> (workspace path validation blocks relative escapes) but a determined
+> adversary reading absolute host paths via Node's `fs` would succeed. The
+> test suite records the `isolationTier` per job so you can see which tier
+> validated each assertion. Production deployments MUST run the docker tier
+> (or stronger) for T19, T20, T23, T24 to fully pass.
+
+### T19 — Sandbox cannot read host files outside workspace
+**CAPABILITY:** Filesystem isolation (`sandbox-worker/index.ts`, docker tier)
+**SETUP:** Create workspace `ws1`. Enqueue `run_code_sandbox` with code that
+tries to read `/etc/passwd` by absolute path:
+`const fs = require('fs'); try { console.log(fs.readFileSync('/etc/passwd', 'utf-8').slice(0, 50)); } catch (e) { console.log('DENIED:', e.code); }`
+**EXPECTED:**
+- docker tier: the read fails with `EACCES` or `ENOENT` (rootfs is read-only +
+  only `/workspace` is mounted). stdout does NOT contain passwd content.
+- process tier: the read may succeed (Node can read world-readable host files).
+  The test is marked PARTIAL with a note that the docker tier is required for
+  full pass. The audit `isolationTier` field records which tier ran.
+**PASS (docker tier):** stdout contains "DENIED" or an error code, NOT
+`root:` or passwd content. `isolationTier: "docker"`.
+**PARTIAL (process tier):** stdout may contain passwd content; the test
+records `isolationTier: "process"` and is NOT a release blocker ONLY if the
+deployment is explicitly single-user dev. Production MUST run docker tier.
+**FAIL:** docker tier returns passwd content.
+
+### T20 — Sandbox cannot make outbound network requests
+**CAPABILITY:** Network isolation (`--network none` in docker tier)
+**SETUP:** Enqueue `run_code_sandbox` with:
+`const http = require('http'); const req = http.get('http://example.com', r => console.log('status', r.statusCode)); req.on('error', e => console.log('DENIED:', e.code)); req.setTimeout(2000, () => { console.log('TIMEOUT'); req.destroy(); });`
+**EXPECTED:**
+- docker tier: `--network none` blocks all sockets. stdout contains "DENIED"
+  with `ENETUNREACH` or `ECONNREFUSED` or "TIMEOUT".
+- process tier: the request may succeed (network is NOT restricted at process
+  tier). Test is PARTIAL with the docker-tier requirement noted.
+**PASS (docker tier):** stdout contains "DENIED" or "TIMEOUT", NOT "status
+200". `isolationTier: "docker"`.
+**FAIL (docker tier):** stdout contains "status 200" (network egress
+succeeded — isolation broken).
+
+### T21 — Sandbox cannot access env secrets
+**CAPABILITY:** Env isolation (`sandbox-worker/index.ts` `minimalEnv = {}`)
+**SETUP:** Set a fake secret `ZAI_API_KEY=secret123` in the server env.
+Enqueue `run_code_sandbox` with:
+`console.log('ZAI_API_KEY:', process.env.ZAI_API_KEY); console.log('DATABASE_URL:', process.env.DATABASE_URL); console.log('sensitive:', Object.keys(process.env).filter(k => /KEY|TOKEN|SECRET|PASSWORD/.test(k)));`
+**EXPECTED:** The worker passes ONLY the minimal env (PATH, HOME=workspace,
+SANDBOX=1, WORKSPACE, NODE_ENV). No `ZAI_API_KEY`, no `DATABASE_URL`, no
+`*_KEY/*_TOKEN/*_SECRET` keys. stdout shows `ZAI_API_KEY: undefined`,
+`DATABASE_URL: undefined`, `sensitive: []`.
+**PASS:** stdout contains `ZAI_API_KEY: undefined` and `sensitive: []`; no
+secret value appears in stdout or stderr.
+**FAIL:** Any server secret appears in the sandbox stdout/stderr.
+
+### T22 — Sandbox process is killed after timeout; no orphaned children
+**CAPABILITY:** Timeout + process-tree kill (`sandbox-worker/index.ts`)
+**SETUP:** Enqueue `run_code_sandbox` with code that forks a child and sleeps:
+`const { spawn } = require('child_process'); const child = spawn('sleep', ['300']); child.on('exit', () => console.log('child exited')); setInterval(() => console.log('still alive', Date.now()), 1000);`
+Run for the full 10s timeout.
+**EXPECTED:** After 10s, the worker kills the process tree (parent + child
+via `process.kill(-pgid, 'SIGKILL')`). The SandboxJob row status is `TIMEOUT`.
+No `sleep 300` process survives on the host after the job completes.
+**PASS:** `status: "TIMEOUT"`; `ps aux | grep 'sleep 300'` returns no results
+after the job; no zombie processes.
+**FAIL:** Job hangs past the timeout, or `sleep 300` survives on the host.
+
+### T23 — Sandbox respects memory limit
+**CAPABILITY:** Memory cap (`--memory 512m` in docker tier)
+**SETUP:** Enqueue `run_code_sandbox` with code that allocates a huge array:
+`const a = []; for (let i = 0; i < 1e9; i++) a.push(new Array(1024)); console.log('allocated');`
+**EXPECTED:**
+- docker tier: `--memory 512m` triggers OOM kill. The process exits with
+  `signal: 'SIGKILL'` or exit code 137. SandboxJob status `FAILED` or
+  `TIMEOUT`.
+- process tier: Node may hit its own heap limit (V8 default ~2GB) and crash
+  with `FATAL ERROR: ... allocation failed`. The job still ends — but the host
+  process (the worker) might also be affected. Test is PARTIAL.
+**PASS (docker tier):** The job ends (does not hang), exit code is 137 or the
+stderr contains "allocation failed". The worker process survives.
+**FAIL:** The job hangs or crashes the worker process itself.
+
+### T24 — Sandbox cannot write outside workspace
+**CAPABILITY:** Write containment (`--read-only` rootfs + only `/workspace`
+mounted rw in docker tier)
+**SETUP:** Enqueue `run_code_sandbox` with:
+`const fs = require('fs'); try { fs.writeFileSync('/tmp/escape.txt', 'gotcha'); console.log('wrote /tmp/escape.txt'); } catch (e) { console.log('DENIED:', e.code); } try { fs.writeFileSync('/etc/cron.d/evil', 'cron'); console.log('wrote /etc/cron.d/evil'); } catch (e) { console.log('DENIED2:', e.code); }`
+**EXPECTED:**
+- docker tier: rootfs is read-only, `/tmp` is a tmpfs inside the container.
+  `fs.writeFileSync('/tmp/escape.txt')` may succeed (it's the container's
+  tmpfs, destroyed on exit) but `fs.writeFileSync('/etc/cron.d/evil')` fails
+  with `EACCES` or `EROFS`. The host `/tmp` and `/etc/cron.d/` are untouched.
+- process tier: writes to `/tmp/escape.txt` succeed (host /tmp is shared) —
+  this is the key gap. Test is PARTIAL.
+**PASS (docker tier):** `/etc/cron.d/evil` is NOT created on the host;
+`/tmp/escape.txt` is NOT created on the host (only inside the container tmpfs
+which is destroyed). `isolationTier: "docker"`.
+**PARTIAL (process tier):** `/tmp/escape.txt` is created on the host — the
+process tier does NOT provide write isolation. Records `isolationTier:
+"process"` and is a release blocker for production.
+**FAIL (docker tier):** `/etc/cron.d/evil` or a host `/tmp/escape.txt` is
+created and persists after the container exits.
+
+### T25 — Two workspaces cannot see each other's files
+**CAPABILITY:** Cross-workspace isolation (`workspace.ts` `resolveWorkspacePath`)
+**SETUP:** Create `wsA` and `wsB`. Write `secret.txt` to `wsB`. From `wsA`,
+try `read_file {path: "../wsB/secret.txt"}` (traversal) and `read_file
+{path: "secret.txt"}` (same relative path — should NOT cross to wsB).
+**EXPECTED:** The `..` path is rejected with `denied_traversal`. The
+`secret.txt` read from wsA returns "file not found" (it doesn't exist in
+wsA, and the backend never looks in wsB). No content from wsB leaks.
+**PASS:** No wsB content in wsA's read results; the `..` attempt is
+`denied_traversal` in the audit.
+**FAIL:** Content from wsB is returned in a wsA call.
+
+### T26 — Oversized upload is rejected
+**CAPABILITY:** Upload size limit (`workspace-quotas.ts` `checkUploadSize`)
+**SETUP:** Try `POST /api/workspaces/ws1/files` with a file > 20 MB
+(QUOTAS.maxUploadBytes).
+**EXPECTED:** The upload is rejected with a 400/413 response:
+`{ error: "upload exceeds max size: <size> > 20971520 bytes" }`. No file is
+written to disk.
+**PASS:** Response status is 4xx with the quota message; no file > 20 MB
+exists in the workspace.
+**FAIL:** The file is written to disk, or the response is 200.
+
+### T27 — Executable file is quarantined
+**CAPABILITY:** Blocklist + quarantine (`file-security.ts`)
+**SETUP:** Upload a file `evil.sh` with content `#!/bin/bash\nrm -rf /` (a
+shell script — blocklisted by magic bytes `#!/bin` and extension `.sh`).
+**EXPECTED:** `scanUploadedFile` runs on upload. The WorkspaceFile row
+status is `QUARANTINED` with `quarantineReason: "executable_blocklist
+(application/x-shellscript)"`. The file is moved to `.quarantine/`. A
+subsequent `read_file {path: "input/evil.sh"}` is refused with
+`is_error: true` and the quarantine reason.
+**PASS:** WorkspaceFile row is `QUARANTINED`; the file is moved to
+`.quarantine/`; `read_file` returns the quarantine reason, not the content.
+**FAIL:** The file is `READY` and `read_file` returns the script content.
+
+### T28 — File with mismatched MIME (extension lies) is quarantined
+**CAPABILITY:** MIME sniffing vs extension (`file-security.ts` `sniffMimeType`)
+**SETUP:** Upload `report.png` with content `#!/bin/bash\necho pwned` (a
+shell script named as a PNG — extension lies).
+**EXPECTED:** `sniffMimeType` reads the magic bytes `#!/bin` and identifies
+it as `application/x-shellscript` despite the `.png` extension. The blocklist
+matches on MIME. The file is `QUARANTINED` with
+`quarantineReason: "executable_blocklist (application/x-shellscript)"`.
+**PASS:** WorkspaceFile `sniffedMimeType: "application/x-shellscript"`;
+`status: QUARANTINED`; `read_file` refused.
+**FAIL:** The file is `READY` because the extension `.png` was trusted.
+
+### T29 — Workspace survives server restart (persistent storage)
+**CAPABILITY:** Persistent storage (`WORKSPACE_STORAGE_ROOT=/home/z/agent-workspaces`)
+**SETUP:** Write `documents/persistent.md` to `ws1`. Restart the Next.js dev
+server AND the sandbox worker. After restart, `read_file {workspaceId: ws1,
+path: "documents/persistent.md"}` should still return the content.
+**EXPECTED:** The file is on disk at `/home/z/agent-workspaces/default/ws1/...`
+(not `/tmp` which can be cleaned on reboot). After restart, the workspace
+row still exists in SQLite (also persistent at
+`/home/z/my-project/db/custom.db`), and the file is still readable.
+**PASS:** File is readable after a full server restart; the workspace root
+path is under `/home/z/agent-workspaces` (not `/tmp`).
+**FAIL:** File is gone after restart (was in `/tmp`), or the workspace DB row
+is gone.
+
+### T30 — Sandbox job stops and cleans up after timeout
+**CAPABILITY:** Job lifecycle + cleanup (`sandbox-client.ts` + `sandbox-worker`)
+**SETUP:** Enqueue a job that runs `while (true) {}` (infinite loop). Wait
+for the 10s timeout.
+**EXPECTED:** The job status transitions `QUEUED → RUNNING → TIMEOUT`. The
+SandboxJob row has `finishedAt` set and `errorMessage: "TIMEOUT: process
+killed after 10000ms"`. No CPU is consumed by the sandboxed process after
+`finishedAt`. The worker process is still alive and accepting new jobs.
+**PASS:** `status: "TIMEOUT"`; `finishedAt` is set; `ps` shows no orphaned
+`node`/`bun`/`python` process from the job; worker `/health` still returns
+200; a second job submitted immediately after runs to completion.
+**FAIL:** Job hangs past the timeout; worker is wedged; orphaned process
+survives; second job is rejected.
+
+---
+
 ## Scoring
 
 Run all tests. A test **passes** only if every PASS criterion holds and no FAIL
@@ -691,5 +877,8 @@ FAILED TESTS:
 ```
 
 **Acceptance threshold:** ≥ 90% pass for a release. Any FAIL in category D (safety),
-H (security), J (T1–T10 approval/validation/audit), **or K (T11–T18 workspace
-isolation)** blocks the release regardless of total score — these tests are gating.
+H (security), J (T1–T10 approval/validation/audit), K (T11–T18 workspace
+isolation), **or L (T19–T30 runtime isolation)** blocks the release regardless
+of total score. Category L tests T19/T20/T23/T24 may be marked PARTIAL in the
+process tier for explicit single-user-dev deployments; production MUST run
+the docker tier (or stronger) and these tests MUST fully PASS there.

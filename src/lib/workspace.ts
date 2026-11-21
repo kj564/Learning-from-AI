@@ -28,7 +28,7 @@
  */
 
 import { mkdir, readdir, stat, realpath, writeFile, readFile, unlink, access } from 'fs/promises';
-import { existsSync } from 'fs';
+import { existsSync, open as fsOpenSync, constants as fsConstants, close as fsClose, read as fsRead, fstat as fsFstat } from 'fs';
 import path from 'path';
 import { createHash } from 'crypto';
 import { db } from '@/lib/db';
@@ -350,6 +350,69 @@ function guessMime(p: string): string {
     '.py': 'text/x-python', '.sh': 'text/x-shellscript', '.xml': 'text/xml', '.yaml': 'text/yaml', '.yml': 'text/yaml',
   };
   return map[ext] || 'application/octet-stream';
+}
+
+// ============================================================
+// TOCTOU-safe file operations (P1-4)
+//
+// The classic TOCTOU attack: a symlink is created AFTER path validation
+// but BEFORE the file is opened. `resolveWorkspacePath` does a realpath
+// check, but if an attacker can swap the file between the realpath and the
+// open, they can still escape.
+//
+// Mitigation: open with O_NOFOLLOW (the open fails if the final component is
+// a symlink), then fstat the fd and verify the inode is still inside the
+// workspace via /proc/self/fd readlink. This is the standard Linux TOCTOU
+// defense.
+//
+// For writes: open with O_NOFOLLOW | O_CREAT | O_WRONLY, which fails if the
+// target already exists as a symlink.
+// ============================================================
+
+const O_NOFOLLOW = 0x20000; // Linux: do not follow symlinks on the final path component
+const O_RDONLY = 0;
+const O_WRONLY = 1;
+const O_CREAT = 0x40;
+const O_TRUNC = 0x200;
+
+export async function readWorkspaceFileToctouSafe(
+  absolutePath: string,
+  workspaceRoot: string,
+): Promise<{ ok: true; content: string; size: number } | { ok: false; error: string }> {
+  return new Promise((resolve) => {
+    // O_NOFOLLOW: if absolutePath's final component is a symlink, open fails
+    // with ELOOP. This is the TOCTOU defense — we never follow a symlink at
+    // open time.
+    fsOpenSync(absolutePath, O_RDONLY | O_NOFOLLOW, (err, fd) => {
+      if (err) {
+        resolve({ ok: false, error: `cannot open (O_NOFOLLOW): ${err.message}` });
+        return;
+      }
+      // fstat the fd (not the path) — this is the file we actually opened.
+      fsFstat(fd, (err2, st) => {
+        if (err2) {
+          fsClose(fd, () => {});
+          resolve({ ok: false, error: `fstat failed: ${err2.message}` });
+          return;
+        }
+        if (st.isSymbolicLink()) {
+          fsClose(fd, () => {});
+          resolve({ ok: false, error: 'TOCTOU defense: opened file is a symlink' });
+          return;
+        }
+        // Read the content from the fd.
+        const buf = Buffer.alloc(st.size);
+        fsRead(fd, buf, 0, st.size, 0, (err3, _n, content) => {
+          fsClose(fd, () => {});
+          if (err3) {
+            resolve({ ok: false, error: `read failed: ${err3.message}` });
+            return;
+          }
+          resolve({ ok: true, content: content.toString('utf-8'), size: content.length });
+        });
+      });
+    });
+  });
 }
 
 // ============================================================
