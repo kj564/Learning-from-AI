@@ -26,7 +26,6 @@ import {
 } from 'lucide-react';
 import { useTheme } from 'next-themes';
 import CodeWorkspace from '@/components/librechat/CodeWorkspace';
-import SnapgentBar, { dispatchSnapgentCommand } from '@/components/librechat/SnapgentBar';
 import ReaPanel from '@/components/librechat/ReaPanel';
 import Markdown from '@/components/librechat/Markdown';
 import CodeBlock from '@/components/librechat/CodeBlock';
@@ -36,7 +35,6 @@ import SettingsDialog from '@/components/librechat/SettingsDialog';
 import CommandPalette from '@/components/librechat/CommandPalette';
 import KeyboardShortcutsHelp from '@/components/librechat/KeyboardShortcutsHelp';
 import { Button } from '@/components/ui/button';
-import { connectBridge, isBridgeConnected, runTool, useBridgeStatus, useAutoConnectBridge, extractSnapgentCommand } from '@/lib/snapgent-client';
 
 const genId = (p: string) => `${p}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 
@@ -89,12 +87,6 @@ export default function Page() {
   const toggleWebSearch = store((s) => s.toggleWebSearch);
   const thinkEnabled = store((s) => s.thinkEnabled);
   const toggleThink = store((s) => s.toggleThink);
-  const snapgentEnabled = store((s) => s.snapgentEnabled);
-  const toggleSnapgent = store((s) => s.toggleSnapgent);
-
-  // Bridge status — client-side WebSocket to ws://127.0.0.1:17613 on user's machine
-  useAutoConnectBridge();
-  const bridgeConnected = useBridgeStatus();
   const isGenerating = store((s) => s.isGenerating);
   const setIsGenerating = store((s) => s.setIsGenerating);
   const newConversation = store((s) => s.newConversation);
@@ -114,9 +106,9 @@ export default function Page() {
   const clearAttachments = store((s) => s.clearAttachments);
   const activeProject = store((s) => s.activeProject);
   const activeAssistant = store((s) => s.assistants.find((a) => a.id === s.activeAssistantId) || null);
-  const showWorkspace = store((s) => s.showWorkspace);
   const showReaPanel = store((s) => s.showReaPanel);
   const setShowReaPanel = store((s) => s.setShowReaPanel);
+  const showWorkspace = store((s) => s.showWorkspace);
   const workspaceFiles = store((s) => s.workspaceFiles);
   const setShowWorkspace = store((s) => s.setShowWorkspace);
   const addWorkspaceFile = store((s) => s.addWorkspaceFile);
@@ -265,53 +257,10 @@ export default function Page() {
 
     const sessionId = sessionByConversation[convoId];
     const controller = streamChat(
-      { message: augmentedText, sessionId, conversationId: convoId, model: selectedModel, project: activeProject || undefined, assistant: activeAssistant ? { id: activeAssistant.id, name: activeAssistant.name, systemPrompt: activeAssistant.systemPrompt } : null, think: thinkEnabled, snapgent: snapgentEnabled && bridgeConnected },
+      { message: augmentedText, sessionId, conversationId: convoId, model: selectedModel, project: activeProject || undefined, assistant: activeAssistant ? { id: activeAssistant.id, name: activeAssistant.name, systemPrompt: activeAssistant.systemPrompt } : null, think: thinkEnabled },
       {
         onTextDelta: (delta) => updateMessage(convoId, pendingMsgId, (prev) => ({ content: (prev?.content || '') + delta })),
         onTextReplace: (text) => updateMessage(convoId, pendingMsgId, { content: text }),
-        onSnapgentCommand: (event) => {
-          // Dispatch to SnapgentBar for chip display + bridge execution
-          const chipId = dispatchSnapgentCommand(event.command, event.params);
-          // Also add to message tool cards
-          updateMessage(convoId, pendingMsgId, (prev) => ({
-            toolExecutions: [...(prev?.toolExecutions || []), { tool: event.command, args: event.params, success: false }],
-          }));
-          // SnapgentBar handles execution + result — listen for result event
-          const resultHandler = async (e: CustomEvent) => {
-            const { command, result } = e.detail;
-            if (command !== event.command) return;
-            window.removeEventListener('snapgent:result' as any, resultHandler as EventListener);
-            // Update tool card
-            updateMessage(convoId, pendingMsgId, (prev) => {
-              const execs = [...(prev?.toolExecutions || [])];
-              for (let i = execs.length - 1; i >= 0; i--) {
-                if (execs[i].tool === command && execs[i].success === false) {
-                  execs[i] = { ...execs[i], success: result.success, result: result.error || (result.text || '').slice(0, 2000) };
-                  break;
-                }
-              }
-              return { toolExecutions: execs };
-            });
-            // Send result back as new message → new AI stream
-            const resultText = result.success ? (result.text || '').slice(0, 8000) : `Snapgent error: ${result.error}`;
-            addMessage(convoId, { id: genId('msg'), role: 'user', content: `Output of '${command}': ${resultText}`, createdAt: Date.now() });
-            const newPendingId = genId('msg');
-            addMessage(convoId, { id: newPendingId, role: 'assistant', content: '', createdAt: Date.now(), pending: true, streaming: true });
-            setIsGenerating(true);
-            const sid = useStore.getState().sessionByConversation[convoId];
-            streamChat(
-              { message: `Output of '${command}': ${resultText}`, sessionId: sid, conversationId: convoId, model: selectedModel, snapgent: snapgentEnabled && bridgeConnected },
-              {
-                onTextDelta: (d) => updateMessage(convoId, newPendingId, (prev) => ({ content: (prev?.content || '') + d })),
-                onTextReplace: (t) => updateMessage(convoId, newPendingId, { content: t }),
-                onSnapgentCommand: (ev) => { dispatchSnapgentCommand(ev.command, ev.params); },
-                onDone: (e) => { setSessionForConversation(convoId, e.sessionId); updateMessage(convoId, newPendingId, { streaming: false, pending: false }); setIsGenerating(false); },
-                onError: (m) => { updateMessage(convoId, newPendingId, { streaming: false, pending: false, error: m }); setIsGenerating(false); },
-              }
-            );
-          };
-          window.addEventListener('snapgent:result' as any, resultHandler as EventListener);
-        },
         onToolUse: (event) => {
           updateMessage(convoId, pendingMsgId, (prev) => ({ toolExecutions: [...(prev?.toolExecutions || []), { tool: event.name, args: event.input, success: false }] }));
           if (event.name === 'file_write') {
@@ -400,6 +349,7 @@ export default function Page() {
 
   return (
     <div className="flex h-screen w-full overflow-hidden bg-[var(--bg-page)] text-[var(--text-primary)]">
+      {showReaPanel && <ReaPanel onClose={() => setShowReaPanel(false)} />}
       {/* REA Panel — 70% right panel */}
       {showReaPanel && <ReaPanel onClose={() => setShowReaPanel(false)} />}
       {/* === SIDEBAR === */}
@@ -576,10 +526,6 @@ export default function Page() {
             <div className="flex h-full flex-col items-center justify-center px-4 pb-24">
               <div className="w-full max-w-2xl">
                 <h1 className="mb-6 text-center text-2xl font-semibold text-[var(--text-primary)]">How can I help you today?</h1>
-                {/* Snapgent bar in welcome screen */}
-                {snapgentEnabled && <SnapgentBar onCommandResult={(cmd, result) => {
-                  window.dispatchEvent(new CustomEvent('snapgent:result', { detail: { command: cmd, result } }));
-                }} />}
                 {/* Composer in welcome screen */}
                 <div className="rounded-2xl border border-[var(--border-default)] bg-[var(--bg-surface)] p-3 shadow-lg">
                   <textarea
@@ -613,11 +559,14 @@ export default function Page() {
                     <button onClick={toggleThink} className={`flex h-7 items-center gap-1 rounded-lg border px-2 text-xs ${thinkEnabled ? 'border-[var(--accent)]/40 bg-[var(--primary-btn)]/10 text-[var(--accent)]' : 'border-[var(--border-default)] text-[var(--text-secondary)] hover:bg-[var(--bg-surface)]'}`}>
                       <Brain size={12} /> Think
                     </button>
-                    <button onClick={() => setShowReaPanel(!showReaPanel)} className={`flex h-7 items-center gap-1 rounded-lg border px-2 text-xs ${showReaPanel ? 'border-purple-500/40 bg-purple-500/10 text-purple-400' : 'border-[var(--border-default)] text-[var(--text-secondary)] hover:bg-[var(--bg-surface)]'}`}>
+                  <button onClick={() => setShowReaPanel(!showReaPanel)} className={`flex h-7 items-center gap-1 rounded-lg border px-2 text-xs ${showReaPanel ? "border-purple-500/40 bg-purple-500/10 text-purple-400" : "border-[var(--border-default)] text-[var(--text-secondary)] hover:bg-[var(--bg-surface)]"}`}>
+                    <Binary size={12} /> REA
+                  </button>
+                    <button onClick={() => setShowReaPanel(!showReaPanel)} className={`flex h-7 items-center gap-1 rounded-lg border px-2 text-xs ${showReaPanel ? "border-purple-500/40 bg-purple-500/10 text-purple-400" : "border-[var(--border-default)] text-[var(--text-secondary)] hover:bg-[var(--bg-surface)]"}`}>
                       <Binary size={12} /> REA
                     </button>
-                    <button onClick={() => { toggleSnapgent(); if (!bridgeConnected) connectBridge(); }} className={`flex h-7 items-center gap-1 rounded-lg border px-2 text-xs ${snapgentEnabled ? (bridgeConnected ? 'border-green-500/40 bg-green-500/10 text-green-400' : 'border-amber-500/40 bg-amber-500/10 text-amber-400') : 'border-[var(--border-default)] text-[var(--text-secondary)] hover:bg-[var(--bg-surface)]'}`} title={bridgeConnected ? 'Bridge connected' : 'Bridge offline — start start.bat on your machine'}>
-                      <Terminal size={12} /> VS Code{snapgentEnabled ? (bridgeConnected ? '' : ' (offline)') : ''}
+                    <button onClick={() => setShowReaPanel(!showReaPanel)} className={`flex h-7 items-center gap-1 rounded-lg border px-2 text-xs ${showReaPanel ? 'border-purple-500/40 bg-purple-500/10 text-purple-400' : 'border-[var(--border-default)] text-[var(--text-secondary)] hover:bg-[var(--bg-surface)]'}`}>
+                      <Binary size={12} /> REA
                     </button>
                     <div className="flex-1" />
                     <button onClick={handleSend} disabled={!composerText.trim()} className="flex h-7 w-7 items-center justify-center rounded-full bg-[var(--primary-btn)] text-white disabled:opacity-40 hover:bg-[var(--accent-hover)] transition">
@@ -689,11 +638,6 @@ export default function Page() {
             </div>
           )}
         </div>
-
-        {/* Snapgent bar — shows above composer when snapgent enabled */}
-        {snapgentEnabled && <SnapgentBar onCommandResult={(cmd, result) => {
-          window.dispatchEvent(new CustomEvent('snapgent:result', { detail: { command: cmd, result } }));
-        }} />}
 
         {/* === COMPOSER (when messages exist) === */}
         {activeMessages.length > 0 && (

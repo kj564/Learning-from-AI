@@ -147,7 +147,6 @@ interface WorkspaceState {
   composerAttachments: Attachment[];
   webSearchEnabled: boolean;
   thinkEnabled: boolean;
-  snapgentEnabled: boolean; // NEW: snapgent VS Code MCP mode
   voiceRecording: { isRecording: boolean; seconds: number } | null;
   readAloud: { messageId: string; audioUrl: string; playing: boolean } | null;
   imageLightbox: { url: string; prompt?: string } | null;
@@ -202,7 +201,6 @@ interface WorkspaceState {
   clearAttachments: () => void;
   toggleWebSearch: () => void;
   toggleThink: () => void;
-  toggleSnapgent: () => void;
   setVoiceRecording: (state: { isRecording: boolean; seconds: number } | null) => void;
   setReadAloud: (state: { messageId: string; audioUrl: string; playing: boolean } | null) => void;
   openImageLightbox: (url: string, prompt?: string) => void;
@@ -238,7 +236,6 @@ export const useStore = create<WorkspaceState>()(
       composerAttachments: [],
       webSearchEnabled: false,
       thinkEnabled: false,
-      snapgentEnabled: false,
       voiceRecording: null,
       readAloud: null,
       imageLightbox: null,
@@ -383,7 +380,6 @@ export const useStore = create<WorkspaceState>()(
       clearAttachments: () => set({ composerAttachments: [] }),
       toggleWebSearch: () => set((s) => ({ webSearchEnabled: !s.webSearchEnabled })),
       toggleThink: () => set((s) => ({ thinkEnabled: !s.thinkEnabled })),
-      toggleSnapgent: () => set((s) => ({ snapgentEnabled: !s.snapgentEnabled })),
       setVoiceRecording: (state) => set({ voiceRecording: state }),
       setReadAloud: (state) => set({ readAloud: state }),
       openImageLightbox: (url, prompt) => set({ imageLightbox: { url, prompt } }),
@@ -427,7 +423,6 @@ export const useStore = create<WorkspaceState>()(
           activeAssistantId: s.activeAssistantId,
           webSearchEnabled: s.webSearchEnabled,
           thinkEnabled: s.thinkEnabled,
-          snapgentEnabled: s.snapgentEnabled,
           archivedConversations: s.archivedConversations,
           messagesByConversation: {},
         };

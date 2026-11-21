@@ -24,7 +24,6 @@ import { NextRequest } from 'next/server';
 import ZAI from 'z-ai-web-dev-sdk';
 import { db } from '@/lib/db';
 import { TOOL_DEFINITIONS, toolsToSystemPrompt } from '@/lib/tool-definitions';
-import { buildSnapgentPrompt, extractSnapgentCommand } from '@/lib/snapgent-prompt';
 
 export const AI_MODELS = [
   { id: 'glm-5.3', name: 'GLM-5.3', description: 'Most advanced — flagship model', glmModel: 'glm-5.3' },
@@ -105,7 +104,7 @@ To call a tool, respond with ONLY this JSON format and nothing else:
 
 The system will execute the tool and send the result back. Then you can explain what happened to the user.`;
 
-function buildSystemPrompt(project: any, assistant: any, tools = TOOL_DEFINITIONS, snapgent = false): string {
+function buildSystemPrompt(project: any, assistant: any, tools = TOOL_DEFINITIONS): string {
   let p = BASE_SYSTEM_PROMPT;
   if (assistant?.systemPrompt) {
     p += `\n\n# Assistant Persona\n\n${assistant.systemPrompt}`;
@@ -124,14 +123,7 @@ function buildSystemPrompt(project: any, assistant: any, tools = TOOL_DEFINITION
     }
     p += context;
   }
-  if (snapgent) {
-    // Snapgent mode: inject the snapgent VS Code MCP system prompt instead of
-    // the regular tool prompt. The AI outputs {"command":"...","params":{...}}
-    // which we parse and forward to the local bridge.
-    p += buildSnapgentPrompt();
-  } else {
-    p += toolsToSystemPrompt(tools);
-  }
+  p += toolsToSystemPrompt(tools);
   return p;
 }
 
@@ -322,7 +314,6 @@ export async function POST(req: NextRequest) {
     model,
     assistant,
     think,
-    snapgent, // NEW: boolean — when true, inject snapgent VS Code MCP system prompt + parse commands
   } = body as {
     message: string;
     sessionId?: string;
@@ -331,7 +322,6 @@ export async function POST(req: NextRequest) {
     model?: string;
     assistant?: { id: string; name: string; systemPrompt: string } | null;
     think?: boolean;
-    snapgent?: boolean;
   };
 
   if (!message || typeof message !== 'string') {
@@ -374,7 +364,7 @@ export async function POST(req: NextRequest) {
   }
 
   const sid = sessionId || convoId || `chat_${Date.now()}`;
-  const systemPrompt = buildSystemPrompt(project, assistant, TOOL_DEFINITIONS, snapgent);
+  const systemPrompt = buildSystemPrompt(project, assistant);
 
   // Get or create the session's in-memory history
   sweepExpired();
@@ -406,50 +396,6 @@ export async function POST(req: NextRequest) {
           }
 
           const toolCall = extractToolCall(raw);
-
-          // === Snapgent mode: PASS commands through to client ===
-          // When snapgent=true, the AI outputs {"command":"...","params":{...}}.
-          // The SERVER does NOT execute these — the browser (client-side) has the
-          // WebSocket connection to the user's local bridge (ws://127.0.0.1:17613).
-          // The server cannot reach the bridge because it runs in the cloud.
-          //
-          // So the server just passes the raw AI text through to the client.
-          // The client detects the command in onDone, executes it via bridge,
-          // and sends the result back as a new message (which starts a new stream).
-          //
-          // We still strip the JSON from visible text and emit tool_use/tool_result
-          // events so the UI shows a clean tool card — but with a special
-          // "snapgent:true" flag that tells the client "you handle execution".
-
-          if (!toolCall && snapgent) {
-            const snapgentCmd = extractSnapgentCommand(raw);
-            if (snapgentCmd) {
-              // Strip the JSON from visible text
-              let visibleText = raw;
-              const trimmed = raw.trim();
-              if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
-                visibleText = '';
-              } else {
-                const found = findBalancedJson(raw);
-                if (found) visibleText = (raw.slice(0, found.start) + raw.slice(found.end)).trim();
-              }
-              sseEmit(controller, 'text-replace', { text: visibleText });
-
-              // Emit a "snapgent_command" event — client detects this and executes
-              // the command via its own bridge WebSocket. Do NOT emit tool_result
-              // here (the server can't execute it).
-              sseEmit(controller, 'snapgent_command', {
-                command: snapgentCmd.command,
-                params: snapgentCmd.params,
-              });
-
-              // Stop the server-side loop — the client will send a new message
-              // with the tool result, which starts a fresh stream.
-              finalText = visibleText;
-              history.push({ role: 'assistant', content: visibleText || `[executed: ${snapgentCmd.command}]` });
-              break; // exit the tool loop — wait for client to send result
-            }
-          }
 
           if (!toolCall) {
             finalText = raw;
