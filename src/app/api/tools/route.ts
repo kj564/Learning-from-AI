@@ -304,6 +304,43 @@ export async function POST(req: NextRequest) {
         }
       }
 
+      case 'send_email_with_approval': {
+        // DANGEROUS tool — requires explicit user confirmation.
+        // The frontend is expected to surface a confirmation UI before the model
+        // ever calls this endpoint. If we get here without a confirmed flag, return
+        // a "needs approval" response so the model knows to stop and ask.
+        const to = args.to as string;
+        const subject = args.subject as string;
+        const body = args.body as string;
+        if (!to || !subject || !body) {
+          return NextResponse.json({ error: 'to, subject, body are all required' }, { status: 400 });
+        }
+        // Basic email syntax check
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to)) {
+          return NextResponse.json({ error: 'invalid recipient address' }, { status: 400 });
+        }
+        const confirmed = args.confirmed === true;
+        if (!confirmed) {
+          return NextResponse.json({
+            success: false,
+            needsApproval: true,
+            draft: { to, subject, body },
+            message: 'This action requires explicit user confirmation. Present the draft to the user and resend with confirmed:true after they approve.',
+          });
+        }
+        // Confirmed — in this environment we don't have an SMTP relay, so we log
+        // the would-be send and return success. A real deployment would call the
+        // email provider here.
+        try {
+          await mkdir(path.join(WORKSPACE, '.tmp-email-log'), { recursive: true });
+          const logLine = `[${new Date().toISOString()}] to=${to} subject=${subject}\n${body}\n---\n`;
+          await writeFile(path.join(WORKSPACE, '.tmp-email-log', 'sent.log'), logLine, { flag: 'a' });
+          return NextResponse.json({ success: true, to, subject, delivered: 'logged' });
+        } catch (e) {
+          return NextResponse.json({ success: false, error: (e as Error).message }, { status: 500 });
+        }
+      }
+
       default:
         return NextResponse.json({ error: `Unknown tool: ${tool}` }, { status: 400 });
     }
@@ -324,6 +361,6 @@ async function POST_proxy(_req: NextRequest, tool: string, args: Record<string, 
 
 export async function GET() {
   return NextResponse.json({
-    tools: ['web_search', 'read_url', 'read_file', 'list_dir', 'write_file', 'edit_file', 'run_code_sandbox', 'run_shell', 'create_note', 'recall_memory', 'search_knowledge_base', 'image_generate', 'image_search', 'npm_install', 'project_create'],
+    tools: ['web_search', 'read_url', 'read_file', 'list_dir', 'write_file', 'edit_file', 'run_code_sandbox', 'run_shell', 'create_note', 'recall_memory', 'search_knowledge_base', 'send_email_with_approval', 'image_generate', 'image_search', 'npm_install', 'project_create'],
   });
 }
