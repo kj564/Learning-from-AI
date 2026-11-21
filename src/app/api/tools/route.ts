@@ -16,7 +16,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { writeFile, readFile, readdir, mkdir, unlink } from 'fs/promises';
+import { writeFile, readFile, mkdir, unlink } from 'fs/promises';
 import { existsSync } from 'fs';
 import path from 'path';
 import { exec, execFile } from 'child_process';
@@ -26,6 +26,10 @@ import ZAI from 'z-ai-web-dev-sdk';
 import { db } from '@/lib/db';
 import { validateToolCall, writeAudit } from '@/lib/tool-validation';
 import { createApproval } from '@/lib/approval';
+import {
+  resolveWorkspacePath, listWorkspaceFiles, readWorkspaceFile, writeWorkspaceFile,
+  buildSandboxEnv, ensureWorkspaceForConversation,
+} from '@/lib/workspace';
 
 const execAsync = promisify(exec);
 const execFileAsync = promisify(execFile);
@@ -48,10 +52,22 @@ function escapeRegExp(s: string): string {
 // never execute inline regardless of what the model sends.
 const DANGEROUS_TOOLS = new Set(['send_email_with_approval']);
 
+// Tools that operate on files and therefore require a workspaceId. If the
+// model omits workspaceId, the backend auto-creates one for the conversation
+// and injects it — the model never needs to know the absolute root path.
+const FILE_TOOLS = new Set([
+  'read_file', 'write_file', 'edit_file', 'list_files', 'list_dir',
+  'run_code_sandbox', 'run_shell', 'create_note',
+]);
+
 export async function POST(req: NextRequest) {
   const t0 = Date.now();
   let conversationId: string | null = null;
   let sessionId: string | null = null;
+  let workspaceId: string | null = null;
+  let requestedPath: string | null = null;
+  let resolvedPath: string | null = null;
+  let accessDecision: string | 'n/a' = 'n/a';
   try {
     const body = await req.json();
     const { tool, args } = body as { tool: string; args: Record<string, unknown>; conversationId?: string; sessionId?: string };
@@ -62,13 +78,27 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: false, is_error: true, error: 'INVALID_ARGUMENTS', details: 'args object required' }, { status: 400 });
     }
 
+    // === Workspace injection: if this is a file tool and the model omitted
+    // workspaceId, auto-create one for the conversation and inject it. The
+    // model never sees the absolute rootPath — only the workspaceId. ===
+    let effectiveArgs = args;
+    if (FILE_TOOLS.has(tool) && !args.workspaceId) {
+      const ws = await ensureWorkspaceForConversation(conversationId, 'default');
+      effectiveArgs = { ...args, workspaceId: ws.id };
+      workspaceId = ws.id;
+    } else if (args.workspaceId) {
+      workspaceId = args.workspaceId as string;
+    }
+    if (typeof effectiveArgs.path === 'string') requestedPath = effectiveArgs.path;
+
     // === 1. Schema validation (Zod) — before any execution. ===
-    const v = validateToolCall(tool, args);
+    const v = validateToolCall(tool, effectiveArgs);
     if (!v.ok) {
       await writeAudit({
-        conversationId, sessionId, toolName: tool, args,
+        conversationId, sessionId, toolName: tool, args: effectiveArgs,
         status: 'invalid', durationMs: Date.now() - t0,
         validationError: JSON.stringify(v.details),
+        workspaceId, requestedPath, accessDecision: 'denied_absolute',
       });
       return NextResponse.json({
         success: false,
@@ -105,21 +135,49 @@ export async function POST(req: NextRequest) {
     }
 
     // === 3. Normal tool execution — wrapped with audit logging. ===
+    // For file tools, resolve the path FIRST so we can record the access
+    // decision (allowed / denied_*) in the audit even on success.
     try {
+      // For file tools, pre-resolve to capture the resolvedPath for the audit.
+      // (The executor does its own resolution; this is just for observability.)
+      if (FILE_TOOLS.has(tool) && typeof v.args.path === 'string') {
+        const res = await resolveWorkspacePath(v.args.workspaceId as string, v.args.path as string, 'default');
+        if (res.ok) {
+          resolvedPath = res.absolutePath;
+          accessDecision = 'allowed';
+        } else {
+          accessDecision = res.accessDecision;
+          // Path resolution failed — record the denial and return the error.
+          await writeAudit({
+            conversationId, sessionId, toolName: tool, args: v.args,
+            status: 'denied', durationMs: Date.now() - t0,
+            errorMessage: res.error,
+            workspaceId, requestedPath, accessDecision,
+          });
+          return NextResponse.json({
+            success: false,
+            is_error: true,
+            error: 'PATH_DENIED',
+            accessDecision: res.accessDecision,
+            message: res.error,
+          }, { status: 400 });
+        }
+      }
       const response = await executeTool(tool, v.args);
-      // executeTool returns NextResponse. Inspect its status to classify.
       const status = response.status;
-      const resultBytes = 0; // response body is a stream we don't want to buffer here
+      const resultBytes = 0;
       if (status >= 200 && status < 300) {
         await writeAudit({
           conversationId, sessionId, toolName: tool, args: v.args,
           status: 'success', durationMs: Date.now() - t0, resultBytes,
+          workspaceId, requestedPath, resolvedPath, accessDecision,
         });
       } else {
         await writeAudit({
           conversationId, sessionId, toolName: tool, args: v.args,
           status: 'failure', durationMs: Date.now() - t0,
           errorMessage: `executor returned status ${status}`,
+          workspaceId, requestedPath, resolvedPath, accessDecision,
         });
       }
       return response;
@@ -128,6 +186,7 @@ export async function POST(req: NextRequest) {
       await writeAudit({
         conversationId, sessionId, toolName: tool, args: v.args,
         status: 'failure', durationMs: Date.now() - t0, errorMessage: errMsg,
+        workspaceId, requestedPath, resolvedPath, accessDecision,
       });
       return NextResponse.json({ success: false, is_error: true, error: errMsg }, { status: 500 });
     }
@@ -173,23 +232,32 @@ async function executeTool(tool: string, args: Record<string, unknown>): Promise
       }
 
       case 'read_file': {
+        const wsId = args.workspaceId as string;
         const filePath = args.path as string;
-        if (!filePath) return NextResponse.json({ error: 'path required' }, { status: 400 });
-        const fullPath = safePath(filePath);
-        if (!fullPath || !existsSync(fullPath)) return NextResponse.json({ error: 'File not found' }, { status: 404 });
-        const content = await readFile(fullPath, 'utf-8');
-        return NextResponse.json({ success: true, path: filePath, content });
+        const res = await readWorkspaceFile(wsId, filePath, 'default');
+        if (!res.ok) {
+          return NextResponse.json({
+            success: false, is_error: true,
+            error: 'PATH_DENIED', accessDecision: res.accessDecision,
+            message: res.error,
+          }, { status: 400 });
+        }
+        return NextResponse.json({ success: true, path: filePath, content: res.content, size: res.size });
       }
 
+      case 'list_files':
       case 'list_dir': {
+        const wsId = args.workspaceId as string;
         const dirPath = (args.path as string) || (args.dir as string) || '.';
-        const fullPath = safePath(dirPath);
-        if (!fullPath || !existsSync(fullPath)) return NextResponse.json({ error: 'Directory not found' }, { status: 404 });
-        const entries = await readdir(fullPath, { withFileTypes: true });
-        const items = entries
-          .filter((e) => !e.name.startsWith('.') && e.name !== 'node_modules' && e.name !== '.next' && e.name !== '__pycache__')
-          .map((e) => ({ name: e.name, type: e.isDirectory() ? 'dir' : 'file' }));
-        return NextResponse.json({ success: true, dir: dirPath, items });
+        const res = await listWorkspaceFiles(wsId, dirPath, 'default');
+        if (!res.ok) {
+          return NextResponse.json({
+            success: false, is_error: true,
+            error: 'PATH_DENIED', accessDecision: res.accessDecision,
+            message: res.error,
+          }, { status: 400 });
+        }
+        return NextResponse.json({ success: true, workspaceId: wsId, dir: dirPath, items: res.entries });
       }
 
       case 'search_knowledge_base': {
@@ -229,26 +297,37 @@ async function executeTool(tool: string, args: Record<string, unknown>): Promise
 
       // === WRITE TOOLS ===
       case 'write_file': {
+        const wsId = args.workspaceId as string;
         const filePath = args.path as string;
         const content = args.content as string;
-        if (!filePath || content === undefined) return NextResponse.json({ error: 'path + content required' }, { status: 400 });
-        const fullPath = safePath(filePath);
-        if (!fullPath) return NextResponse.json({ error: 'Invalid path (path traversal blocked)' }, { status: 400 });
-        const dir = path.dirname(fullPath);
-        if (!existsSync(dir)) await mkdir(dir, { recursive: true });
-        await writeFile(fullPath, content, 'utf-8');
-        return NextResponse.json({ success: true, path: filePath, size: content.length });
+        const res = await writeWorkspaceFile(wsId, filePath, content, 'default');
+        if (!res.ok) {
+          return NextResponse.json({
+            success: false, is_error: true,
+            error: 'PATH_DENIED', accessDecision: res.accessDecision,
+            message: res.error,
+          }, { status: 400 });
+        }
+        return NextResponse.json({ success: true, workspaceId: wsId, path: res.path, size: res.size });
       }
 
       case 'edit_file': {
+        const wsId = args.workspaceId as string;
         const filePath = args.path as string;
-        if (!filePath) return NextResponse.json({ error: 'path required' }, { status: 400 });
-        const fullPath = safePath(filePath);
-        if (!fullPath || !existsSync(fullPath)) return NextResponse.json({ error: 'File not found' }, { status: 404 });
+        const res = await resolveWorkspacePath(wsId, filePath, 'default');
+        if (!res.ok) {
+          return NextResponse.json({
+            success: false, is_error: true,
+            error: 'PATH_DENIED', accessDecision: res.accessDecision,
+            message: res.error,
+          }, { status: 400 });
+        }
+        if (!existsSync(res.absolutePath)) {
+          return NextResponse.json({ success: false, is_error: true, error: 'File not found', path: filePath }, { status: 404 });
+        }
         const oldText = args.old_text as string;
         const newText = args.new_text as string;
-        if (!oldText || !newText) return NextResponse.json({ error: 'old_text + new_text required' }, { status: 400 });
-        let fileContent = await readFile(fullPath, 'utf-8');
+        let fileContent = await readFile(res.absolutePath, 'utf-8');
         const replaceAll = args.replace_all === true;
         if (replaceAll) {
           fileContent = fileContent.split(oldText).join(newText);
@@ -258,70 +337,83 @@ async function executeTool(tool: string, args: Record<string, unknown>): Promise
           if (count > 1) return NextResponse.json({ error: `old_text found ${count} times; use replace_all: true` }, { status: 400 });
           fileContent = fileContent.replace(oldText, newText);
         }
-        await writeFile(fullPath, fileContent, 'utf-8');
-        return NextResponse.json({ success: true, path: filePath });
+        await writeFile(res.absolutePath, fileContent, 'utf-8');
+        return NextResponse.json({ success: true, workspaceId: wsId, path: filePath });
       }
 
       case 'run_code_sandbox': {
+        const wsId = args.workspaceId as string;
         const code = args.code as string;
         const lang = (args.language as string) || 'javascript';
-        if (!code) return NextResponse.json({ error: 'code required' }, { status: 400 });
-        const tmpDir = path.join(WORKSPACE, '.tmp-exec');
+        // Resolve the workspace root — code runs with cwd = workspace root, so
+        // it can only read/write inside its own workspace. Env is filtered to
+        // strip secrets (T17).
+        const res = await resolveWorkspacePath(wsId, '.', 'default', { followSymlinks: false });
+        if (!res.ok) {
+          return NextResponse.json({
+            success: false, is_error: true,
+            error: 'PATH_DENIED', accessDecision: res.accessDecision,
+            message: res.error,
+          }, { status: 400 });
+        }
+        const workspaceRoot = res.workspaceRoot;
+        // Sandbox temp files live INSIDE the workspace (under .tmp/) so cleanup
+        // is workspace-scoped and the sandbox can't write outside the workspace.
+        const tmpDir = path.join(workspaceRoot, '.tmp');
         if (!existsSync(tmpDir)) await mkdir(tmpDir, { recursive: true });
+        // Filtered environment — no DATABASE_URL, no *_KEY/_TOKEN/_SECRET.
+        const sandboxEnv = buildSandboxEnv(workspaceRoot);
 
-        if (lang === 'javascript') {
-          const tmpFile = path.join(tmpDir, `${randomUUID()}.js`);
-          await writeFile(tmpFile, code, 'utf-8');
-          try {
-            const { stdout, stderr } = await execFileAsync('node', [tmpFile], { cwd: WORKSPACE, timeout: 10000, maxBuffer: 1024 * 1024 });
-            await unlink(tmpFile).catch(() => {});
-            return NextResponse.json({ success: true, stdout, stderr: stderr || undefined });
-          } catch (e) {
-            await unlink(tmpFile).catch(() => {});
-            return NextResponse.json({ success: false, error: (e as Error).message }, { status: 500 });
-          }
-        }
-        if (lang === 'typescript') {
-          const tmpFile = path.join(tmpDir, `${randomUUID()}.ts`);
-          await writeFile(tmpFile, code, 'utf-8');
-          try {
-            const { stdout, stderr } = await execFileAsync('bun', ['run', tmpFile], { cwd: WORKSPACE, timeout: 10000, maxBuffer: 1024 * 1024 });
-            await unlink(tmpFile).catch(() => {});
-            return NextResponse.json({ success: true, stdout, stderr: stderr || undefined });
-          } catch (e) {
-            await unlink(tmpFile).catch(() => {});
-            return NextResponse.json({ success: false, error: (e as Error).message }, { status: 500 });
-          }
-        }
-        if (lang === 'python') {
-          const tmpFile = path.join(tmpDir, `${randomUUID()}.py`);
-          await writeFile(tmpFile, code, 'utf-8');
-          try {
-            const { stdout, stderr } = await execFileAsync('python3', [tmpFile], { cwd: WORKSPACE, timeout: 10000, maxBuffer: 1024 * 1024 });
-            await unlink(tmpFile).catch(() => {});
-            return NextResponse.json({ success: true, stdout, stderr: stderr || undefined });
-          } catch (e) {
-            await unlink(tmpFile).catch(() => {});
-            return NextResponse.json({ success: false, error: (e as Error).message }, { status: 500 });
-          }
-        }
+        const runners: Record<string, { cmd: string; argsFn: (f: string) => string[]; ext: string }> = {
+          javascript: { cmd: 'node', argsFn: (f) => [f], ext: 'js' },
+          typescript: { cmd: 'bun', argsFn: (f) => ['run', f], ext: 'ts' },
+          python: { cmd: 'python3', argsFn: (f) => [f], ext: 'py' },
+        };
         if (lang === 'bash' || lang === 'sh') {
           try {
-            const { stdout, stderr } = await execAsync(code, { cwd: WORKSPACE, timeout: 10000, maxBuffer: 1024 * 1024 });
-            return NextResponse.json({ success: true, stdout, stderr: stderr || undefined });
+            const { stdout, stderr } = await execAsync(code, {
+              cwd: workspaceRoot, timeout: 10000, maxBuffer: 1024 * 1024, env: sandboxEnv,
+            });
+            return NextResponse.json({ success: true, workspaceId: wsId, stdout, stderr: stderr || undefined });
           } catch (e) {
-            return NextResponse.json({ success: false, error: (e as Error).message }, { status: 500 });
+            const err = e as Error & { stdout?: string; stderr?: string };
+            return NextResponse.json({ success: false, error: err.message, stdout: err.stdout, stderr: err.stderr }, { status: 500 });
           }
         }
-        return NextResponse.json({ error: `Language ${lang} not supported` }, { status: 400 });
+        const runner = runners[lang];
+        if (!runner) return NextResponse.json({ error: `Language ${lang} not supported` }, { status: 400 });
+        const tmpFile = path.join(tmpDir, `${randomUUID()}.${runner.ext}`);
+        await writeFile(tmpFile, code, 'utf-8');
+        try {
+          const { stdout, stderr } = await execFileAsync(runner.cmd, runner.argsFn(tmpFile), {
+            cwd: workspaceRoot, timeout: 10000, maxBuffer: 1024 * 1024, env: sandboxEnv,
+          });
+          await unlink(tmpFile).catch(() => {});
+          return NextResponse.json({ success: true, workspaceId: wsId, language: lang, stdout, stderr: stderr || undefined });
+        } catch (e) {
+          await unlink(tmpFile).catch(() => {});
+          const err = e as Error & { stdout?: string; stderr?: string };
+          return NextResponse.json({ success: false, error: err.message, stdout: err.stdout, stderr: err.stderr }, { status: 500 });
+        }
       }
 
       case 'run_shell': {
+        const wsId = args.workspaceId as string;
         const command = args.command as string;
-        if (!command) return NextResponse.json({ error: 'command required' }, { status: 400 });
+        const res = await resolveWorkspacePath(wsId, '.', 'default', { followSymlinks: false });
+        if (!res.ok) {
+          return NextResponse.json({
+            success: false, is_error: true,
+            error: 'PATH_DENIED', accessDecision: res.accessDecision,
+            message: res.error,
+          }, { status: 400 });
+        }
+        const sandboxEnv = buildSandboxEnv(res.workspaceRoot);
         try {
-          const { stdout, stderr } = await execAsync(command, { cwd: WORKSPACE, timeout: 15000, maxBuffer: 1024 * 1024 });
-          return NextResponse.json({ success: true, command, stdout, stderr: stderr || undefined });
+          const { stdout, stderr } = await execAsync(command, {
+            cwd: res.workspaceRoot, timeout: 15000, maxBuffer: 1024 * 1024, env: sandboxEnv,
+          });
+          return NextResponse.json({ success: true, workspaceId: wsId, command, stdout, stderr: stderr || undefined });
         } catch (e) {
           const err = e as Error & { stdout?: string; stderr?: string };
           return NextResponse.json({ success: false, error: err.message, stdout: err.stdout, stderr: err.stderr }, { status: 500 });
@@ -329,15 +421,27 @@ async function executeTool(tool: string, args: Record<string, unknown>): Promise
       }
 
       case 'create_note': {
+        const wsId = args.workspaceId as string;
         const title = args.title as string;
         const content = args.content as string;
         const category = (args.category as string) || 'finding';
-        if (!title || !content) return NextResponse.json({ error: 'title + content required' }, { status: 400 });
+        // Save the note to the workspace notes/ folder AND to the knowledge
+        // base for recall_memory. Notes are workspace-scoped: the filename
+        // encodes the workspaceId so recall can filter by workspace.
+        const notePath = `notes/${title.replace(/[^a-z0-9-_]+/gi, '_').slice(0, 60)}.md`;
+        const writeRes = await writeWorkspaceFile(wsId, notePath, `# ${title}\n\nCategory: ${category}\n\n${content}\n`, 'default');
+        if (!writeRes.ok) {
+          return NextResponse.json({
+            success: false, is_error: true,
+            error: 'PATH_DENIED', accessDecision: writeRes.accessDecision,
+            message: writeRes.error,
+          }, { status: 400 });
+        }
         try {
           const doc = await db.knowledgeDoc.create({
-            data: { title, source: `memory:${category}`, content, tags: JSON.stringify([category, 'memory']) },
+            data: { title, source: `memory:${category}:${wsId}`, content, tags: JSON.stringify([category, 'memory', wsId]) },
           });
-          return NextResponse.json({ success: true, id: doc.id });
+          return NextResponse.json({ success: true, id: doc.id, workspaceId: wsId, path: notePath });
         } catch (e) {
           return NextResponse.json({ success: false, error: (e as Error).message }, { status: 500 });
         }
@@ -345,23 +449,24 @@ async function executeTool(tool: string, args: Record<string, unknown>): Promise
 
       // === LEGACY ALIASES (backward compat) — delegate to executeTool directly
       // to avoid recursion through POST (which would double-audit).
+      // workspaceId is passed through so legacy calls stay workspace-scoped.
       case 'file_write': {
-        return executeTool('write_file', { path: args.path, content: args.content });
+        return executeTool('write_file', { workspaceId: args.workspaceId, path: args.path, content: args.content });
       }
       case 'file_read': {
-        return executeTool('read_file', { path: args.path });
+        return executeTool('read_file', { workspaceId: args.workspaceId, path: args.path });
       }
       case 'file_list': {
-        return executeTool('list_dir', { dir: args.dir || '.' });
+        return executeTool('list_dir', { workspaceId: args.workspaceId, dir: args.dir || '.' });
       }
       case 'code_run': {
-        return executeTool('run_code_sandbox', { code: args.code, language: args.language || 'javascript' });
+        return executeTool('run_code_sandbox', { workspaceId: args.workspaceId, code: args.code, language: args.language || 'javascript' });
       }
       case 'shell_run': {
-        return executeTool('run_shell', { command: args.command });
+        return executeTool('run_shell', { workspaceId: args.workspaceId, command: args.command });
       }
       case 'knowledge_search': {
-        return executeTool('search_knowledge_base', { query: args.query, top_k: args.topK });
+        return executeTool('search_knowledge_base', { workspaceId: args.workspaceId, query: args.query, top_k: args.topK });
       }
       case 'image_generate': {
         try {

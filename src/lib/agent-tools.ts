@@ -74,11 +74,12 @@ export const ORCHESTRATOR_TOOLS: AgentTool[] = [
   },
   {
     name: 'read_file',
-    description: 'Read a UTF-8 text file from the workspace.',
+    description: 'Read a UTF-8 text file from the workspace. workspaceId is required; paths are relative to the workspace root. Absolute paths and `..` are rejected.',
     input_schema: {
       type: 'object',
       properties: {
-        path: { type: 'string', description: 'Relative file path from workspace root.' },
+        workspaceId: { type: 'string', description: 'The workspace to read from. If omitted, the backend uses the conversation\'s active workspace.' },
+        path: { type: 'string', description: 'Relative file path from workspace root. Must NOT start with / and must NOT contain ..' },
       },
       required: ['path'],
     },
@@ -86,11 +87,26 @@ export const ORCHESTRATOR_TOOLS: AgentTool[] = [
     timeout_ms: 5000,
   },
   {
-    name: 'list_dir',
-    description: 'List files and folders in a directory.',
+    name: 'list_files',
+    description: 'List files and folders in a workspace directory. workspaceId required; paths relative to workspace root. Use this as the primary listing tool (list_dir is an alias).',
     input_schema: {
       type: 'object',
       properties: {
+        workspaceId: { type: 'string', description: 'The workspace to list in. If omitted, the conversation\'s active workspace is used.' },
+        path: { type: 'string', description: 'Relative directory path. Default: "."' },
+      },
+      required: [],
+    },
+    permission: 'read',
+    timeout_ms: 5000,
+  },
+  {
+    name: 'list_dir',
+    description: 'Alias for list_files. List files and folders in a workspace directory.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        workspaceId: { type: 'string', description: 'The workspace to list in. If omitted, the conversation\'s active workspace is used.' },
         path: { type: 'string', description: 'Relative directory path. Default: "."' },
       },
       required: [],
@@ -100,12 +116,13 @@ export const ORCHESTRATOR_TOOLS: AgentTool[] = [
   },
   {
     name: 'write_file',
-    description: 'Write or replace a file in the workspace. Creates parent directories.',
+    description: 'Write or replace a file in the workspace. Creates parent directories. workspaceId required; paths relative to workspace root. Absolute paths and `..` are rejected. NEVER create .md/README files unless asked.',
     input_schema: {
       type: 'object',
       properties: {
+        workspaceId: { type: 'string', description: 'The workspace to write to. If omitted, the conversation\'s active workspace is used.' },
         path: { type: 'string', description: 'Relative file path.' },
-        content: { type: 'string', description: 'Full file content.' },
+        content: { type: 'string', description: 'Full file content. Existing content is replaced.' },
       },
       required: ['path', 'content'],
     },
@@ -114,10 +131,11 @@ export const ORCHESTRATOR_TOOLS: AgentTool[] = [
   },
   {
     name: 'edit_file',
-    description: 'Replace an exact text snippet in a file. The snippet must be unique unless replace_all is true.',
+    description: 'Replace an exact text snippet in a workspace file. The snippet must be unique unless replace_all is true. workspaceId required; paths relative to workspace root.',
     input_schema: {
       type: 'object',
       properties: {
+        workspaceId: { type: 'string', description: 'The workspace to edit in. If omitted, the conversation\'s active workspace is used.' },
         path: { type: 'string', description: 'Relative file path.' },
         old_text: { type: 'string', description: 'Exact text to find.' },
         new_text: { type: 'string', description: 'Replacement text.' },
@@ -130,10 +148,11 @@ export const ORCHESTRATOR_TOOLS: AgentTool[] = [
   },
   {
     name: 'run_code_sandbox',
-    description: 'Execute code in an isolated sandbox. Supports JavaScript, TypeScript, Python, and Bash. Max 10s timeout.',
+    description: 'Execute code in an isolated sandbox with cwd set to the workspace root. Supports JavaScript, TypeScript, Python, Bash. Max 10s. Env is filtered (no DATABASE_URL, no *_KEY/*_TOKEN/*_SECRET). The sandbox can only read/write inside its own workspace.',
     input_schema: {
       type: 'object',
       properties: {
+        workspaceId: { type: 'string', description: 'The workspace whose root becomes the sandbox cwd. If omitted, the conversation\'s active workspace is used.' },
         code: { type: 'string', description: 'Code to execute.' },
         language: { type: 'string', enum: ['javascript', 'typescript', 'python', 'bash'] },
       },
@@ -144,10 +163,11 @@ export const ORCHESTRATOR_TOOLS: AgentTool[] = [
   },
   {
     name: 'run_shell',
-    description: 'Run a shell command in the workspace. Use for build, test, lint, git. Max 15s timeout.',
+    description: 'Run a shell command with cwd set to the workspace root. Use for build, test, lint, git. Max 15s. Env is filtered (no secrets). The shell can only operate inside its own workspace.',
     input_schema: {
       type: 'object',
       properties: {
+        workspaceId: { type: 'string', description: 'The workspace whose root becomes the shell cwd. If omitted, the conversation\'s active workspace is used.' },
         command: { type: 'string', description: 'Shell command.' },
       },
       required: ['command'],
@@ -157,10 +177,11 @@ export const ORCHESTRATOR_TOOLS: AgentTool[] = [
   },
   {
     name: 'create_note',
-    description: 'Save a note to persistent memory. Use for project decisions, user preferences, or important findings.',
+    description: 'Save a note to persistent memory AND to the workspace notes/ folder. Use for project decisions, user preferences, important findings. workspaceId required.',
     input_schema: {
       type: 'object',
       properties: {
+        workspaceId: { type: 'string', description: 'The workspace to save the note in. If omitted, the conversation\'s active workspace is used.' },
         title: { type: 'string', description: 'Note title.' },
         content: { type: 'string', description: 'Note content.' },
         category: { type: 'string', enum: ['preference', 'decision', 'finding', 'error_pattern', 'source'], description: 'Memory category.' },
@@ -267,6 +288,29 @@ A good agent does not call tools constantly. Call a tool only when it adds relia
 - Do NOT call create_note for trivia or re-derivable facts. Use it for durable user preferences, project decisions, recurring error patterns, source URLs you'll want again.
 
 If you are unsure whether a tool is needed, lean toward NOT calling it. The cost of an unnecessary tool call (latency, context pollution, audit noise) is real; the cost of answering directly from reasoning is usually lower.
+
+# Workspace
+
+Every file operation runs inside an isolated workspace. You do not need to know the absolute root path on disk — and you must NEVER try to discover or use one. The backend resolves relative paths to absolute paths and validates them; the model never sees absolute paths.
+
+Rules:
+- All paths are relative to the workspace root (e.g. "documents/report.md", "code/app.ts", "output/summary.txt").
+- NEVER use absolute paths (starting with /). They are rejected.
+- NEVER use ".." segments. They are rejected.
+- Symlinks that escape the workspace are followed-and-rejected (the backend resolves realpath).
+- Use list_files before modifying file structure so you know what's there.
+- Convention for output folders:
+  - input/ — user-uploaded files
+  - documents/ — source documents the user gave you
+  - code/ — code you write
+  - notes/ — notes (also saved to memory by create_note)
+  - output/ — final deliverables (reports, generated files)
+  - .agent/ — internal agent state (don't write here directly)
+- Before overwriting a file, read it first. If the change is destructive (replaces a lot of content), confirm with the user.
+- Don't send file contents to external tools (web_search, read_url) without the user's permission — the file may be sensitive.
+- workspaceId is passed in tool args. If you omit it, the backend uses the conversation's active workspace — but you should include it when you know it.
+
+The sandbox (run_code_sandbox, run_shell) runs with cwd = workspace root and a filtered environment (no DATABASE_URL, no API keys, no secrets). The sandbox can ONLY read and write inside its own workspace. Trying to access /etc/passwd, other users' workspaces, or server secrets will fail.
 
 # Tone
 

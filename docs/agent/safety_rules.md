@@ -273,3 +273,83 @@ Forbidden workarounds:
 - Chaining tools to smuggle a blocked action through an allowed one.
 
 The runtime's look-through rules (§2.4) catch all of these. Don't try.
+
+---
+
+## 9. Workspace isolation
+
+### 9.1 Workspace model
+
+Every conversation is bound to an isolated workspace directory, scoped per-user and
+per-project. The model never sees absolute paths — all paths in tool args are relative
+to the workspace root, and the backend resolves them. Workspaces are mutually
+inaccessible: a tool call scoped to workspace A cannot read or write workspace B.
+
+### 9.2 Path validation pipeline
+
+Before any filesystem access, the backend runs this pipeline on the requested path:
+
+1. **Reject absolute** — any path beginning with `/` is denied.
+2. **Reject `..` traversal** — any segment equal to `..` is denied.
+3. **Resolve under workspace root** — the relative path is joined to the workspace
+   root to form a candidate absolute path.
+4. **`realpath` check** — symlinks are resolved; if the real target escapes the
+   workspace root, the call is denied.
+5. **Cross-user check** — the resolved path is confirmed to belong to the workspace's
+   owner; cross-user access is denied.
+
+Only a path that survives all five steps reaches the filesystem.
+
+### 9.3 Access decisions
+
+The audit `accessDecision` field records exactly one of:
+
+- `allowed` — the call proceeded.
+- `denied_absolute` — the requested path was absolute.
+- `denied_traversal` — the path contained a `..` segment.
+- `denied_symlink_escape` — a symlink resolved outside the workspace root.
+- `denied_outside_workspace` — the resolved path fell outside the workspace root.
+- `denied_cross_user` — the resolved path belonged to a different user.
+- `denied_missing_workspace` — `workspaceId` did not resolve to a known workspace.
+
+Six denial reasons plus the `allowed` outcome; every file tool call records exactly one.
+
+### 9.4 Sandbox isolation
+
+`run_code_sandbox` runs with `cwd` set to the workspace root and a filtered environment.
+Environment variables are denied if their name matches any of these patterns
+(case-insensitive):
+
+- `DATABASE_URL`
+- `*_KEY`
+- `*_TOKEN`
+- `*_SECRET`
+- `*_PASSWORD`
+- `*_PRIVATE_KEY`
+
+Hard limits:
+
+- **Time**: 10s timeout per call.
+- **Output**: 1 MB cap; excess is truncated.
+
+The sandbox **cannot** access other workspaces, server secrets, or the production
+database. See §3 for the broader sandbox boundary table.
+
+### 9.5 Storage
+
+In development, workspace contents live on local disk at
+`.workspaces/{userId}/{wsId}/`. Production should swap this backend for an object store
+(S3 / R2) behind the same path-validation API — the pipeline in §9.2 is
+storage-agnostic.
+
+### 9.6 Audit fields
+
+Every file tool call records the following audit fields:
+
+- `workspaceId` — the workspace scoped to the call.
+- `requestedPath` — the path as the model supplied it (relative).
+- `resolvedPath` — the absolute path after validation, or `null` if denied before
+  resolution.
+- `accessDecision` — one of the values in §9.3.
+
+Denied calls are recorded with the same fields.

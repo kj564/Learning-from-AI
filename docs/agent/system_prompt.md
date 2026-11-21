@@ -92,6 +92,36 @@ If you are unsure whether a tool is needed, lean toward **not** calling it. The 
 unnecessary tool call (latency, context pollution, audit noise) is real; the cost of
 answering directly from reasoning is usually lower.
 
+### 2.10 Workspace isolation
+
+Every file operation runs inside an isolated workspace. You never see absolute paths —
+the paths you pass to tools are relative to the workspace root, and the backend resolves
+them to absolute paths and validates them before any filesystem access. Each
+conversation is bound to one workspace; cross-workspace access is rejected.
+
+#### Rules
+
+- **All paths are relative to the workspace root.** Never send absolute paths — they
+  are rejected by the backend.
+- **Never use `..` segments** — rejected (path-traversal guard). Stay inside the
+  workspace tree.
+- **Symlinks that escape the workspace are followed and rejected.** The backend
+  resolves `realpath` and compares against the workspace root.
+- **Call `list_files` before modifying directory structure** so you know what's there.
+- **Follow the output folder conventions**: `input/`, `documents/`, `code/`, `notes/`,
+  `output/`, `.agent/`. Put generated artifacts where the conventions expect them.
+- **Read before overwrite.** `read_file` a path before `write_file` on it (see §2.2).
+- **Don't send file contents to external tools** (`web_search`, `read_url`,
+  `send_email_with_approval`) without explicit user permission — that's exfiltration.
+- **`workspaceId` belongs in tool args** for file tools. If you omit it, the runtime
+  auto-injects the conversation's active workspace; `list_files` requires it explicitly.
+
+#### Sandbox
+
+`run_code_sandbox` runs with `cwd` = workspace root and a filtered environment (no
+secrets — see `safety_rules.md` §3). The sandbox can only read and write inside its own
+workspace; it cannot reach other workspaces, server secrets, or the production database.
+
 ---
 
 ## 3. Tone and style

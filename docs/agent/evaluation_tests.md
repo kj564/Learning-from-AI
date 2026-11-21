@@ -553,6 +553,128 @@ with `status: "success"` exists for the call; no file content leaks.
 
 ---
 
+## K. Workspace isolation (T11–T18) — gating safety tests
+
+> These tests exercise the workspace isolation layer (`src/lib/workspace.ts`).
+> They are **gating** — any failure blocks a release. The workspace model:
+> per-user/per-project isolated directories; model never sees absolute paths;
+> backend resolves + validates; sandbox runs with cwd=workspace root + filtered env.
+
+### T11 — Relative path works inside a workspace
+**CAPABILITY:** Workspace path resolution (`workspace.ts` `resolveWorkspacePath`)
+**SETUP:** Create a workspace `ws1` via `POST /api/workspaces {name:"ws1"}`. Write
+a file to `documents/report.md` via `POST /api/workspaces/ws1/files {path, content}`.
+Then call `read_file` with `workspaceId: ws1, path: "documents/report.md"`.
+**EXPECTED:** The read succeeds and returns the exact content written. The audit
+log shows `accessDecision: "allowed"`, `workspaceId: ws1`, `requestedPath:
+"documents/report.md"`, and `resolvedPath` under the workspace root.
+**PASS:** read_file returns `success: true` with matching content; audit row has
+`accessDecision: "allowed"` and `resolvedPath` starting with the workspace root.
+**FAIL:** read_file fails, or the audit row shows a denial, or `resolvedPath` is
+outside the workspace root.
+
+### T12 — Absolute path rejected
+**CAPABILITY:** Absolute-path rejection (`workspace.ts` step 4, Zod schema)
+**SETUP:** Workspace `ws1` exists. Call `read_file` with `path: "/etc/passwd"`.
+**EXPECTED:** The Zod schema rejects the path at validation time. The response is
+`{ success: false, is_error: true, error: "INVALID_ARGUMENTS", details: [{path:
+"path", message: "path must be relative and contain no .. segments"}] }`. The
+audit row has `status: "invalid"`, `accessDecision: "denied_absolute"`.
+**PASS:** Response has `is_error: true` with the path-validation message; audit
+row confirms `denied_absolute`; no file is read.
+**FAIL:** The path reaches the executor, or the file is read, or no audit row is
+written.
+
+### T13 — `../` traversal rejected
+**CAPABILITY:** Traversal rejection (`workspace.ts` step 5)
+**SETUP:** Workspace `ws1` exists. Call `read_file` with `path:
+"../../../../etc/passwd"`.
+**EXPECTED:** The Zod schema rejects `..` segments. The response is
+`is_error: true` with the traversal message. The audit row has
+`accessDecision: "denied_traversal"` (or `denied_absolute` if the schema catches
+it first — both are acceptable denials).
+**PASS:** Response is `is_error: true`; no file content returned; audit row
+records the denial.
+**FAIL:** /etc/passwd content is returned, or the path resolves outside the
+workspace.
+
+### T14 — Symlink escape rejected
+**CAPABILITY:** Symlink-realpath check (`workspace.ts` step 7)
+**SETUP:** Create workspace `ws1`. Inside it, create a symlink
+`documents/link → /etc/passwd` (via shell or direct fs.symlink). Then call
+`read_file` with `path: "documents/link"`.
+**EXPECTED:** The path passes the `..` check (it's relative, no `..`), and the
+resolved absolute path is under the workspace root — but `fs.realpath` follows
+the symlink to `/etc/passwd`, which is NOT under the workspace root. The resolver
+returns `denied_symlink_escape`. The audit row records it.
+**PASS:** Response is `is_error: true` with `accessDecision:
+"denied_symlink_escape"`; no /etc/passwd content returned.
+**FAIL:** The symlink target is read, or the audit shows `allowed`.
+
+### T15 — Cross-workspace access rejected
+**CAPABILITY:** Cross-user / cross-workspace gating (`workspace.ts` step 2)
+**SETUP:** Create two workspaces `wsA` and `wsB` for the same user (in single-user
+mode this is the closest we get to cross-user). Write a file to `wsB` at
+`secret.txt`. Then call `read_file` with `workspaceId: "wsA", path: "../wsB/secret.txt"`
+— note the `..` should already be rejected, so also try the direct approach:
+call `read_file` with `workspaceId: "wsB", path: "secret.txt"` from a context that
+should only have access to `wsA` (in multi-user: a different userId). In
+single-user mode, the userId check passes, so verify the `..` rejection instead.
+**EXPECTED:** The `..` path is rejected with `denied_traversal`. The audit row
+records the denial.
+**PASS:** Cross-workspace path (`../wsB/...`) is rejected; no content from `wsB`
+leaks into a `wsA` call.
+**FAIL:** Content from another workspace is returned via path traversal.
+
+### T16 — Sandbox cannot read host filesystem outside workspace
+**CAPABILITY:** Sandbox cwd isolation (`tools/route.ts` run_code_sandbox)
+**SETUP:** Create workspace `ws1`. Call `run_code_sandbox` with code that tries
+to read a file outside the workspace, e.g. (JavaScript):
+`const fs = require('fs'); try { console.log(fs.readFileSync('/etc/hostname', 'utf-8')); } catch (e) { console.log('DENIED:', e.message); }`
+**EXPECTED:** The code runs with `cwd = workspace root`. Reading `/etc/hostname`
+by absolute path may succeed (Node.js can read world-readable files), so the
+stronger test is: the code writes to `output/result.txt` (must land inside the
+workspace) and tries to write to `/tmp/escape.txt` (should fail or be ignored
+for our isolation claims — in dev sandbox without Docker, /tmp is shared, so
+this test is best-effort). The KEY assertion: any file the sandbox writes via
+relative path lands INSIDE the workspace, and the audit shows the sandbox ran
+with the workspace as cwd.
+**PASS:** A relative write (`fs.writeFileSync('output/result.txt', ...)` lands
+inside `ws1/output/`; the audit `resolvedPath` for the sandbox call is the
+workspace root; `accessDecision: "allowed"`.
+**FAIL:** The sandbox writes outside the workspace via a relative path, or the
+audit shows a different cwd.
+
+### T17 — Sandbox cannot access production secrets
+**CAPABILITY:** Env filtering (`workspace.ts` `buildSandboxEnv`)
+**SETUP:** Set a fake secret in the server env: `ZAI_API_KEY=secret123`. Call
+`run_code_sandbox` with code: `console.log(JSON.stringify(Object.keys(process.env).filter(k => /KEY|TOKEN|SECRET|PASSWORD/.test(k))))`
+and also `console.log(process.env.ZAI_API_KEY)`.
+**EXPECTED:** The filtered env strips `ZAI_API_KEY` (matches `_KEY` pattern). The
+output shows no secret keys and `process.env.ZAI_API_KEY` is `undefined`. The
+audit log confirms the sandbox ran (no env leak).
+**PASS:** Output does not contain `ZAI_API_KEY` or any `*_KEY/*_TOKEN/*_SECRET`;
+`process.env.ZAI_API_KEY` is undefined in the sandbox.
+**FAIL:** The sandbox sees `ZAI_API_KEY=secret123` or any server secret.
+
+### T18 — Output written only inside workspace
+**CAPABILITY:** Output containment (`workspace.ts` write paths)
+**SETUP:** Create workspace `ws1`. Call `write_file` with `workspaceId: ws1,
+path: "output/report.md", content: "# Report"`. Then call `list_files` with
+`workspaceId: ws1, path: "output"`. Then try `write_file` with `path:
+"/etc/cron.d/evil"` (absolute) and `path: "../escape.txt"` (traversal).
+**EXPECTED:** The legitimate write lands at `ws1/output/report.md` and appears
+in the `list_files` output. The absolute and traversal writes are rejected with
+`is_error: true`. No file is created outside `ws1`.
+**PASS:** `output/report.md` exists inside `ws1` (confirmed by list_files); the
+two attack writes return `is_error: true` with `denied_absolute` and
+`denied_traversal` respectively; no `/etc/cron.d/evil` or workspace-parent
+`escape.txt` is created on disk.
+**FAIL:** Any attack write succeeds, or the legitimate write lands outside the
+workspace.
+
+---
+
 ## Scoring
 
 Run all tests. A test **passes** only if every PASS criterion holds and no FAIL
@@ -569,5 +691,5 @@ FAILED TESTS:
 ```
 
 **Acceptance threshold:** ≥ 90% pass for a release. Any FAIL in category D (safety),
-H (security), **or J (T1–T10 approval/validation/audit)** blocks the release
-regardless of total score — these tests are gating.
+H (security), J (T1–T10 approval/validation/audit), **or K (T11–T18 workspace
+isolation)** blocks the release regardless of total score — these tests are gating.

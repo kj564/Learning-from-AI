@@ -1,6 +1,6 @@
 # Tool Catalogue — GLM Orchestrator Agent
 
-> Anthropic-standard tool definitions (`name`, `description`, `input_schema`) for the 8
+> Anthropic-standard tool definitions (`name`, `description`, `input_schema`) for the 9
 > tools the GLM orchestrator can call. Schema style follows Claude Code's per-tool
 > contract: one-line purpose, "Key rules" section, parameter table, gotchas, and
 > worked examples where behaviour is non-obvious.
@@ -16,7 +16,7 @@ Every tool carries a `permission` field the safety layer consults before executi
 
 | Tier | Meaning | Examples | Approval |
 |---|---|---|---|
-| `read` | No side effects. Safe to call freely. | `web_search`, `read_url`, `search_knowledge_base`, `read_file`, `recall_memory` | auto |
+| `read` | No side effects. Safe to call freely. | `web_search`, `read_url`, `list_files`, `search_knowledge_base`, `read_file`, `recall_memory` | auto |
 | `write` | Modifies workspace state (files, memory, sandbox). Reversible. | `write_file`, `run_code_sandbox`, `create_note` | auto (logged) |
 | `dangerous` | External or irreversible real-world action. | `send_email_with_approval` | **requires explicit user confirmation** |
 
@@ -92,6 +92,38 @@ to drill into a specific result, or when the user gives you a URL directly.
 
 ---
 
+### `list_files`
+
+**Purpose.** List entries in a workspace directory. Use before modifying directory
+structure, to verify a path exists, or to enumerate the contents of a folder.
+
+**Key rules.**
+- `path` defaults to `.` (the workspace root). Returns entry names with type
+  (`file` / `dir`).
+- `path` must be relative. Absolute paths and `..` segments are rejected.
+- `workspaceId` is required — every list operation is scoped to exactly one
+  workspace.
+- Read-only; no side effects.
+
+**Schema.**
+```json
+{
+  "type": "object",
+  "properties": {
+    "workspaceId": { "type": "string", "description": "The workspace to operate in. If omitted, the conversation's active workspace is used." },
+    "path":        { "type": "string", "default": ".", "description": "Relative directory path from workspace root. Defaults to the workspace root ('.')." }
+  },
+  "required": ["workspaceId"]
+}
+```
+
+**Example.**
+```json
+{"tool":"list_files","args":{"workspaceId":"ws_abc123","path":"src/lib"}}
+```
+
+---
+
 ### `search_knowledge_base`
 
 **Purpose.** Search the workspace knowledge base — documents the user has uploaded to
@@ -132,8 +164,7 @@ anything that smells like "the user already gave me this".
 - `path` must be relative. Absolute paths and `..` segments are rejected (path-traversal
   guard).
 - If the file doesn't exist, you get a 404 — that's a signal, not an error to retry.
-- Reading a directory returns an error; use `list_dir` instead (not in the core 8 but
-  available in the runtime).
+- Reading a directory returns an error; use `list_files` instead.
 - You **must** `read_file` a file before `write_file` or `edit_file` on it. The runtime
   doesn't enforce this, but the system prompt does. Editing a file you haven't read is a
   bug.
@@ -143,7 +174,8 @@ anything that smells like "the user already gave me this".
 {
   "type": "object",
   "properties": {
-    "path": { "type": "string", "description": "Relative file path from workspace root." }
+    "workspaceId": { "type": "string", "description": "The workspace to operate in. If omitted, the conversation's active workspace is used." },
+    "path":        { "type": "string", "description": "Relative file path from workspace root." }
   },
   "required": ["path"]
 }
@@ -164,6 +196,8 @@ anything that smells like "the user already gave me this".
 automatically.
 
 **Key rules.**
+- `path` must be relative to the workspace root. Absolute paths and `..` segments are
+  rejected (path-traversal guard).
 - Overwrites the existing file if one exists at the path. There is no append mode — to
   append, `read_file` first and write back the concatenation.
 - Prefer `edit_file` (when available) for small changes — it sends only the diff. Use
@@ -179,7 +213,8 @@ automatically.
 {
   "type": "object",
   "properties": {
-    "path":    { "type": "string", "description": "Relative file path." },
+    "workspaceId": { "type": "string", "description": "The workspace to operate in. If omitted, the conversation's active workspace is used." },
+    "path":        { "type": "string", "description": "Relative file path. Absolute paths and `..` segments are rejected." },
     "content": { "type": "string", "description": "Full file content. Existing content is replaced." }
   },
   "required": ["path", "content"]
@@ -214,7 +249,8 @@ run a quick script.
 {
   "type": "object",
   "properties": {
-    "code":     { "type": "string", "description": "Code to execute." },
+    "workspaceId": { "type": "string", "description": "The workspace to operate in. If omitted, the conversation's active workspace is used." },
+    "code":        { "type": "string", "description": "Code to execute." },
     "language": { "type": "string", "enum": ["javascript","typescript","python","bash"], "default": "javascript" }
   },
   "required": ["code"]
@@ -249,7 +285,8 @@ project decisions, recurring error patterns, or source URLs worth remembering.
 {
   "type": "object",
   "properties": {
-    "title":    { "type": "string", "description": "Short, searchable title." },
+    "workspaceId": { "type": "string", "description": "The workspace to operate in. If omitted, the conversation's active workspace is used." },
+    "title":       { "type": "string", "description": "Short, searchable title." },
     "content":  { "type": "string", "description": "The fact or decision, in 1–3 sentences." },
     "category": { "type": "string", "enum": ["preference","decision","finding","error_pattern","source"] }
   },
@@ -262,7 +299,7 @@ project decisions, recurring error patterns, or source URLs worth remembering.
 {"tool":"create_note","args":{"title":"User prefers tabs over spaces","content":"In all generated code, use tabs, not spaces.","category":"preference"}}
 ```
 
-### `recall_memory` (companion, not in the core 8 but paired with `create_note`)
+### `recall_memory` (companion, not in the core 9 but paired with `create_note`)
 
 **Purpose.** Recall notes from persistent memory. Use at the start of a turn when the
 user references past work, or when you suspect a stored preference applies.
@@ -337,19 +374,23 @@ Confirm and I'll send it.
 
 ## Tool-set summary
 
-| # | Tool | Permission | Tier purpose |
-|---|---|---|---|
-| 1 | `web_search` | read | external current facts |
-| 2 | `read_url` | read | drill into one URL |
-| 3 | `search_knowledge_base` | read | user's uploaded docs |
-| 4 | `read_file` | read | workspace file |
-| 5 | `write_file` | write | create/replace file |
-| 6 | `run_code_sandbox` | write | verify a snippet |
-| 7 | `create_note` | write | persistent memory |
-| 8 | `send_email_with_approval` | dangerous | real-world send (gated) |
+| # | Tool | Permission | Tier purpose | workspaceId |
+|---|---|---|---|---|
+| 1 | `web_search` | read | external current facts | — |
+| 2 | `read_url` | read | drill into one URL | — |
+| 3 | `list_files` | read | list workspace contents | required |
+| 4 | `search_knowledge_base` | read | user's uploaded docs | — |
+| 5 | `read_file` | read | workspace file | optional |
+| 6 | `write_file` | write | create/replace file | optional |
+| 7 | `run_code_sandbox` | write | verify a snippet | optional |
+| 8 | `create_note` | write | persistent memory | optional |
+| 9 | `send_email_with_approval` | dangerous | real-world send (gated) | — |
+
+`workspaceId` is auto-injected from the conversation's active workspace when omitted by
+the model. `list_files` is the only tool that requires it explicitly.
 
 Plus one paired read for memory: `recall_memory` (read tier, used with `create_note`).
 
-> **Runtime extras** (not in the model's advertised 8, but available to the orchestrator
+> **Runtime extras** (not in the model's advertised 9, but available to the orchestrator
 > if explicitly granted): `list_dir`, `edit_file`, `run_shell`. They follow the same
 > schema style. See `src/lib/agent-tools.ts` for their definitions.

@@ -205,10 +205,71 @@ model ToolCallAudit {
   approvalId      String?
   // For schema validation failures: the Zod error flatten() output (JSON).
   validationError String?
+  // === Workspace isolation audit fields ===
+  // The workspace the call targeted (null for non-file tools like web_search).
+  workspaceId     String?
+  // The relative path the model requested (before resolution).
+  requestedPath   String?
+  // The absolute path the backend resolved to (after validation). Useful for
+  // debugging path-traversal attempts and confirming containment.
+  resolvedPath    String?
+  // Path-access decision: allowed | denied_absolute | denied_traversal |
+  // denied_symlink_escape | denied_outside_workspace | denied_cross_user |
+  // n/a (non-file tool). Records WHY a path was accepted or rejected.
+  accessDecision  String?
   createdAt       DateTime @default(now())
 
   @@index([conversationId])
   @@index([toolName])
   @@index([status])
   @@index([createdAt])
+  @@index([workspaceId])
+}
+
+// === Workspaces (per-user / per-project working directories) ===
+//
+// Each user/project gets an isolated directory tree. All file tools
+// (read_file, write_file, list_files, edit_file, run_code_sandbox, create_note)
+// operate relative to a workspace root. The model never sees the absolute
+// rootPath — only the workspaceId and relative paths.
+//
+// Default folders created on workspace creation:
+//   input/  documents/  code/  notes/  output/  .agent/  .agent/audit/
+//
+// Storage is local disk in dev (under .workspaces/{userId}/{wsId}/). Production
+// should swap the storage adapter for S3/R2 — see src/lib/workspace.ts STORAGE.
+model Workspace {
+  id          String   @id @default(cuid())
+  // Single-user sandbox: always "default". Multi-user: the authenticated user id.
+  userId      String   @default("default")
+  // Optional: link workspace to a project (existing Project model).
+  projectId   String?
+  name        String
+  // Absolute filesystem path of the workspace root. NEVER exposed to the model.
+  rootPath    String   @unique
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  files       WorkspaceFile[]
+
+  @@index([userId])
+  @@index([projectId])
+}
+
+model WorkspaceFile {
+  id          String   @id @default(cuid())
+  workspaceId String
+  // Relative path within the workspace (e.g. "documents/report.md").
+  path        String
+  mimeType    String?
+  sizeBytes   Int      @default(0)
+  // SHA-256 checksum for dedup / integrity. Null if not computed.
+  checksum    String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, path])
+  @@index([workspaceId])
 }

@@ -23,6 +23,20 @@ import { db } from '@/lib/db';
 
 const emailSchema = z.string().regex(/^[^\s@]+@[^\s@]+\.[^\s@]+$/, 'invalid email address');
 
+// workspaceId is required for every file-related tool. The chat stream injects
+// it from the conversation's active workspace; the model can also pass it (and
+// is told the workspaceId in the system prompt). Either way, the backend
+// validates the workspace belongs to the user before any filesystem access.
+const workspaceIdSchema = z.string().min(1).max(100);
+
+// Relative path inside a workspace. Absolute paths and `..` are rejected at the
+// schema layer; the workspace resolver does a second, deeper check (realpath
+// for symlinks) before touching disk.
+const relativePathSchema = z.string().min(1).max(500).refine(
+  (p) => !p.startsWith('/') && !p.includes('..'),
+  'path must be relative and contain no .. segments',
+);
+
 export const TOOL_SCHEMAS: Record<string, z.ZodTypeAny> = {
   web_search: z.object({
     query: z.string().min(1).max(500),
@@ -35,51 +49,76 @@ export const TOOL_SCHEMAS: Record<string, z.ZodTypeAny> = {
 
   search_knowledge_base: z.object({
     query: z.string().min(1).max(500),
+    workspaceId: workspaceIdSchema.optional(), // scope RAG to a workspace if given
     top_k: z.number().int().min(1).max(10).optional(),
   }),
 
   read_file: z.object({
-    path: z.string().min(1).max(500).refine((p) => !p.startsWith('/') && !p.includes('..'), 'path must be relative and contain no .. segments'),
+    workspaceId: workspaceIdSchema,
+    path: relativePathSchema,
   }),
 
+  // list_files is the workspace-aware rename of list_dir. Both work; the model
+  // is taught list_files as the primary name.
+  list_files: z.object({
+    workspaceId: workspaceIdSchema,
+    path: z.string().min(1).max(500).optional().refine(
+      (p) => !p || (!p.startsWith('/') && !p.includes('..')),
+      'path must be relative and contain no .. segments',
+    ),
+  }),
+
+  // list_dir kept for backward compat — same as list_files.
   list_dir: z.object({
-    path: z.string().min(1).max(500).optional(),
+    workspaceId: workspaceIdSchema,
+    path: z.string().min(1).max(500).optional().refine(
+      (p) => !p || (!p.startsWith('/') && !p.includes('..')),
+      'path must be relative and contain no .. segments',
+    ),
     dir: z.string().min(1).max(500).optional(),
   }),
 
   write_file: z.object({
-    path: z.string().min(1).max(500).refine((p) => !p.startsWith('/') && !p.includes('..'), 'path must be relative and contain no .. segments'),
+    workspaceId: workspaceIdSchema,
+    path: relativePathSchema,
     content: z.string().max(5_000_000, 'file content exceeds 5 MB limit'),
   }),
 
   edit_file: z.object({
-    path: z.string().min(1).max(500).refine((p) => !p.startsWith('/') && !p.includes('..'), 'path must be relative'),
+    workspaceId: workspaceIdSchema,
+    path: relativePathSchema,
     old_text: z.string().min(1),
     new_text: z.string(),
     replace_all: z.boolean().optional(),
   }),
 
   run_code_sandbox: z.object({
+    workspaceId: workspaceIdSchema,
     code: z.string().min(1).max(500_000, 'code exceeds 500 KB limit'),
     language: z.enum(['javascript', 'typescript', 'python', 'bash']).optional(),
   }),
 
+  // run_shell is workspace-scoped too: cwd is set to the workspace root.
   run_shell: z.object({
+    workspaceId: workspaceIdSchema,
     command: z.string().min(1).max(50_000, 'command exceeds 50 KB limit'),
   }),
 
   create_note: z.object({
+    workspaceId: workspaceIdSchema,
     title: z.string().min(1).max(200),
     content: z.string().min(1).max(10_000),
     category: z.enum(['preference', 'decision', 'finding', 'error_pattern', 'source']),
   }),
 
   recall_memory: z.object({
+    workspaceId: workspaceIdSchema.optional(),
     query: z.string().min(1).max(500),
   }),
 
   search_knowledge_base_alias: z.object({
     query: z.string().min(1).max(500),
+    workspaceId: workspaceIdSchema.optional(),
     top_k: z.number().int().min(1).max(10).optional(),
   }),
 
@@ -180,6 +219,11 @@ export interface AuditInput {
   resultBytes?: number;
   approvalId?: string | null;
   validationError?: string | null;
+  // === Workspace isolation audit fields ===
+  workspaceId?: string | null;
+  requestedPath?: string | null;
+  resolvedPath?: string | null;
+  accessDecision?: string | null;
 }
 
 const ARGS_MAX_BYTES = 8 * 1024;
@@ -214,6 +258,10 @@ export async function writeAudit(input: AuditInput): Promise<string | null> {
         resultBytes: input.resultBytes ?? 0,
         approvalId: input.approvalId ?? null,
         validationError: input.validationError ?? null,
+        workspaceId: input.workspaceId ?? null,
+        requestedPath: input.requestedPath ?? null,
+        resolvedPath: input.resolvedPath ?? null,
+        accessDecision: input.accessDecision ?? null,
       },
     });
     return row.id;

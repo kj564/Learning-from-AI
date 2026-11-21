@@ -61,6 +61,11 @@ export async function GET(req: NextRequest) {
       resultBytes: r.resultBytes,
       approvalId: r.approvalId,
       validationError: r.validationError ? safeParse(r.validationError) : null,
+      // Workspace isolation audit fields
+      workspaceId: r.workspaceId,
+      requestedPath: r.requestedPath,
+      resolvedPath: r.resolvedPath,
+      accessDecision: r.accessDecision,
       createdAt: r.createdAt,
     })),
   });
