@@ -193,6 +193,28 @@ function sseEmit(controller: ReadableStreamDefaultController, event: string, dat
 }
 
 /**
+ * SSE heartbeat — emits a `ping` event every `intervalMs` so intermediate
+ * proxies / gateways (Caddy, cloud LBs) don't close an otherwise idle
+ * connection during long-running tool calls (e.g. run_shell, web_search can
+ * each take 10–30s with zero bytes written to the client). Without this, the
+ * gateway returns HTTP 502 after its idle timeout even though the upstream
+ * request is still healthy.
+ *
+ * Returns a NodeJS.Timeout handle that the caller MUST clear on completion /
+ * cancellation / error to avoid leaking timers.
+ */
+const HEARTBEAT_INTERVAL_MS = 8000;
+function startHeartbeat(controller: ReadableStreamDefaultController): ReturnType<typeof setInterval> {
+  return setInterval(() => {
+    try {
+      controller.enqueue(new TextEncoder().encode(`event: ping\ndata: ${JSON.stringify({ t: Date.now() })}\n\n`));
+    } catch {
+      // controller may be closed (client gone) — ignore; caller clears the timer.
+    }
+  }, HEARTBEAT_INTERVAL_MS);
+}
+
+/**
  * Stream tokens from the LLM via the SDK's `stream: true` async iterable.
  *
  * The SDK returns raw SSE bytes (one or more Uint8Array chunks). We parse them
@@ -356,12 +378,19 @@ export async function POST(req: NextRequest) {
   // disconnects (clicks Stop), we abort the upstream SDK stream so we stop
   // paying for tokens nobody will read.
   const upstreamAbort = new AbortController();
+  // Heartbeat handle — declared in the outer scope so both start() and
+  // cancel() can clear it (cancel() does not share start()'s closure).
+  let heartbeat: ReturnType<typeof setInterval> | null = null;
 
   const stream = new ReadableStream({
     async start(controller) {
       const zai = await ZAI.create();
       let finalText = '';
       const toolExecutions: { tool: string; args: Record<string, unknown>; success: boolean }[] = [];
+
+      // Keep the connection warm during long tool calls so the gateway doesn't
+      // return 502. Cleared in finally / cancel().
+      heartbeat = startHeartbeat(controller);
 
       try {
         for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
@@ -467,12 +496,14 @@ export async function POST(req: NextRequest) {
       } catch (e) {
         sseEmit(controller, 'error', { message: e instanceof Error ? e.message : String(e) });
       } finally {
+        if (heartbeat) clearInterval(heartbeat);
         controller.close();
       }
     },
     // Client disconnected (closed tab, clicked Stop) → abort upstream SDK call
     // so we stop consuming tokens that nobody will read.
     cancel() {
+      if (heartbeat) clearInterval(heartbeat);
       upstreamAbort.abort();
     },
   });

@@ -113,6 +113,12 @@ export default function Page() {
   const readAloud = store((s) => s.readAloud);
   const setReadAloud = store((s) => s.setReadAloud);
   const { theme, setTheme } = useTheme();
+  // next-themes resolves `theme` from localStorage on the client only, so the
+  // server and first client render would disagree (server: undefined → <Moon/>,
+  // client after mount: 'dark' → <Sun/>). That causes a hydration mismatch.
+  // Render a neutral placeholder until mounted.
+  const [themeMounted, setThemeMounted] = useState(false);
+  useEffect(() => setThemeMounted(true), []);
   const abortRef = useRef<AbortController | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -445,8 +451,23 @@ export default function Page() {
               <button onClick={() => setSettingsOpen(true)} className="flex h-8 flex-1 items-center gap-2 rounded-lg px-3 text-xs text-[var(--text-secondary)] hover:bg-[var(--bg-surface)]">
                 <Settings size={14} /> Settings
               </button>
-              <button onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')} className="flex h-8 w-8 items-center justify-center rounded-lg text-[var(--text-secondary)] hover:bg-[var(--bg-surface)]">
-                {theme === 'dark' ? <Sun size={14} /> : <Moon size={14} />}
+              <button
+                onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
+                aria-label="Toggle theme"
+                className="flex h-8 w-8 items-center justify-center rounded-lg text-[var(--text-secondary)] hover:bg-[var(--bg-surface)]"
+              >
+                {/* Avoid SSR/CSR hydration mismatch: next-themes resolves `theme`
+                    from localStorage on the client only, so server render has
+                    theme=undefined. Render a fixed <Sun/> on both server and the
+                    client's first paint, then swap to the theme-correct icon
+                    only after `themeMounted` flips true. */}
+                {!themeMounted ? (
+                  <Sun size={14} />
+                ) : theme === 'dark' ? (
+                  <Sun size={14} />
+                ) : (
+                  <Moon size={14} />
+                )}
               </button>
             </div>
           </div>

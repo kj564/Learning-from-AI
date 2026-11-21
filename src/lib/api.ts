@@ -314,6 +314,10 @@ export function streamChat(
               case 'error':
                 cb.onError?.(payload.message || 'Unknown error');
                 break;
+              case 'ping':
+                // Heartbeat from the server — keeps the connection warm during
+                // long tool calls so the gateway doesn't return 502. Ignored.
+                break;
             }
           } catch {
             // ignore malformed events
