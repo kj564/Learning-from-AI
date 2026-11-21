@@ -22,7 +22,7 @@ import {
   ChevronDown, FileCode, FileText, Folder, FolderOpen, ChevronRight,
   RefreshCw, Copy, Check, Trash2, Archive, ArchiveRestore, Pen,
   Settings, Sun, Moon, Star, Zap, MessageSquare, Share2,
-  Terminal, Binary,
+  Terminal, Binary, ScrollText,
 } from 'lucide-react';
 import { useTheme } from 'next-themes';
 import CodeWorkspace from '@/components/librechat/CodeWorkspace';
@@ -33,6 +33,8 @@ import ImageLightbox from '@/components/librechat/ImageLightbox';
 import SettingsDialog from '@/components/librechat/SettingsDialog';
 import CommandPalette from '@/components/librechat/CommandPalette';
 import KeyboardShortcutsHelp from '@/components/librechat/KeyboardShortcutsHelp';
+import { ApprovalDialog } from '@/components/librechat/ApprovalDialog';
+import { AuditLogPanel } from '@/components/librechat/AuditLogPanel';
 import { Button } from '@/components/ui/button';
 
 const genId = (p: string) => `${p}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
@@ -126,6 +128,12 @@ export default function Page() {
   const [searchQuery, setSearchQuery] = useState('');
   const [slashOpen, setSlashOpen] = useState(false);
   const [renameId, setRenameId] = useState<string | null>(null);
+  // Pending approval dialog state — when the chat stream emits an
+  // `approval_required` event for a dangerous tool (e.g. send_email_with_approval),
+  // we surface it here. The token lives only in component state, never persisted.
+  const [pendingApproval, setPendingApproval] = useState<any | null>(null);
+  // Audit log viewer (collapsed by default).
+  const [showAudit, setShowAudit] = useState(false);
   const [renameDraft, setRenameDraft] = useState('');
   const [menuOpenFor, setMenuOpenFor] = useState<string | null>(null);
 
@@ -296,6 +304,21 @@ export default function Page() {
           setIsGenerating(false);
           abortRef.current = null;
         },
+        onApprovalRequired: (event) => {
+          // A dangerous tool needs user approval. Surface the dialog with the
+          // draft. The token lives in component state only — single-use.
+          setPendingApproval({
+            approvalId: event.approvalId,
+            token: event.token,
+            tool: event.tool,
+            draft: event.draft,
+            expiresAt: event.expiresAt,
+            message: event.message,
+          });
+          updateMessage(convoId, pendingMsgId, { streaming: false, pending: false });
+          setIsGenerating(false);
+          abortRef.current = null;
+        },
         onError: (msg) => {
           updateMessage(convoId, pendingMsgId, { streaming: false, pending: false, error: msg });
           setIsGenerating(false);
@@ -450,6 +473,14 @@ export default function Page() {
             <div className="flex items-center gap-1">
               <button onClick={() => setSettingsOpen(true)} className="flex h-8 flex-1 items-center gap-2 rounded-lg px-3 text-xs text-[var(--text-secondary)] hover:bg-[var(--bg-surface)]">
                 <Settings size={14} /> Settings
+              </button>
+              <button
+                onClick={() => setShowAudit(true)}
+                aria-label="Audit log"
+                title="Audit log"
+                className="flex h-8 w-8 items-center justify-center rounded-lg text-[var(--text-secondary)] hover:bg-[var(--bg-surface)]"
+              >
+                <ScrollText size={14} />
               </button>
               <button
                 onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
@@ -715,6 +746,19 @@ export default function Page() {
       <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
       <CommandPalette onGenerateImage={() => setImageDialogOpen(true)} onShowShortcuts={() => setShortcutsOpen(true)} />
       <KeyboardShortcutsHelp open={shortcutsOpen} onOpenChange={setShortcutsOpen} />
+
+      {/* === APPROVAL DIALOG (dangerous tool gating) === */}
+      <ApprovalDialog
+        approval={pendingApproval}
+        onClose={() => setPendingApproval(null)}
+        onResolved={(status) => {
+          setPendingApproval(null);
+          // Optionally surface the result inline. For now a toast is enough.
+        }}
+      />
+
+      {/* === AUDIT LOG PANEL (observability) === */}
+      <AuditLogPanel open={showAudit} onOpenChange={setShowAudit} conversationId={activeConversationId} />
     </div>
   );
 }

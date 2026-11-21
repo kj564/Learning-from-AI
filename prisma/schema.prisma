@@ -137,3 +137,78 @@ model SharedConversation {
 
   @@index([shareId])
 }
+
+// === Approval Requests (real approval workflow for dangerous tools) ===
+// Status machine: PENDING_APPROVAL -> APPROVED -> EXECUTING -> COMPLETED
+//                                              -> REJECTED
+//                                            -> EXPIRED (auto, by background sweep)
+//                                            -> FAILED (execution error)
+// Token is single-use and hashed (SHA-256). Draft is immutable; an edit creates
+// a new ApprovalRequest with parentApprovalId pointing back, and the original is
+// marked SUPERSEDED (a terminal state that also invalidates the old token).
+model ApprovalRequest {
+  id              String   @id @default(cuid())
+  // The tool call this approval is for (e.g. "send_email_with_approval").
+  toolName        String
+  toolUseId       String?  // toolu_... id from the chat stream (if applicable)
+  // Immutable draft args (JSON). For email: {to, subject, body}.
+  argsJson        String
+  // Conversation context for the UI to surface the request inline.
+  conversationId  String?
+  // Single-use approval token (plaintext issued to UI; the hashed form is stored).
+  tokenHash       String   @unique
+  // Status enum: PENDING_APPROVAL | APPROVED | REJECTED | EXPIRED | EXECUTING | COMPLETED | FAILED | SUPERSEDED
+  status          String   @default("PENDING_APPROVAL")
+  // Token expiry (default 15 min from creation). Sweep marks EXPIRED.
+  expiresAt       DateTime
+  // Edit chain: if the user edits the draft, a new ApprovalRequest is created with
+  // parentApprovalId = this one, and this one is set to SUPERSEDED.
+  parentApprovalId String?
+  // Who/what decided. In this single-user sandbox it's "user"; production would
+  // record an authenticated user id + session.
+  decidedBy       String?
+  decidedAt       DateTime?
+  executedAt      DateTime?
+  // JSON of the final result (success data or error message).
+  resultJson      String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([conversationId])
+  @@index([status])
+  @@index([expiresAt])
+}
+
+// === Tool Call Audit Log (observability — every tool call logged) ===
+// One row per tool invocation, success or failure. Powers /api/audit and
+// gives us: tool name, args, duration, status, retries, truncation, errors,
+// approval linkage — everything needed to debug and control cost.
+model ToolCallAudit {
+  id              String   @id @default(cuid())
+  conversationId  String?
+  // The chat-stream turn that issued this call (sessionId in code).
+  sessionId       String?
+  toolName        String
+  // Args the model sent (JSON). Truncated to 8 KB to bound row size.
+  argsJson        String
+  // Result summary: success | failure | denied | invalid | pending
+  status          String
+  durationMs      Int      @default(0)
+  retries         Int      @default(0)
+  // Error message (if status != success). Null on success.
+  errorMessage    String?
+  // Whether the result was truncated before being handed back to the model.
+  resultTruncated Boolean  @default(false)
+  // Original result size in bytes (before truncation) for cost/debugging.
+  resultBytes     Int      @default(0)
+  // If this call needed approval, link to the ApprovalRequest.
+  approvalId      String?
+  // For schema validation failures: the Zod error flatten() output (JSON).
+  validationError String?
+  createdAt       DateTime @default(now())
+
+  @@index([conversationId])
+  @@index([toolName])
+  @@index([status])
+  @@index([createdAt])
+}

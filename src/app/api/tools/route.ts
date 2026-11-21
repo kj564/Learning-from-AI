@@ -3,7 +3,16 @@
  *
  * Tools: web_search, read_url, read_file, list_dir, write_file, edit_file,
  *        run_code_sandbox, run_shell, create_note, recall_memory,
- *        search_knowledge_base, image_generate, image_search
+ *        search_knowledge_base, send_email_with_approval, image_generate,
+ *        image_search.
+ *
+ * Pipeline (P0 fixes):
+ *   1. Strict Zod schema validation — invalid args return is_error:true,
+ *      never reach the executor. (docs/agent/evaluation_tests.md T5)
+ *   2. Every call is wrapped in audit logging (ToolCallAudit row written).
+ *   3. Dangerous tools (send_email_with_approval) never execute inline — they
+ *      create an ApprovalRequest and return {needsApproval:true, approvalId,
+ *      token} for the UI to surface. (T1)
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -15,6 +24,8 @@ import { promisify } from 'util';
 import { randomUUID } from 'crypto';
 import ZAI from 'z-ai-web-dev-sdk';
 import { db } from '@/lib/db';
+import { validateToolCall, writeAudit } from '@/lib/tool-validation';
+import { createApproval } from '@/lib/approval';
 
 const execAsync = promisify(exec);
 const execFileAsync = promisify(execFile);
@@ -33,13 +44,109 @@ function escapeRegExp(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+// Tools that are "dangerous" — they always require the approval workflow and
+// never execute inline regardless of what the model sends.
+const DANGEROUS_TOOLS = new Set(['send_email_with_approval']);
+
 export async function POST(req: NextRequest) {
+  const t0 = Date.now();
+  let conversationId: string | null = null;
+  let sessionId: string | null = null;
   try {
     const body = await req.json();
-    const { tool, args } = body as { tool: string; args: Record<string, unknown> };
+    const { tool, args } = body as { tool: string; args: Record<string, unknown>; conversationId?: string; sessionId?: string };
+    conversationId = body.conversationId ?? null;
+    sessionId = body.sessionId ?? null;
     if (!tool) return NextResponse.json({ error: 'tool required' }, { status: 400 });
+    if (!args || typeof args !== 'object') {
+      return NextResponse.json({ success: false, is_error: true, error: 'INVALID_ARGUMENTS', details: 'args object required' }, { status: 400 });
+    }
 
-    switch (tool) {
+    // === 1. Schema validation (Zod) — before any execution. ===
+    const v = validateToolCall(tool, args);
+    if (!v.ok) {
+      await writeAudit({
+        conversationId, sessionId, toolName: tool, args,
+        status: 'invalid', durationMs: Date.now() - t0,
+        validationError: JSON.stringify(v.details),
+      });
+      return NextResponse.json({
+        success: false,
+        is_error: true,
+        error: 'INVALID_ARGUMENTS',
+        details: v.details,
+      }, { status: 400 });
+    }
+
+    // === 2. Dangerous tool — never execute inline, create approval instead. ===
+    if (DANGEROUS_TOOLS.has(tool)) {
+      const approval = await createApproval({
+        toolName: tool,
+        args: v.args,
+        conversationId,
+      });
+      await writeAudit({
+        conversationId, sessionId, toolName: tool, args: v.args,
+        status: 'pending', durationMs: Date.now() - t0,
+        approvalId: approval.approvalId,
+      });
+      // Return a structured response the chat stream surfaces as a tool_result
+      // with a special "needsApproval" flag. The model is told to STOP and wait.
+      return NextResponse.json({
+        success: false,
+        is_error: false,
+        needsApproval: true,
+        approvalId: approval.approvalId,
+        token: approval.token, // UI must persist this; backend only stores the hash
+        draft: v.args,
+        expiresAt: approval.expiresAt,
+        message: `This action requires user approval. The UI will show the draft. Do NOT call this tool again — wait for the user to approve or reject. Approval expires at ${approval.expiresAt.toISOString()}.`,
+      });
+    }
+
+    // === 3. Normal tool execution — wrapped with audit logging. ===
+    try {
+      const response = await executeTool(tool, v.args);
+      // executeTool returns NextResponse. Inspect its status to classify.
+      const status = response.status;
+      const resultBytes = 0; // response body is a stream we don't want to buffer here
+      if (status >= 200 && status < 300) {
+        await writeAudit({
+          conversationId, sessionId, toolName: tool, args: v.args,
+          status: 'success', durationMs: Date.now() - t0, resultBytes,
+        });
+      } else {
+        await writeAudit({
+          conversationId, sessionId, toolName: tool, args: v.args,
+          status: 'failure', durationMs: Date.now() - t0,
+          errorMessage: `executor returned status ${status}`,
+        });
+      }
+      return response;
+    } catch (e) {
+      const errMsg = e instanceof Error ? e.message : String(e);
+      await writeAudit({
+        conversationId, sessionId, toolName: tool, args: v.args,
+        status: 'failure', durationMs: Date.now() - t0, errorMessage: errMsg,
+      });
+      return NextResponse.json({ success: false, is_error: true, error: errMsg }, { status: 500 });
+    }
+  } catch (error) {
+    await writeAudit({
+      conversationId, sessionId, toolName: '(unknown)',
+      args: {}, status: 'failure', durationMs: Date.now() - t0,
+      errorMessage: error instanceof Error ? error.message : String(error),
+    }).catch(() => {});
+    return NextResponse.json({ error: error instanceof Error ? error.message : String(error) }, { status: 500 });
+  }
+}
+
+// ============================================================
+// Tool executor — the big switch. Called only after validation.
+// Returns NextResponse directly; the outer wrapper audits and forwards.
+// ============================================================
+async function executeTool(tool: string, args: Record<string, unknown>): Promise<NextResponse> {
+  switch (tool) {
       // === READ TOOLS ===
       case 'web_search': {
         const query = args.query as string;
@@ -236,24 +343,25 @@ export async function POST(req: NextRequest) {
         }
       }
 
-      // === LEGACY ALIASES (backward compat) ===
+      // === LEGACY ALIASES (backward compat) — delegate to executeTool directly
+      // to avoid recursion through POST (which would double-audit).
       case 'file_write': {
-        return POST_proxy(req, 'write_file', { ...args, path: args.path, content: args.content });
+        return executeTool('write_file', { path: args.path, content: args.content });
       }
       case 'file_read': {
-        return POST_proxy(req, 'read_file', { path: args.path });
+        return executeTool('read_file', { path: args.path });
       }
       case 'file_list': {
-        return POST_proxy(req, 'list_dir', { dir: args.dir || '.' });
+        return executeTool('list_dir', { dir: args.dir || '.' });
       }
       case 'code_run': {
-        return POST_proxy(req, 'run_code_sandbox', { code: args.code, language: args.language || 'javascript' });
+        return executeTool('run_code_sandbox', { code: args.code, language: args.language || 'javascript' });
       }
       case 'shell_run': {
-        return POST_proxy(req, 'run_shell', { command: args.command });
+        return executeTool('run_shell', { command: args.command });
       }
       case 'knowledge_search': {
-        return POST_proxy(req, 'search_knowledge_base', { query: args.query, top_k: args.topK });
+        return executeTool('search_knowledge_base', { query: args.query, top_k: args.topK });
       }
       case 'image_generate': {
         try {
@@ -304,59 +412,11 @@ export async function POST(req: NextRequest) {
         }
       }
 
-      case 'send_email_with_approval': {
-        // DANGEROUS tool — requires explicit user confirmation.
-        // The frontend is expected to surface a confirmation UI before the model
-        // ever calls this endpoint. If we get here without a confirmed flag, return
-        // a "needs approval" response so the model knows to stop and ask.
-        const to = args.to as string;
-        const subject = args.subject as string;
-        const body = args.body as string;
-        if (!to || !subject || !body) {
-          return NextResponse.json({ error: 'to, subject, body are all required' }, { status: 400 });
-        }
-        // Basic email syntax check
-        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to)) {
-          return NextResponse.json({ error: 'invalid recipient address' }, { status: 400 });
-        }
-        const confirmed = args.confirmed === true;
-        if (!confirmed) {
-          return NextResponse.json({
-            success: false,
-            needsApproval: true,
-            draft: { to, subject, body },
-            message: 'This action requires explicit user confirmation. Present the draft to the user and resend with confirmed:true after they approve.',
-          });
-        }
-        // Confirmed — in this environment we don't have an SMTP relay, so we log
-        // the would-be send and return success. A real deployment would call the
-        // email provider here.
-        try {
-          await mkdir(path.join(WORKSPACE, '.tmp-email-log'), { recursive: true });
-          const logLine = `[${new Date().toISOString()}] to=${to} subject=${subject}\n${body}\n---\n`;
-          await writeFile(path.join(WORKSPACE, '.tmp-email-log', 'sent.log'), logLine, { flag: 'a' });
-          return NextResponse.json({ success: true, to, subject, delivered: 'logged' });
-        } catch (e) {
-          return NextResponse.json({ success: false, error: (e as Error).message }, { status: 500 });
-        }
-      }
-
       default:
         return NextResponse.json({ error: `Unknown tool: ${tool}` }, { status: 400 });
     }
-  } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : String(error) }, { status: 500 });
-  }
-}
-
-// Helper: proxy a legacy tool call to the new tool name
-async function POST_proxy(_req: NextRequest, tool: string, args: Record<string, unknown>) {
-  const res = await POST(new NextRequest('http://localhost:3000/api/tools', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ tool, args }),
-  }));
-  return res;
+  // Note: executeTool does NOT catch — the outer POST wrapper audits and
+  // converts thrown errors to a 500 response with is_error: true.
 }
 
 export async function GET() {

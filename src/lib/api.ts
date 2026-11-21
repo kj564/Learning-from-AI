@@ -218,7 +218,16 @@ export interface StreamChatCallbacks {
   onTextDelta?: (text: string) => void;
   onTextReplace?: (text: string) => void;
   onToolUse?: (event: { id: string; name: string; input: Record<string, unknown> }) => void;
-  onToolResult?: (event: { tool_use_id: string; tool: string; success: boolean; result: string }) => void;
+  onToolResult?: (event: { tool_use_id: string; tool: string; success: boolean; result: string; pendingApproval?: boolean; approvalId?: string }) => void;
+  onApprovalRequired?: (event: {
+    tool_use_id: string;
+    tool: string;
+    approvalId: string;
+    token: string;
+    draft: Record<string, unknown>;
+    expiresAt: string;
+    message: string;
+  }) => void;
   onDone?: (event: { sessionId: string; messageCount: number; model: string; toolExecutions: { tool: string; args: Record<string, unknown>; success: boolean }[] }) => void;
   onError?: (message: string) => void;
 }
@@ -313,6 +322,17 @@ export function streamChat(
                 break;
               case 'error':
                 cb.onError?.(payload.message || 'Unknown error');
+                break;
+              case 'approval_required':
+                cb.onApprovalRequired?.({
+                  tool_use_id: payload.tool_use_id,
+                  tool: payload.tool,
+                  approvalId: payload.approvalId,
+                  token: payload.token,
+                  draft: payload.draft || {},
+                  expiresAt: payload.expiresAt,
+                  message: payload.message || '',
+                });
                 break;
               case 'ping':
                 // Heartbeat from the server — keeps the connection warm during

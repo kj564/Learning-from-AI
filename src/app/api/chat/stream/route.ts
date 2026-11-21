@@ -169,21 +169,66 @@ function extractToolCall(text: string): { tool: string; args: Record<string, unk
   return null;
 }
 
-/** Execute a tool by proxying to /api/tools. */
-async function executeTool(toolCall: { tool: string; args: Record<string, unknown> }): Promise<{ success: boolean; result: string }> {
+/** Execute a tool by proxying to /api/tools.
+ *
+ * Passes conversationId + sessionId so the audit log can link tool calls back
+ * to the chat turn. Returns a discriminated union: a normal result, an
+ * approval-required signal (which stops the agent loop), or an error.
+ */
+async function executeTool(
+  toolCall: { tool: string; args: Record<string, unknown> },
+  ctx: { conversationId?: string; sessionId?: string },
+  controller?: ReadableStreamDefaultController,
+  toolUseId?: string,
+): Promise<
+  | { kind: 'result'; success: boolean; result: string }
+  | { kind: 'approval'; approvalId: string; token: string; draft: Record<string, unknown>; expiresAt: string; tool: string }
+> {
   try {
     const res = await fetch('http://localhost:3000/api/tools', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(toolCall),
+      body: JSON.stringify({ ...toolCall, conversationId: ctx.conversationId, sessionId: ctx.sessionId }),
     });
     const data = await res.json();
-    if (data.success || res.ok) {
-      return { success: true, result: JSON.stringify(data).slice(0, 4000) };
+
+    // Approval-gated tool: emit an SSE event for the UI to render the approval
+    // card, then return a signal that stops the agent loop. The model will be
+    // told "approval required, stop and wait" via the tool_result content.
+    if (data.needsApproval) {
+      if (controller && toolUseId) {
+        sseEmit(controller, 'approval_required', {
+          tool_use_id: toolUseId,
+          tool: toolCall.tool,
+          approvalId: data.approvalId,
+          token: data.token,
+          draft: data.draft,
+          expiresAt: data.expiresAt,
+          message: data.message,
+        });
+      }
+      return {
+        kind: 'approval',
+        approvalId: data.approvalId,
+        token: data.token,
+        draft: data.draft,
+        expiresAt: data.expiresAt,
+        tool: toolCall.tool,
+      };
     }
-    return { success: false, result: `Tool error: ${data.error || 'Unknown error'}` };
+
+    // Schema-invalid tool call — surface as is_error so the model knows the
+    // args were wrong (and doesn't retry the same args per T6).
+    if (data.is_error) {
+      return { kind: 'result', success: false, result: JSON.stringify({ is_error: true, error: data.error, details: data.details }) };
+    }
+
+    if (data.success || res.ok) {
+      return { kind: 'result', success: true, result: JSON.stringify(data).slice(0, 8000) };
+    }
+    return { kind: 'result', success: false, result: `Tool error: ${data.error || 'Unknown error'}` };
   } catch (e) {
-    return { success: false, result: `Tool execution failed: ${e instanceof Error ? e.message : String(e)}` };
+    return { kind: 'result', success: false, result: `Tool execution failed: ${e instanceof Error ? e.message : String(e)}` };
   }
 }
 
@@ -432,7 +477,38 @@ export async function POST(req: NextRequest) {
           const toolUseId = `toolu_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
           sseEmit(controller, 'tool_use', { id: toolUseId, name: toolCall.tool, input: toolCall.args });
 
-          const execResult = await executeTool(toolCall);
+          const execResult = await executeTool(toolCall, { conversationId: convoId, sessionId: sid }, controller, toolUseId);
+
+          // Approval-gated tool: stop the agent loop and tell the model to wait.
+          // The UI has been notified via the approval_required SSE event and will
+          // render an approval card. The model must NOT retry the same call.
+          if (execResult.kind === 'approval') {
+            toolExecutions.push({
+              tool: toolCall.tool,
+              args: toolCall.args,
+              success: false,
+              pendingApproval: true,
+              approvalId: execResult.approvalId,
+            } as any);
+
+            sseEmit(controller, 'tool_result', {
+              tool_use_id: toolUseId,
+              tool: toolCall.tool,
+              success: false,
+              pendingApproval: true,
+              approvalId: execResult.approvalId,
+              result: `APPROVAL_REQUIRED: This action (${toolCall.tool}) needs user approval. The UI is showing an approval card. Do NOT call this tool again. Wait for the user to approve or reject. If the user approves, the backend will execute and you'll be informed. If the user rejects or the token expires, stop and report.`,
+            });
+
+            history.push({ role: 'assistant', content: raw });
+            history.push({
+              role: 'user',
+              content: `APPROVAL_REQUIRED for ${toolCall.tool}. Approval ID: ${execResult.approvalId}. Stop calling tools and wait for the user to decide. Do not retry this tool call.`,
+            });
+            finalText = visibleText || `I've prepared the ${toolCall.tool} action and need your approval to proceed. Please review the approval card and click Approve or Reject.`;
+            break; // EXIT the agent loop — wait for the user.
+          }
+
           toolExecutions.push({
             tool: toolCall.tool,
             args: toolCall.args,
