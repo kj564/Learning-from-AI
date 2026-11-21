@@ -22,11 +22,12 @@ import {
   ChevronDown, FileCode, FileText, Folder, FolderOpen, ChevronRight,
   RefreshCw, Copy, Check, Trash2, Archive, ArchiveRestore, Pen,
   Settings, Sun, Moon, Star, Zap, MessageSquare, Share2,
-  Terminal,
+  Terminal, Binary,
 } from 'lucide-react';
 import { useTheme } from 'next-themes';
 import CodeWorkspace from '@/components/librechat/CodeWorkspace';
 import SnapgentBar, { dispatchSnapgentCommand } from '@/components/librechat/SnapgentBar';
+import ReaPanel from '@/components/librechat/ReaPanel';
 import Markdown from '@/components/librechat/Markdown';
 import CodeBlock from '@/components/librechat/CodeBlock';
 import ImageGenDialog from '@/components/librechat/ImageGenDialog';
@@ -114,6 +115,8 @@ export default function Page() {
   const activeProject = store((s) => s.activeProject);
   const activeAssistant = store((s) => s.assistants.find((a) => a.id === s.activeAssistantId) || null);
   const showWorkspace = store((s) => s.showWorkspace);
+  const showReaPanel = store((s) => s.showReaPanel);
+  const setShowReaPanel = store((s) => s.setShowReaPanel);
   const workspaceFiles = store((s) => s.workspaceFiles);
   const setShowWorkspace = store((s) => s.setShowWorkspace);
   const addWorkspaceFile = store((s) => s.addWorkspaceFile);
@@ -397,6 +400,8 @@ export default function Page() {
 
   return (
     <div className="flex h-screen w-full overflow-hidden bg-[var(--bg-page)] text-[var(--text-primary)]">
+      {/* REA Panel — 70% right panel */}
+      {showReaPanel && <ReaPanel onClose={() => setShowReaPanel(false)} />}
       {/* === SIDEBAR === */}
       {sidebarOpen && (
         <div className="flex h-full w-64 shrink-0 flex-col border-r border-[var(--border-default)] bg-[var(--bg-surface)]">
@@ -504,7 +509,8 @@ export default function Page() {
       )}
 
       {/* === MAIN CHAT === */}
-      <div className="relative flex h-full min-w-0 flex-1 flex-col">
+      {/* === MAIN CHAT (30% when REA open, 100% otherwise) === */}
+      <div className={`relative flex h-full min-w-0 flex-col ${showReaPanel ? 'w-[30%] shrink-0' : 'flex-1'}`}>
         {/* Top bar: sidebar toggle + model picker + share */}
         <div className="flex h-12 shrink-0 items-center gap-2 px-3">
           <button onClick={() => setSidebarOpen((v) => !v)} className="flex h-8 w-8 items-center justify-center rounded-lg text-[var(--text-secondary)] hover:bg-[var(--bg-surface)]">
@@ -606,6 +612,9 @@ export default function Page() {
                     </button>
                     <button onClick={toggleThink} className={`flex h-7 items-center gap-1 rounded-lg border px-2 text-xs ${thinkEnabled ? 'border-[var(--accent)]/40 bg-[var(--primary-btn)]/10 text-[var(--accent)]' : 'border-[var(--border-default)] text-[var(--text-secondary)] hover:bg-[var(--bg-surface)]'}`}>
                       <Brain size={12} /> Think
+                    </button>
+                    <button onClick={() => setShowReaPanel(!showReaPanel)} className={`flex h-7 items-center gap-1 rounded-lg border px-2 text-xs ${showReaPanel ? 'border-purple-500/40 bg-purple-500/10 text-purple-400' : 'border-[var(--border-default)] text-[var(--text-secondary)] hover:bg-[var(--bg-surface)]'}`}>
+                      <Binary size={12} /> REA
                     </button>
                     <button onClick={() => { toggleSnapgent(); if (!bridgeConnected) connectBridge(); }} className={`flex h-7 items-center gap-1 rounded-lg border px-2 text-xs ${snapgentEnabled ? (bridgeConnected ? 'border-green-500/40 bg-green-500/10 text-green-400' : 'border-amber-500/40 bg-amber-500/10 text-amber-400') : 'border-[var(--border-default)] text-[var(--text-secondary)] hover:bg-[var(--bg-surface)]'}`} title={bridgeConnected ? 'Bridge connected' : 'Bridge offline — start start.bat on your machine'}>
                       <Terminal size={12} /> VS Code{snapgentEnabled ? (bridgeConnected ? '' : ' (offline)') : ''}
@@ -748,6 +757,7 @@ export default function Page() {
       )}
 
       {/* === DIALOGS === */}
+
       <ImageGenDialog open={imageDialogOpen} onOpenChange={setImageDialogOpen} onImageGenerated={(img) => {
         if (activeConversationId) addMessage(activeConversationId, { id: genId('msg'), role: 'assistant', content: `Generated: ${img.prompt}`, createdAt: Date.now(), images: [{ id: img.id, url: img.url, prompt: img.prompt, size: img.size, width: img.width, height: img.height }] });
       }} />
