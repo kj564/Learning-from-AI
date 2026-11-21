@@ -35,6 +35,7 @@ import CommandPalette from '@/components/librechat/CommandPalette';
 import KeyboardShortcutsHelp from '@/components/librechat/KeyboardShortcutsHelp';
 import { ApprovalDialog } from '@/components/librechat/ApprovalDialog';
 import { AuditLogPanel } from '@/components/librechat/AuditLogPanel';
+import { SandboxPanel } from '@/components/librechat/SandboxPanel';
 import { Button } from '@/components/ui/button';
 
 const genId = (p: string) => `${p}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
@@ -134,6 +135,8 @@ export default function Page() {
   const [pendingApproval, setPendingApproval] = useState<any | null>(null);
   // Audit log viewer (collapsed by default).
   const [showAudit, setShowAudit] = useState(false);
+  // Sandbox worker dashboard (collapsed by default).
+  const [showSandbox, setShowSandbox] = useState(false);
   const [renameDraft, setRenameDraft] = useState('');
   const [menuOpenFor, setMenuOpenFor] = useState<string | null>(null);
 
@@ -483,6 +486,14 @@ export default function Page() {
                 <ScrollText size={14} />
               </button>
               <button
+                onClick={() => setShowSandbox(true)}
+                aria-label="Sandbox worker"
+                title="Sandbox worker"
+                className="flex h-8 w-8 items-center justify-center rounded-lg text-[var(--text-secondary)] hover:bg-[var(--bg-surface)]"
+              >
+                <Terminal size={14} />
+              </button>
+              <button
                 onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
                 aria-label="Toggle theme"
                 className="flex h-8 w-8 items-center justify-center rounded-lg text-[var(--text-secondary)] hover:bg-[var(--bg-surface)]"
@@ -759,6 +770,9 @@ export default function Page() {
 
       {/* === AUDIT LOG PANEL (observability) === */}
       <AuditLogPanel open={showAudit} onOpenChange={setShowAudit} conversationId={activeConversationId} />
+
+      {/* === SANDBOX WORKER PANEL (code execution dashboard) === */}
+      <SandboxPanel open={showSandbox} onOpenChange={setShowSandbox} />
     </div>
   );
 }
