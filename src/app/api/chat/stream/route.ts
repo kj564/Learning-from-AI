@@ -23,7 +23,7 @@
 import { NextRequest } from 'next/server';
 import ZAI from 'z-ai-web-dev-sdk';
 import { db } from '@/lib/db';
-import { TOOL_DEFINITIONS, toolsToSystemPrompt } from '@/lib/tool-definitions';
+import { ALL_TOOLS, ORCHESTRATOR_SYSTEM_PROMPT, GUARDRAILS, toolsToSystemPrompt as agentToolsToPrompt, type AgentTool } from '@/lib/agent-tools';
 
 export const AI_MODELS = [
   { id: 'glm-5.3', name: 'GLM-5.3', description: 'Most advanced — flagship model', glmModel: 'glm-5.3' },
@@ -52,7 +52,10 @@ interface SessionEntry {
 const sessions = new Map<string, SessionEntry>();
 const SESSION_TTL_MS = 30 * 60 * 1000;
 const MAX_MESSAGES = 100;
-const MAX_TOOL_ROUNDS = 10;
+// Guardrails from agent-tools.ts
+const MAX_TOOL_ROUNDS = GUARDRAILS.MAX_STEPS; // 10 — Anthropic standard
+
+const BASE_SYSTEM_PROMPT = ORCHESTRATOR_SYSTEM_PROMPT;
 
 function saveSession(sid: string, history: { role: string; content: string }[]) {
   sessions.set(sid, { history, expiresAt: Date.now() + SESSION_TTL_MS });
@@ -77,34 +80,9 @@ function sweepExpired() {
   }
 }
 
-const BASE_SYSTEM_PROMPT = `# glm_behavior
 
-## product_information
 
-You are GLM-4.6, Z.ai's most capable model for coding, agentic tasks, and reasoning. You are running on chat.z.ai.
-
-## tone_and_formatting
-
-GLM uses a warm tone, treating people with kindness. GLM avoids over-formatting with bold emphasis, headers, lists, and bullet points, using the minimum formatting needed for clarity. In typical conversation GLM keeps a natural tone and responds in prose rather than lists unless asked; casual responses can be short.
-
-## behavioral_guardrails
-
-GLM doesn't help with creating malware, planning cyberattacks, or content that sexualizes minors.
-GLM DOES help with legitimate security research, code generation, creative writing, technical explanations, and building full-stack web applications.
-
-# Tool Use — CRITICAL
-
-When the user asks you to create a file, write code, build something, run code, or look something up:
-1. DO NOT just show them the code and say "here's the code"
-2. Actually USE the appropriate tool (file_write, code_run, shell_run, web_search, knowledge_search, etc.)
-3. Report what you did and the result.
-
-To call a tool, respond with ONLY this JSON format and nothing else:
-{"tool":"file_write","args":{"path":"src/app/page.tsx","content":"import React from 'react'\\nexport default function Home() {\\n  return <div>Hello</div>\\n}"}}
-
-The system will execute the tool and send the result back. Then you can explain what happened to the user.`;
-
-function buildSystemPrompt(project: any, assistant: any, tools = TOOL_DEFINITIONS): string {
+function buildSystemPrompt(project: any, assistant: any, tools: AgentTool[] = ALL_TOOLS): string {
   let p = BASE_SYSTEM_PROMPT;
   if (assistant?.systemPrompt) {
     p += `\n\n# Assistant Persona\n\n${assistant.systemPrompt}`;
@@ -123,7 +101,7 @@ function buildSystemPrompt(project: any, assistant: any, tools = TOOL_DEFINITION
     }
     p += context;
   }
-  p += toolsToSystemPrompt(tools);
+  p += agentToolsToPrompt(tools);
   return p;
 }
 

@@ -127,7 +127,6 @@ interface WorkspaceState {
   sidebarExpanded: boolean;
   showDocumentsPanel: boolean;
   showWorkspace: boolean;
-  showReaPanel: boolean;
   workspaceFiles: import('./components/librechat/CodeWorkspace').WorkspaceFile[];
   isMobile: boolean;
   drawerOpen: boolean;
@@ -177,7 +176,6 @@ interface WorkspaceState {
   toggleDocumentsPanel: () => void;
   setShowDocumentsPanel: (b: boolean) => void;
   setShowWorkspace: (b: boolean) => void;
-  setShowReaPanel: (b: boolean) => void;
   setWorkspaceFiles: (files: import('./components/librechat/CodeWorkspace').WorkspaceFile[]) => void;
   addWorkspaceFile: (file: import('./components/librechat/CodeWorkspace').WorkspaceFile) => void;
   setIsMobile: (b: boolean) => void;
@@ -223,7 +221,6 @@ export const useStore = create<WorkspaceState>()(
       sidebarExpanded: true,
       showDocumentsPanel: false,
       showWorkspace: false,
-      showReaPanel: false,
       workspaceFiles: [],
       isMobile: false,
       drawerOpen: false,
@@ -356,7 +353,6 @@ export const useStore = create<WorkspaceState>()(
       toggleDocumentsPanel: () => set((s) => ({ showDocumentsPanel: !s.showDocumentsPanel })),
       setShowDocumentsPanel: (b) => set({ showDocumentsPanel: b }),
       setShowWorkspace: (b) => set({ showWorkspace: b }),
-      setShowReaPanel: (b) => set({ showReaPanel: b }),
       setWorkspaceFiles: (files) => set({ workspaceFiles: files }),
       addWorkspaceFile: (file) => set((s) => {
         const existing = s.workspaceFiles.filter((f) => f.path !== file.path);

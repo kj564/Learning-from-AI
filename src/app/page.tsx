@@ -26,7 +26,6 @@ import {
 } from 'lucide-react';
 import { useTheme } from 'next-themes';
 import CodeWorkspace from '@/components/librechat/CodeWorkspace';
-import ReaPanel from '@/components/librechat/ReaPanel';
 import Markdown from '@/components/librechat/Markdown';
 import CodeBlock from '@/components/librechat/CodeBlock';
 import ImageGenDialog from '@/components/librechat/ImageGenDialog';
@@ -106,8 +105,6 @@ export default function Page() {
   const clearAttachments = store((s) => s.clearAttachments);
   const activeProject = store((s) => s.activeProject);
   const activeAssistant = store((s) => s.assistants.find((a) => a.id === s.activeAssistantId) || null);
-  const showReaPanel = store((s) => s.showReaPanel);
-  const setShowReaPanel = store((s) => s.setShowReaPanel);
   const showWorkspace = store((s) => s.showWorkspace);
   const workspaceFiles = store((s) => s.workspaceFiles);
   const setShowWorkspace = store((s) => s.setShowWorkspace);
@@ -349,9 +346,7 @@ export default function Page() {
 
   return (
     <div className="flex h-screen w-full overflow-hidden bg-[var(--bg-page)] text-[var(--text-primary)]">
-      {showReaPanel && <ReaPanel onClose={() => setShowReaPanel(false)} />}
       {/* REA Panel — 70% right panel */}
-      {showReaPanel && <ReaPanel onClose={() => setShowReaPanel(false)} />}
       {/* === SIDEBAR === */}
       {sidebarOpen && (
         <div className="flex h-full w-64 shrink-0 flex-col border-r border-[var(--border-default)] bg-[var(--bg-surface)]">
@@ -459,8 +454,7 @@ export default function Page() {
       )}
 
       {/* === MAIN CHAT === */}
-      {/* === MAIN CHAT (30% when REA open, 100% otherwise) === */}
-      <div className={`relative flex h-full min-w-0 flex-col ${showReaPanel ? 'w-[30%] shrink-0' : 'flex-1'}`}>
+      <div className="relative flex h-full min-w-0 flex-1 flex-col">
         {/* Top bar: sidebar toggle + model picker + share */}
         <div className="flex h-12 shrink-0 items-center gap-2 px-3">
           <button onClick={() => setSidebarOpen((v) => !v)} className="flex h-8 w-8 items-center justify-center rounded-lg text-[var(--text-secondary)] hover:bg-[var(--bg-surface)]">
@@ -558,15 +552,6 @@ export default function Page() {
                     </button>
                     <button onClick={toggleThink} className={`flex h-7 items-center gap-1 rounded-lg border px-2 text-xs ${thinkEnabled ? 'border-[var(--accent)]/40 bg-[var(--primary-btn)]/10 text-[var(--accent)]' : 'border-[var(--border-default)] text-[var(--text-secondary)] hover:bg-[var(--bg-surface)]'}`}>
                       <Brain size={12} /> Think
-                    </button>
-                  <button onClick={() => setShowReaPanel(!showReaPanel)} className={`flex h-7 items-center gap-1 rounded-lg border px-2 text-xs ${showReaPanel ? "border-purple-500/40 bg-purple-500/10 text-purple-400" : "border-[var(--border-default)] text-[var(--text-secondary)] hover:bg-[var(--bg-surface)]"}`}>
-                    <Binary size={12} /> REA
-                  </button>
-                    <button onClick={() => setShowReaPanel(!showReaPanel)} className={`flex h-7 items-center gap-1 rounded-lg border px-2 text-xs ${showReaPanel ? "border-purple-500/40 bg-purple-500/10 text-purple-400" : "border-[var(--border-default)] text-[var(--text-secondary)] hover:bg-[var(--bg-surface)]"}`}>
-                      <Binary size={12} /> REA
-                    </button>
-                    <button onClick={() => setShowReaPanel(!showReaPanel)} className={`flex h-7 items-center gap-1 rounded-lg border px-2 text-xs ${showReaPanel ? 'border-purple-500/40 bg-purple-500/10 text-purple-400' : 'border-[var(--border-default)] text-[var(--text-secondary)] hover:bg-[var(--bg-surface)]'}`}>
-                      <Binary size={12} /> REA
                     </button>
                     <div className="flex-1" />
                     <button onClick={handleSend} disabled={!composerText.trim()} className="flex h-7 w-7 items-center justify-center rounded-full bg-[var(--primary-btn)] text-white disabled:opacity-40 hover:bg-[var(--accent-hover)] transition">
