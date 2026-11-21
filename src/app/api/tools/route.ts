@@ -1,14 +1,9 @@
 /**
- * API: /api/tools — Tool executor (Anthropic tool_use → tool_result flow)
+ * API: /api/tools — Tool executor (Anthropic-standard)
  *
- * Tools available (matching src/lib/tool-definitions.ts):
- *   - file_write, file_read, file_list, file_delete
- *   - code_run, shell_run, npm_install
- *   - web_search, knowledge_search
- *   - project_create, canva_mcp
- *
- * bolt.diy-inspired: agentic file + shell + code execution with timeout + stdout/stderr capture.
- * Onyx-inspired: knowledge_search routes through /api/knowledge.
+ * Tools: web_search, read_url, read_file, list_dir, write_file, edit_file,
+ *        run_code_sandbox, run_shell, create_note, recall_memory,
+ *        search_knowledge_base, image_generate, image_search
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -19,89 +14,117 @@ import { exec, execFile } from 'child_process';
 import { promisify } from 'util';
 import { randomUUID } from 'crypto';
 import ZAI from 'z-ai-web-dev-sdk';
-import { TOOL_BY_NAME } from '@/lib/tool-definitions';
+import { db } from '@/lib/db';
 
 const execAsync = promisify(exec);
 const execFileAsync = promisify(execFile);
 const WORKSPACE = '/home/z/my-project';
 
-/** Resolve a relative path against WORKSPACE and reject path traversal / absolute paths. */
 function safePath(relPath: string): string | null {
   if (!relPath || typeof relPath !== 'string') return null;
-  // Reject absolute paths (which path.join would happily accept as the new root)
   if (path.isAbsolute(relPath)) return null;
   const full = path.resolve(WORKSPACE, relPath);
-  // Ensure the resolved path is still inside WORKSPACE
   if (full !== WORKSPACE && !full.startsWith(WORKSPACE + path.sep)) return null;
-  // Reject any segment that is `..` (defense in depth)
   if (relPath.split(/[\\/]/).some((seg) => seg === '..')) return null;
   return full;
 }
 
-/** Validate an npm package name (with optional @version) — reject shell metacharacters. */
-const PKG_RE = /^@?[a-zA-Z0-9][a-zA-Z0-9._/-]*(@[a-zA-Z0-9._^+:-]+)?$/;
-function validPackageNames(pkgs: string[]): boolean {
-  return pkgs.every((p) => typeof p === 'string' && PKG_RE.test(p) && p.length < 200);
-}
-
-/** Validate a project name (kebab-case) for project_create. */
-const NAME_RE = /^[a-z0-9][a-z0-9-]{0,63}$/;
-function validProjectName(name: string): boolean {
-  return typeof name === 'string' && NAME_RE.test(name);
-}
-
-/** Call the knowledge search endpoint internally. */
-async function knowledgeSearch(query: string, topK = 4): Promise<{ query: string; snippets: { source: string; content: string; score: number }[] }> {
-  try {
-    const res = await fetch(`http://localhost:3000/api/knowledge`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'search', query, topK }),
-    });
-    if (!res.ok) return { query, snippets: [] };
-    const data = await res.json();
-    return { query, snippets: data.snippets || [] };
-  } catch {
-    return { query, snippets: [] };
-  }
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
     const { tool, args } = body as { tool: string; args: Record<string, unknown> };
-
-    // Validate tool exists in definitions
-    if (!TOOL_BY_NAME[tool]) {
-      // Check new agent tool aliases
-      const agentTools = ['write_file','edit_file','read_file','list_dir','run_code_sandbox','run_shell','read_url','create_note','recall_memory'];
-      if (!agentTools.includes(tool)) {
-        return NextResponse.json({ error: `Unknown tool: ${tool}` }, { status: 400 });
-      }
-    }
-
-      // === NEW AGENT TOOL ALIASES (Anthropic-standard names) ===
-      case 'write_file': { args.path = args.path || args.path; const fp = args.path; const ct = args.content; if (!fp || ct === undefined) return NextResponse.json({ error: 'path + content required' }, { status: 400 }); const fullPath = safePath(fp); if (!fullPath) return NextResponse.json({ error: 'Invalid path' }, { status: 400 }); const dir = path.dirname(fullPath); if (!existsSync(dir)) await mkdir(dir, { recursive: true }); await writeFile(fullPath, ct, 'utf-8'); return NextResponse.json({ success: true, path: fp, size: ct.length }); }
-      case 'edit_file': { const fp = args.path as string; if (!fp) return NextResponse.json({ error: 'path required' }, { status: 400 }); const fullPath = safePath(fp); if (!fullPath || !existsSync(fullPath)) return NextResponse.json({ error: 'File not found' }, { status: 404 }); const oldText = args.old_text as string; const newText = args.new_text as string; if (!oldText || !newText) return NextResponse.json({ error: 'old_text + new_text required' }, { status: 400 }); let fileContent = await readFile(fullPath, 'utf-8'); const replaceAll = args.replace_all === true; if (replaceAll) { fileContent = fileContent.split(oldText).join(newText); } else { const count = (fileContent.match(new RegExp(escapeRegExp(oldText), 'g')) || []).length; if (count === 0) return NextResponse.json({ error: 'old_text not found' }, { status: 404 }); if (count > 1) return NextResponse.json({ error: \`old_text found \${count} times; use replace_all: true\` }, { status: 400 }); fileContent = fileContent.replace(oldText, newText); } await writeFile(fullPath, fileContent, 'utf-8'); return NextResponse.json({ success: true, path: fp }); }
-      case 'read_file': { const fp = args.path as string; if (!fp) return NextResponse.json({ error: 'path required' }, { status: 400 }); const fullPath = safePath(fp); if (!fullPath || !existsSync(fullPath)) return NextResponse.json({ error: 'File not found' }, { status: 404 }); const c = await readFile(fullPath, 'utf-8'); return NextResponse.json({ success: true, path: fp, content: c }); }
-      case 'list_dir': { const dp = (args.dir as string) || '.'; const fullPath = safePath(dp); if (!fullPath || !existsSync(fullPath)) return NextResponse.json({ error: 'Directory not found' }, { status: 404 }); const entries = await readdir(fullPath, { withFileTypes: true }); const items = entries.filter(e => !e.name.startsWith('.') && e.name !== 'node_modules' && e.name !== '.next').map(e => ({ name: e.name, type: e.isDirectory() ? 'dir' : 'file' })); return NextResponse.json({ success: true, dir: dp, items }); }
-      case 'run_code_sandbox': { const code = args.code as string; const lang = (args.language as string) || 'javascript'; if (!code) return NextResponse.json({ error: 'code required' }, { status: 400 }); const tmpDir = path.join(WORKSPACE, '.tmp-exec'); if (!existsSync(tmpDir)) await mkdir(tmpDir, { recursive: true }); if (lang === 'javascript' || lang === 'typescript') { const ext = lang === 'typescript' ? 'ts' : 'js'; const tmpFile = path.join(tmpDir, \`\${randomUUID()}.\${ext}\`); await writeFile(tmpFile, lang === 'typescript' ? code : code, 'utf-8'); try { const runner = lang === 'typescript' ? 'bun' : 'node'; const { stdout, stderr } = await execFileAsync(runner, lang === 'typescript' ? ['run', tmpFile] : [tmpFile], { cwd: WORKSPACE, timeout: 10000, maxBuffer: 1024 * 1024 }); await unlink(tmpFile).catch(() => {}); return NextResponse.json({ success: true, stdout, stderr: stderr || undefined }); } catch (e) { return NextResponse.json({ success: false, error: (e as Error).message }, { status: 500 }); } } if (lang === 'python') { const tmpFile = path.join(tmpDir, \`\${randomUUID()}.py\`); await writeFile(tmpFile, code, 'utf-8'); try { const { stdout, stderr } = await execFileAsync('python3', [tmpFile], { cwd: WORKSPACE, timeout: 10000, maxBuffer: 1024 * 1024 }); await unlink(tmpFile).catch(() => {}); return NextResponse.json({ success: true, stdout, stderr: stderr || undefined }); } catch (e) { return NextResponse.json({ success: false, error: (e as Error).message }, { status: 500 }); } } if (lang === 'bash') { try { const { stdout, stderr } = await execAsync(code, { cwd: WORKSPACE, timeout: 10000, maxBuffer: 1024 * 1024 }); return NextResponse.json({ success: true, stdout, stderr: stderr || undefined }); } catch (e) { return NextResponse.json({ success: false, error: (e as Error).message }, { status: 500 }); } } return NextResponse.json({ error: \`Language \${lang} not supported\` }, { status: 400 }); }
-      case 'run_shell': { const cmd = args.command as string; if (!cmd) return NextResponse.json({ error: 'command required' }, { status: 400 }); try { const { stdout, stderr } = await execAsync(cmd, { cwd: WORKSPACE, timeout: 15000, maxBuffer: 1024 * 1024 }); return NextResponse.json({ success: true, command: cmd, stdout, stderr: stderr || undefined }); } catch (e) { const err = e as Error & { stdout?: string; stderr?: string }; return NextResponse.json({ success: false, error: err.message, stdout: err.stdout, stderr: err.stderr }, { status: 500 }); } }
-      case 'read_url': { const url = args.url as string; if (!url || !isSafeExternalUrl(url)) return NextResponse.json({ error: 'Valid http(s) URL required' }, { status: 400 }); try { const zai = await ZAI.create(); const result = await zai.functions.invoke('page_reader', { url }); return NextResponse.json({ success: true, url, title: result?.data?.title || '', content: result?.data?.html || '' }); } catch (e) { return NextResponse.json({ success: false, error: (e as Error).message }, { status: 500 }); } }
-      case 'create_note': { const title = args.title as string; const content = args.content as string; const category = args.category as string; if (!title || !content) return NextResponse.json({ error: 'title + content required' }, { status: 400 }); try { const doc = await db.knowledgeDoc.create({ data: { title, source: \`memory:\${category || 'finding'}\`, content, tags: JSON.stringify([category || 'finding', 'memory']) } }); return NextResponse.json({ success: true, id: doc.id }); } catch (e) { return NextResponse.json({ success: false, error: (e as Error).message }, { status: 500 }); } }
-      case 'recall_memory': { const query = args.query as string; if (!query) return NextResponse.json({ error: 'query required' }, { status: 400 }); try { const wsRes = await fetch('http://localhost:3000/api/knowledge', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'search', query: \`memory \${query}\`, topK: 5 }) }); const data = await wsRes.json(); const notes = (data.snippets || []).filter((s: any) => s.source?.startsWith('memory:')).map((s: any) => ({ title: s.title, content: s.content, category: s.source?.replace('memory:', '') })); return NextResponse.json({ success: true, notes }); } catch (e) { return NextResponse.json({ success: false, error: (e as Error).message }, { status: 500 }); } }
-
-    // OLD tools below...
-      return NextResponse.json({ error: `Unknown tool: ${tool}` }, { status: 400 });
-    }
+    if (!tool) return NextResponse.json({ error: 'tool required' }, { status: 400 });
 
     switch (tool) {
-      // === FILE OPERATIONS ===
-      case 'file_write': {
+      // === READ TOOLS ===
+      case 'web_search': {
+        const query = args.query as string;
+        if (!query) return NextResponse.json({ error: 'query required' }, { status: 400 });
+        try {
+          const zai = await ZAI.create();
+          const results = await zai.functions.invoke('web_search', { query, num: (args.max_results as number) || 5 });
+          return NextResponse.json({ success: true, query, results: results || [] });
+        } catch (e) {
+          return NextResponse.json({ success: false, error: (e as Error).message }, { status: 500 });
+        }
+      }
+
+      case 'read_url': {
+        const url = args.url as string;
+        if (!url) return NextResponse.json({ error: 'url required' }, { status: 400 });
+        try {
+          const zai = await ZAI.create();
+          const result = await zai.functions.invoke('page_reader', { url });
+          return NextResponse.json({ success: true, url, title: result?.data?.title || '', content: result?.data?.html || '' });
+        } catch (e) {
+          return NextResponse.json({ success: false, error: (e as Error).message }, { status: 500 });
+        }
+      }
+
+      case 'read_file': {
+        const filePath = args.path as string;
+        if (!filePath) return NextResponse.json({ error: 'path required' }, { status: 400 });
+        const fullPath = safePath(filePath);
+        if (!fullPath || !existsSync(fullPath)) return NextResponse.json({ error: 'File not found' }, { status: 404 });
+        const content = await readFile(fullPath, 'utf-8');
+        return NextResponse.json({ success: true, path: filePath, content });
+      }
+
+      case 'list_dir': {
+        const dirPath = (args.path as string) || (args.dir as string) || '.';
+        const fullPath = safePath(dirPath);
+        if (!fullPath || !existsSync(fullPath)) return NextResponse.json({ error: 'Directory not found' }, { status: 404 });
+        const entries = await readdir(fullPath, { withFileTypes: true });
+        const items = entries
+          .filter((e) => !e.name.startsWith('.') && e.name !== 'node_modules' && e.name !== '.next' && e.name !== '__pycache__')
+          .map((e) => ({ name: e.name, type: e.isDirectory() ? 'dir' : 'file' }));
+        return NextResponse.json({ success: true, dir: dirPath, items });
+      }
+
+      case 'search_knowledge_base': {
+        const query = args.query as string;
+        if (!query) return NextResponse.json({ error: 'query required' }, { status: 400 });
+        try {
+          const res = await fetch('http://localhost:3000/api/knowledge', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'search', query, topK: args.top_k || 5 }),
+          });
+          const data = await res.json();
+          return NextResponse.json({ success: true, query, snippets: data.snippets || [] });
+        } catch (e) {
+          return NextResponse.json({ success: false, error: (e as Error).message }, { status: 500 });
+        }
+      }
+
+      case 'recall_memory': {
+        const query = args.query as string;
+        if (!query) return NextResponse.json({ error: 'query required' }, { status: 400 });
+        try {
+          const res = await fetch('http://localhost:3000/api/knowledge', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'search', query: `memory ${query}`, topK: 5 }),
+          });
+          const data = await res.json();
+          const notes = (data.snippets || [])
+            .filter((s: any) => s.source?.startsWith('memory:'))
+            .map((s: any) => ({ title: s.title, content: s.content, category: s.source?.replace('memory:', '') }));
+          return NextResponse.json({ success: true, notes });
+        } catch (e) {
+          return NextResponse.json({ success: false, error: (e as Error).message }, { status: 500 });
+        }
+      }
+
+      // === WRITE TOOLS ===
+      case 'write_file': {
         const filePath = args.path as string;
         const content = args.content as string;
-        if (!filePath || content === undefined)
-          return NextResponse.json({ error: 'path + content required' }, { status: 400 });
+        if (!filePath || content === undefined) return NextResponse.json({ error: 'path + content required' }, { status: 400 });
         const fullPath = safePath(filePath);
         if (!fullPath) return NextResponse.json({ error: 'Invalid path (path traversal blocked)' }, { status: 400 });
         const dir = path.dirname(fullPath);
@@ -110,100 +133,64 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ success: true, path: filePath, size: content.length });
       }
 
-      case 'file_read': {
+      case 'edit_file': {
         const filePath = args.path as string;
         if (!filePath) return NextResponse.json({ error: 'path required' }, { status: 400 });
         const fullPath = safePath(filePath);
-        if (!fullPath) return NextResponse.json({ error: 'Invalid path (path traversal blocked)' }, { status: 400 });
-        if (!existsSync(fullPath)) return NextResponse.json({ error: 'File not found' }, { status: 404 });
-        const content = await readFile(fullPath, 'utf-8');
-        return NextResponse.json({ success: true, path: filePath, content });
+        if (!fullPath || !existsSync(fullPath)) return NextResponse.json({ error: 'File not found' }, { status: 404 });
+        const oldText = args.old_text as string;
+        const newText = args.new_text as string;
+        if (!oldText || !newText) return NextResponse.json({ error: 'old_text + new_text required' }, { status: 400 });
+        let fileContent = await readFile(fullPath, 'utf-8');
+        const replaceAll = args.replace_all === true;
+        if (replaceAll) {
+          fileContent = fileContent.split(oldText).join(newText);
+        } else {
+          const count = (fileContent.match(new RegExp(escapeRegExp(oldText), 'g')) || []).length;
+          if (count === 0) return NextResponse.json({ error: 'old_text not found' }, { status: 404 });
+          if (count > 1) return NextResponse.json({ error: `old_text found ${count} times; use replace_all: true` }, { status: 400 });
+          fileContent = fileContent.replace(oldText, newText);
+        }
+        await writeFile(fullPath, fileContent, 'utf-8');
+        return NextResponse.json({ success: true, path: filePath });
       }
 
-      case 'file_list': {
-        const dirPath = (args.dir as string) || '.';
-        const fullPath = safePath(dirPath);
-        if (!fullPath) return NextResponse.json({ error: 'Invalid path (path traversal blocked)' }, { status: 400 });
-        if (!existsSync(fullPath)) return NextResponse.json({ error: 'Directory not found' }, { status: 404 });
-        const entries = await readdir(fullPath, { withFileTypes: true });
-        const items = entries
-          .filter((e) => !e.name.startsWith('.') && e.name !== 'node_modules' && e.name !== '.next' && e.name !== '__pycache__')
-          .map((e) => ({ name: e.name, type: e.isDirectory() ? 'dir' : 'file' }));
-        return NextResponse.json({ success: true, dir: dirPath, items });
-      }
-
-      case 'file_delete': {
-        const filePath = args.path as string;
-        if (!filePath) return NextResponse.json({ error: 'path required' }, { status: 400 });
-        const fullPath = safePath(filePath);
-        if (!fullPath) return NextResponse.json({ error: 'Invalid path (path traversal blocked)' }, { status: 400 });
-        if (!existsSync(fullPath)) return NextResponse.json({ error: 'File not found' }, { status: 404 });
-        await unlink(fullPath);
-        return NextResponse.json({ success: true, deleted: filePath });
-      }
-
-      // === CODE EXECUTION ===
-      case 'code_run': {
+      case 'run_code_sandbox': {
         const code = args.code as string;
-        const language = (args.language as string) || 'javascript';
+        const lang = (args.language as string) || 'javascript';
         if (!code) return NextResponse.json({ error: 'code required' }, { status: 400 });
-
-        // Use a unique temp file per request to avoid concurrent overwrites.
         const tmpDir = path.join(WORKSPACE, '.tmp-exec');
         if (!existsSync(tmpDir)) await mkdir(tmpDir, { recursive: true });
 
-        if (language === 'javascript') {
+        if (lang === 'javascript') {
           const tmpFile = path.join(tmpDir, `${randomUUID()}.js`);
           await writeFile(tmpFile, code, 'utf-8');
           try {
-            const { stdout, stderr } = await execFileAsync('node', [tmpFile], {
-              cwd: WORKSPACE,
-              timeout: 10000,
-              maxBuffer: 1024 * 1024,
-            });
+            const { stdout, stderr } = await execFileAsync('node', [tmpFile], { cwd: WORKSPACE, timeout: 10000, maxBuffer: 1024 * 1024 });
             await unlink(tmpFile).catch(() => {});
             return NextResponse.json({ success: true, stdout, stderr: stderr || undefined });
           } catch (e) {
             await unlink(tmpFile).catch(() => {});
-            const err = e as Error & { stdout?: string; stderr?: string };
-            return NextResponse.json(
-              { success: false, error: err.message, stdout: err.stdout, stderr: err.stderr },
-              { status: 500 }
-            );
+            return NextResponse.json({ success: false, error: (e as Error).message }, { status: 500 });
           }
         }
-
-        if (language === 'typescript') {
-          // Use bun (which has built-in TS support) to run TS code.
+        if (lang === 'typescript') {
           const tmpFile = path.join(tmpDir, `${randomUUID()}.ts`);
           await writeFile(tmpFile, code, 'utf-8');
           try {
-            const { stdout, stderr } = await execFileAsync('bun', ['run', tmpFile], {
-              cwd: WORKSPACE,
-              timeout: 10000,
-              maxBuffer: 1024 * 1024,
-            });
+            const { stdout, stderr } = await execFileAsync('bun', ['run', tmpFile], { cwd: WORKSPACE, timeout: 10000, maxBuffer: 1024 * 1024 });
             await unlink(tmpFile).catch(() => {});
             return NextResponse.json({ success: true, stdout, stderr: stderr || undefined });
           } catch (e) {
             await unlink(tmpFile).catch(() => {});
-            const err = e as Error & { stdout?: string; stderr?: string };
-            return NextResponse.json(
-              { success: false, error: err.message, stdout: err.stdout, stderr: err.stderr },
-              { status: 500 }
-            );
+            return NextResponse.json({ success: false, error: (e as Error).message }, { status: 500 });
           }
         }
-
-        if (language === 'python' || language === 'python3') {
+        if (lang === 'python') {
           const tmpFile = path.join(tmpDir, `${randomUUID()}.py`);
           await writeFile(tmpFile, code, 'utf-8');
           try {
-            const { stdout, stderr } = await execFileAsync('python3', [tmpFile], {
-              cwd: WORKSPACE,
-              timeout: 10000,
-              maxBuffer: 1024 * 1024,
-            });
+            const { stdout, stderr } = await execFileAsync('python3', [tmpFile], { cwd: WORKSPACE, timeout: 10000, maxBuffer: 1024 * 1024 });
             await unlink(tmpFile).catch(() => {});
             return NextResponse.json({ success: true, stdout, stderr: stderr || undefined });
           } catch (e) {
@@ -211,244 +198,132 @@ export async function POST(req: NextRequest) {
             return NextResponse.json({ success: false, error: (e as Error).message }, { status: 500 });
           }
         }
-
-        if (language === 'bash' || language === 'sh') {
+        if (lang === 'bash' || lang === 'sh') {
           try {
-            // shell_run is intentionally shell — commands can use pipes/redirects.
-            const { stdout, stderr } = await execAsync(code, {
-              cwd: WORKSPACE,
-              timeout: 10000,
-              maxBuffer: 1024 * 1024,
-            });
+            const { stdout, stderr } = await execAsync(code, { cwd: WORKSPACE, timeout: 10000, maxBuffer: 1024 * 1024 });
             return NextResponse.json({ success: true, stdout, stderr: stderr || undefined });
           } catch (e) {
             return NextResponse.json({ success: false, error: (e as Error).message }, { status: 500 });
           }
         }
-
-        return NextResponse.json({ error: `Language ${language} not supported` }, { status: 400 });
+        return NextResponse.json({ error: `Language ${lang} not supported` }, { status: 400 });
       }
 
-      // === SHELL RUN (new) ===
-      case 'shell_run': {
+      case 'run_shell': {
         const command = args.command as string;
-        const cwdRel = (args.cwd as string) || '.';
         if (!command) return NextResponse.json({ error: 'command required' }, { status: 400 });
         try {
-          const { stdout, stderr } = await execAsync(command, {
-            cwd: path.join(WORKSPACE, cwdRel),
-            timeout: 15000,
-            maxBuffer: 1024 * 1024,
-          });
+          const { stdout, stderr } = await execAsync(command, { cwd: WORKSPACE, timeout: 15000, maxBuffer: 1024 * 1024 });
           return NextResponse.json({ success: true, command, stdout, stderr: stderr || undefined });
         } catch (e) {
           const err = e as Error & { stdout?: string; stderr?: string };
-          return NextResponse.json(
-            { success: false, error: err.message, stdout: err.stdout, stderr: err.stderr },
-            { status: 500 }
-          );
+          return NextResponse.json({ success: false, error: err.message, stdout: err.stdout, stderr: err.stderr }, { status: 500 });
         }
       }
 
-      // === PACKAGE INSTALL ===
+      case 'create_note': {
+        const title = args.title as string;
+        const content = args.content as string;
+        const category = (args.category as string) || 'finding';
+        if (!title || !content) return NextResponse.json({ error: 'title + content required' }, { status: 400 });
+        try {
+          const doc = await db.knowledgeDoc.create({
+            data: { title, source: `memory:${category}`, content, tags: JSON.stringify([category, 'memory']) },
+          });
+          return NextResponse.json({ success: true, id: doc.id });
+        } catch (e) {
+          return NextResponse.json({ success: false, error: (e as Error).message }, { status: 500 });
+        }
+      }
+
+      // === LEGACY ALIASES (backward compat) ===
+      case 'file_write': {
+        return POST_proxy(req, 'write_file', { ...args, path: args.path, content: args.content });
+      }
+      case 'file_read': {
+        return POST_proxy(req, 'read_file', { path: args.path });
+      }
+      case 'file_list': {
+        return POST_proxy(req, 'list_dir', { dir: args.dir || '.' });
+      }
+      case 'code_run': {
+        return POST_proxy(req, 'run_code_sandbox', { code: args.code, language: args.language || 'javascript' });
+      }
+      case 'shell_run': {
+        return POST_proxy(req, 'run_shell', { command: args.command });
+      }
+      case 'knowledge_search': {
+        return POST_proxy(req, 'search_knowledge_base', { query: args.query, top_k: args.topK });
+      }
+      case 'image_generate': {
+        try {
+          const genRes = await fetch('http://localhost:3000/api/image/generate', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ prompt: args.prompt, size: args.size || '1024x1024' }),
+          });
+          const data = await genRes.json();
+          return NextResponse.json({ success: !!data.success, prompt: args.prompt, image: data.image || null });
+        } catch (e) {
+          return NextResponse.json({ success: false, error: (e as Error).message }, { status: 500 });
+        }
+      }
+      case 'image_search': {
+        try {
+          const isRes = await fetch('http://localhost:3000/api/image/search', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ query: args.query, count: 4 }),
+          });
+          const data = await isRes.json();
+          return NextResponse.json({ success: !!data.success, query: args.query, results: data.results || [] });
+        } catch (e) {
+          return NextResponse.json({ success: false, error: (e as Error).message }, { status: 500 });
+        }
+      }
       case 'npm_install': {
         const packages = args.packages as string[];
-        if (!packages || !Array.isArray(packages) || !validPackageNames(packages))
-          return NextResponse.json({ error: 'packages array of valid names required' }, { status: 400 });
+        if (!packages || !Array.isArray(packages)) return NextResponse.json({ error: 'packages array required' }, { status: 400 });
         try {
-          // Use execFile (no shell) to prevent command injection via package names.
-          const { stdout } = await execFileAsync('bun', ['add', ...packages], {
-            cwd: WORKSPACE,
-            timeout: 60000,
-            maxBuffer: 1024 * 1024,
-          });
+          const { stdout } = await execFileAsync('bun', ['add', ...packages], { cwd: WORKSPACE, timeout: 60000, maxBuffer: 1024 * 1024 });
           return NextResponse.json({ success: true, packages, stdout: stdout.slice(0, 500) });
         } catch (e) {
           return NextResponse.json({ success: false, error: (e as Error).message }, { status: 500 });
         }
       }
-
-      // === WEB SEARCH ===
-      case 'web_search': {
-        const query = args.query as string;
-        if (!query) return NextResponse.json({ error: 'query required' }, { status: 400 });
-        try {
-          // REAL web search via the SDK's built-in function (replaces the old LLM-hallucinated version)
-          const wsRes = await fetch('http://localhost:3000/api/web/search', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ query, num: 6 }),
-          });
-          const data = await wsRes.json();
-          return NextResponse.json({ success: true, query, results: data.results || [] });
-        } catch (e) {
-          return NextResponse.json({ success: false, error: (e as Error).message }, { status: 500 });
-        }
-      }
-
-      // === IMAGE GENERATION (new) ===
-      case 'image_generate': {
-        const prompt = args.prompt as string;
-        const size = (args.size as string) || '1024x1024';
-        if (!prompt) return NextResponse.json({ error: 'prompt required' }, { status: 400 });
-        try {
-          const genRes = await fetch('http://localhost:3000/api/image/generate', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ prompt, size }),
-          });
-          const data = await genRes.json();
-          return NextResponse.json({
-            success: !!data.success,
-            prompt,
-            image: data.image || null,
-          });
-        } catch (e) {
-          return NextResponse.json({ success: false, error: (e as Error).message }, { status: 500 });
-        }
-      }
-
-      // === IMAGE SEARCH (new) ===
-      case 'image_search': {
-        const query = args.query as string;
-        if (!query) return NextResponse.json({ error: 'query required' }, { status: 400 });
-        try {
-          const isRes = await fetch('http://localhost:3000/api/image/search', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ query, count: 4 }),
-          });
-          const data = await isRes.json();
-          return NextResponse.json({ success: !!data.success, query, results: data.results || [] });
-        } catch (e) {
-          return NextResponse.json({ success: false, error: (e as Error).message }, { status: 500 });
-        }
-      }
-
-      // === IMAGE EDIT (new) ===
-      case 'image_edit': {
-        const prompt = args.prompt as string;
-        const image = args.image as string;
-        const size = (args.size as string) || '1024x1024';
-        if (!prompt || !image) return NextResponse.json({ error: 'prompt + image required' }, { status: 400 });
-        try {
-          const editRes = await fetch('http://localhost:3000/api/image/edit', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ prompt, image, size }),
-          });
-          const data = await editRes.json();
-          return NextResponse.json({
-            success: !!data.success,
-            prompt,
-            image: data.image || null,
-          });
-        } catch (e) {
-          return NextResponse.json({ success: false, error: (e as Error).message }, { status: 500 });
-        }
-      }
-
-      // === VIDEO GENERATION (new, async) ===
-      case 'video_generate': {
-        const prompt = args.prompt as string;
-        const image_url = args.image_url as string | undefined;
-        const quality = (args.quality as 'speed' | 'quality') || 'quality';
-        const with_audio = args.with_audio !== false;
-        const duration = args.duration as number | undefined;
-        if (!prompt && !image_url) return NextResponse.json({ error: 'prompt or image_url required' }, { status: 400 });
-        try {
-          const genRes = await fetch('http://localhost:3000/api/video/generate', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ prompt, image_url, quality, with_audio, duration }),
-          });
-          const data = await genRes.json();
-          return NextResponse.json({
-            success: !!data.success,
-            prompt,
-            taskId: data.taskId,
-            status: data.status,
-            note: 'Video generation is async. Poll /api/video/status?taskId=<id> every 5-10s until status === SUCCESS.',
-          });
-        } catch (e) {
-          return NextResponse.json({ success: false, error: (e as Error).message }, { status: 500 });
-        }
-      }
-
-      // === KNOWLEDGE SEARCH (new) ===
-      case 'knowledge_search': {
-        const query = args.query as string;
-        const topK = (args.topK as number) || 4;
-        if (!query) return NextResponse.json({ error: 'query required' }, { status: 400 });
-        const result = await knowledgeSearch(query, topK);
-        return NextResponse.json({ success: true, ...result });
-      }
-
-      // === PROJECT CREATION ===
       case 'project_create': {
         const name = args.name as string;
-        const type = (args.type as string) || 'nextjs';
-        if (!name || !validProjectName(name))
-          return NextResponse.json({ error: 'valid name required (kebab-case)' }, { status: 400 });
+        if (!name || !/^[a-z0-9][a-z0-9-]{0,63}$/.test(name)) return NextResponse.json({ error: 'valid name required' }, { status: 400 });
         const projectPath = path.join(WORKSPACE, name);
-        if (existsSync(projectPath))
-          return NextResponse.json({ error: 'Project already exists' }, { status: 400 });
-
-        if (type === 'nextjs') {
-          try {
-            // Use execFile (no shell) to prevent command injection via project name.
-            const { stdout } = await execFileAsync(
-              'npx',
-              ['create-next-app@latest', name, '--ts', '--tailwind', '--app', '--no-eslint', '--no-src-dir', '--use-bun', '--yes'],
-              { cwd: WORKSPACE, timeout: 120000, maxBuffer: 1024 * 1024 * 2 }
-            );
-            return NextResponse.json({ success: true, name, path: name, stdout: stdout.slice(0, 500) });
-          } catch {
-            await mkdir(path.join(projectPath, 'src/app'), { recursive: true });
-            await writeFile(
-              path.join(projectPath, 'src/app/page.tsx'),
-              `export default function Home() {\n  return <div>Hello from ${name}</div>\n}\n`,
-              'utf-8'
-            );
-            await writeFile(
-              path.join(projectPath, 'package.json'),
-              JSON.stringify({ name, version: '0.1.0', private: true, scripts: { dev: 'next dev' } }, null, 2),
-              'utf-8'
-            );
-            return NextResponse.json({ success: true, name, path: name, note: 'Created minimal structure (create-next-app failed)' });
-          }
+        if (existsSync(projectPath)) return NextResponse.json({ error: 'Project already exists' }, { status: 400 });
+        try {
+          const { stdout } = await execFileAsync('npx', ['create-next-app@latest', name, '--ts', '--tailwind', '--app', '--no-eslint', '--no-src-dir', '--use-bun', '--yes'], { cwd: WORKSPACE, timeout: 120000, maxBuffer: 1024 * 1024 * 2 });
+          return NextResponse.json({ success: true, name, path: name, stdout: stdout.slice(0, 500) });
+        } catch {
+          await mkdir(path.join(projectPath, 'src/app'), { recursive: true });
+          await writeFile(path.join(projectPath, 'src/app/page.tsx'), `export default function Home() {\n  return <div>Hello from ${name}</div>\n}\n`, 'utf-8');
+          return NextResponse.json({ success: true, name, path: name, note: 'Minimal structure created' });
         }
-        return NextResponse.json({ error: `Type ${type} not supported` }, { status: 400 });
-      }
-
-      // === CANVA MCP PROXY ===
-      case 'canva_mcp': {
-        const mcpRequest = args.mcpRequest as string;
-        if (!mcpRequest) return NextResponse.json({ error: 'mcpRequest required' }, { status: 400 });
-        const canvaRes = await fetch('http://localhost:3000/api/mcp/canva', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: mcpRequest,
-        });
-        const canvaData = await canvaRes.text();
-        return new NextResponse(canvaData, {
-          status: canvaRes.status,
-          headers: { 'Content-Type': 'application/json' },
-        });
       }
 
       default:
         return NextResponse.json({ error: `Unknown tool: ${tool}` }, { status: 400 });
     }
   } catch (error) {
-    const msg = error instanceof Error ? error.message : String(error);
-    return NextResponse.json({ error: msg }, { status: 500 });
+    return NextResponse.json({ error: error instanceof Error ? error.message : String(error) }, { status: 500 });
   }
 }
 
+// Helper: proxy a legacy tool call to the new tool name
+async function POST_proxy(_req: NextRequest, tool: string, args: Record<string, unknown>) {
+  const res = await POST(new NextRequest('http://localhost:3000/api/tools', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ tool, args }),
+  }));
+  return res;
+}
+
 export async function GET() {
-  // Return tool definitions in Anthropic format
   return NextResponse.json({
-    tools: ['file_write', 'file_read', 'file_list', 'file_delete', 'code_run', 'shell_run', 'npm_install', 'web_search', 'image_generate', 'image_search', 'knowledge_search', 'project_create', 'canva_mcp'],
+    tools: ['web_search', 'read_url', 'read_file', 'list_dir', 'write_file', 'edit_file', 'run_code_sandbox', 'run_shell', 'create_note', 'recall_memory', 'search_knowledge_base', 'image_generate', 'image_search', 'npm_install', 'project_create'],
   });
 }
