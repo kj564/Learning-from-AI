@@ -36,6 +36,7 @@ import KeyboardShortcutsHelp from '@/components/librechat/KeyboardShortcutsHelp'
 import { ApprovalDialog } from '@/components/librechat/ApprovalDialog';
 import { AuditLogPanel } from '@/components/librechat/AuditLogPanel';
 import { SandboxPanel } from '@/components/librechat/SandboxPanel';
+import { WorkspaceBrowser } from '@/components/librechat/WorkspaceBrowser';
 import { Button } from '@/components/ui/button';
 
 const genId = (p: string) => `${p}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
@@ -137,6 +138,9 @@ export default function Page() {
   const [showAudit, setShowAudit] = useState(false);
   // Sandbox worker dashboard (collapsed by default).
   const [showSandbox, setShowSandbox] = useState(false);
+  // Workspace file browser (collapsed by default) — separate from the
+  // existing CodeWorkspace panel (showWorkspace from the store).
+  const [showFileBrowser, setShowFileBrowser] = useState(false);
   const [renameDraft, setRenameDraft] = useState('');
   const [menuOpenFor, setMenuOpenFor] = useState<string | null>(null);
 
@@ -478,6 +482,14 @@ export default function Page() {
                 <Settings size={14} /> Settings
               </button>
               <button
+                onClick={() => setShowFileBrowser(true)}
+                aria-label="Workspace files"
+                title="Workspace files"
+                className="flex h-8 w-8 items-center justify-center rounded-lg text-[var(--text-secondary)] hover:bg-[var(--bg-surface)]"
+              >
+                <FolderOpen size={14} />
+              </button>
+              <button
                 onClick={() => setShowAudit(true)}
                 aria-label="Audit log"
                 title="Audit log"
@@ -773,6 +785,9 @@ export default function Page() {
 
       {/* === SANDBOX WORKER PANEL (code execution dashboard) === */}
       <SandboxPanel open={showSandbox} onOpenChange={setShowSandbox} />
+
+      {/* === WORKSPACE FILE BROWSER (folder navigation + preview) === */}
+      <WorkspaceBrowser open={showFileBrowser} onOpenChange={setShowFileBrowser} conversationId={activeConversationId} />
     </div>
   );
 }

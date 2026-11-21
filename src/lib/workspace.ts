@@ -303,12 +303,16 @@ export async function writeWorkspaceFile(
     const dir = path.dirname(res.absolutePath);
     if (!existsSync(dir)) await mkdir(dir, { recursive: true });
     await writeFile(res.absolutePath, content, 'utf-8');
-    // Record in WorkspaceFile table (best-effort).
+    // Record in WorkspaceFile table (best-effort). Text files written by the
+    // agent (write_file tool) or via JSON text upload are immediately READY —
+    // they're UTF-8 text, not potentially-malicious binaries, so no MIME scan
+    // is needed. Only binary uploads (multipart) go through the scan flow
+    // (UPLOADED → SCANNING → READY | QUARANTINED) in /api/workspaces/[id]/files.
     const checksum = createHash('sha256').update(content).digest('hex');
     await db.workspaceFile.upsert({
       where: { workspaceId_path: { workspaceId, path: relativePath } },
-      create: { workspaceId, path: relativePath, sizeBytes: content.length, checksum, mimeType: guessMime(relativePath) },
-      update: { sizeBytes: content.length, checksum, mimeType: guessMime(relativePath), updatedAt: new Date() },
+      create: { workspaceId, path: relativePath, sizeBytes: content.length, checksum, mimeType: guessMime(relativePath), sniffedMimeType: 'text/plain', status: 'READY' },
+      update: { sizeBytes: content.length, checksum, mimeType: guessMime(relativePath), sniffedMimeType: 'text/plain', status: 'READY', updatedAt: new Date() },
     }).catch(() => {});
     return { ok: true, path: relativePath, size: content.length };
   } catch (e) {

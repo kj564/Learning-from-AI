@@ -17,7 +17,7 @@
  */
 
 import { open as fsOpen, read, close, rename } from 'fs/promises';
-import { open, constants } from 'fs';
+import { open, read as fsReadCallback, close as fsCloseCallback, fstat as fsFstatCallback, constants } from 'fs';
 import path from 'path';
 import { db } from '@/lib/db';
 
@@ -50,8 +50,8 @@ export async function sniffMimeType(filePath: string): Promise<string> {
     open(filePath, 'r', (err, fd) => {
       if (err) return resolve('application/octet-stream');
       const buf = Buffer.alloc(16);
-      read(fd, buf, 0, 16, 0, (err2) => {
-        close(fd, () => {});
+      fsReadCallback(fd, buf, 0, 16, 0, (err2) => {
+        fsCloseCallback(fd, () => {});
         if (err2) return resolve('application/octet-stream');
         for (const sig of MAGIC_BYTES) {
           if (buf.length >= sig.bytes.length + (sig.offset || 0)) {
