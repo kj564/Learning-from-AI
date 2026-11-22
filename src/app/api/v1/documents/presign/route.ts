@@ -61,7 +61,8 @@ export async function POST(req: NextRequest) {
 
   // In dev: construct a local upload URL (PUT to /api/v1/documents/[id]/upload)
   // In prod: construct R2 presigned URL (S3 AWS4-HMAC-SHA256)
-  const uploadUrl = `${req.nextUrl.origin}/api/v1/documents/${doc.id}/upload`;
+  // Use http://localhost:3000 (not req.nextUrl.origin which may be 0.0.0.0)
+  const uploadUrl = `http://localhost:3000/api/v1/documents/${doc.id}/upload`;
 
   return setDevUserCookie(success({
     key: storageKey,

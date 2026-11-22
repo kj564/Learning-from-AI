@@ -380,10 +380,51 @@ function MindmapTab({ note }: { note: any }) {
 function QuizTab({ noteId }: { noteId: string }) {
   const [quizzes, setQuizzes] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  useEffect(() => { fetch(`/api/v1/notes/${noteId}/quizzes`).then(r => r.json()).then(d => { setQuizzes(d.data || []); setLoading(false); }).catch(() => setLoading(false)); }, [noteId]);
+  const [generating, setGenerating] = useState(false);
+  const [selectedAnswer, setSelectedAnswer] = useState<Record<string, number>>({});
+
+  async function loadQuizzes() {
+    setLoading(true);
+    try {
+      const res = await fetch(`/api/v1/notes/${noteId}/quizzes`);
+      const d = await res.json();
+      setQuizzes(d.data || []);
+    } catch {} finally { setLoading(false); }
+  }
+  useEffect(() => { loadQuizzes(); }, [noteId]);
+
+  async function generate() {
+    setGenerating(true);
+    try {
+      const res = await fetch(`/api/v1/notes/${noteId}/quizzes`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ count: 5 }) });
+      const d = await res.json();
+      if (d.data) { toast.success(`${d.data.question_count} soal kuis dibuat!`); loadQuizzes(); }
+      else toast.error(d.error?.message || 'Gagal generate kuis');
+    } catch { toast.error('Gagal generate kuis'); }
+    finally { setGenerating(false); }
+  }
+
   if (loading) return <div className="mx-auto w-full flex flex-col items-center justify-center py-20" style={{ maxWidth: '1120px' }}><div className="flex h-14 w-14 items-center justify-center rounded-full" style={{ background: 'var(--bg-accent)', borderRadius: '9999px' }}><Loader2 size={24} className="animate-spin" style={{ color: 'var(--accent-orange)' }} /></div><p className="mt-4 text-sm text-muted">Writing questions...</p></div>;
-  if (quizzes.length === 0) return <div className="mx-auto w-full" style={{ maxWidth: '1120px', padding: '0 clamp(28px, 5vw, 72px)' }}><div className="text-center py-12 rounded-2xl border-2 border-app"><CheckCircle size={32} className="mx-auto text-muted mb-2" /><p className="text-sm text-muted">Belum ada kuis. Generate dari catatan kamu!</p></div></div>;
-  return <div className="mx-auto w-full space-y-3" style={{ maxWidth: '1120px', padding: '0 clamp(28px, 5vw, 72px)' }}>{quizzes.map(q => <div key={q.id} className="card-pjr"><p className="text-sm font-medium">{q.title || 'Kuis'}</p><p className="text-xs text-muted">{q.question_count || 0} soal</p></div>)}</div>;
+  if (quizzes.length === 0) return <div className="mx-auto w-full" style={{ maxWidth: '1120px', padding: '0 clamp(28px, 5vw, 72px)' }}><div className="text-center py-12 rounded-2xl border-2 border-app"><CheckCircle size={32} className="mx-auto text-muted mb-2" /><p className="text-sm text-muted mb-4">Belum ada kuis.</p><button onClick={generate} disabled={generating} className="inline-flex items-center gap-2 rounded-full font-semibold" style={{ background: 'var(--accent-orange)', color: '#fff', fontSize: '14px', fontWeight: 600, padding: '0 24px', height: 44, borderRadius: '9999px' }}>{generating ? <Loader2 size={16} className="animate-spin" /> : <Plus size={16} />} Generate Kuis</button></div></div>;
+  return <div className="mx-auto w-full space-y-4" style={{ maxWidth: '1120px', padding: '0 clamp(28px, 5vw, 72px)' }}>
+    {quizzes.map(q => (
+      <div key={q.id} className="card-pjr">
+        <p className="text-sm font-medium mb-3">{q.title || 'Kuis'}</p>
+        {q.questions?.map((qs: any, qi: number) => (
+          <div key={qs.id} className="mb-4 rounded-xl border-2 border-app p-3" style={{ borderRadius: '16px' }}>
+            <p className="text-sm font-medium mb-2">{qi + 1}. {qs.question}</p>
+            {qs.options?.map((opt: string, oi: number) => {
+              const isCorrect = opt === qs.answer;
+              const isSelected = selectedAnswer[qs.id] === oi;
+              return <button key={oi} onClick={() => setSelectedAnswer(prev => ({ ...prev, [qs.id]: oi }))} className="block w-full text-left rounded-lg px-3 py-2 mb-1 text-sm transition-colors" style={{ border: `2px solid ${isSelected ? (isCorrect ? 'var(--accent-green)' : 'var(--accent-red)') : 'var(--border)'}`, borderRadius: '12px', background: isSelected ? (isCorrect ? 'rgba(88,204,2,0.1)' : 'rgba(239,68,68,0.1)') : 'transparent' }}><span className="font-semibold mr-2">{String.fromCharCode(65 + oi)}.</span> {opt}</button>;
+            })}
+            {selectedAnswer[qs.id] !== undefined && <p className="text-xs text-muted mt-2">{qs.explanation}</p>}
+          </div>
+        ))}
+      </div>
+    ))}
+    <button onClick={generate} disabled={generating} className="inline-flex items-center gap-2 rounded-full font-semibold" style={{ background: 'var(--accent-orange)', color: '#fff', fontSize: '14px', fontWeight: 600, padding: '0 24px', height: 44, borderRadius: '9999px' }}>{generating ? <Loader2 size={16} className="animate-spin" /> : <Plus size={16} />} Generate Lagi</button>
+  </div>;
 }
 
 // === Tab 5: Flashcard ===
@@ -391,10 +432,35 @@ function FlashcardTab({ noteId }: { noteId: string }) {
   const [cards, setCards] = useState<any[]>([]);
   const [flipped, setFlipped] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
-  useEffect(() => { fetch(`/api/v1/notes/${noteId}/flashcards`).then(r => r.json()).then(d => { setCards(d.data || []); setLoading(false); }).catch(() => setLoading(false)); }, [noteId]);
+  const [generating, setGenerating] = useState(false);
+
+  async function loadCards() {
+    setLoading(true);
+    try {
+      const res = await fetch(`/api/v1/notes/${noteId}/flashcards`);
+      const d = await res.json();
+      setCards(d.data || []);
+    } catch {} finally { setLoading(false); }
+  }
+  useEffect(() => { loadCards(); }, [noteId]);
+
+  async function generate() {
+    setGenerating(true);
+    try {
+      const res = await fetch(`/api/v1/notes/${noteId}/flashcards`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ count: 10 }) });
+      const d = await res.json();
+      if (d.data) { toast.success(`${d.data.count} flashcard dibuat!`); loadCards(); }
+      else toast.error(d.error?.message || 'Gagal generate flashcard');
+    } catch { toast.error('Gagal generate flashcard'); }
+    finally { setGenerating(false); }
+  }
+
   if (loading) return <div className="mx-auto w-full flex flex-col items-center justify-center py-20" style={{ maxWidth: '1120px' }}><div className="flex h-14 w-14 items-center justify-center rounded-full" style={{ background: 'var(--bg-accent)', borderRadius: '9999px' }}><Loader2 size={24} className="animate-spin" style={{ color: 'var(--accent-orange)' }} /></div><p className="mt-4 text-sm text-muted">Making cards...</p></div>;
-  if (cards.length === 0) return <div className="mx-auto w-full" style={{ maxWidth: '1120px', padding: '0 clamp(28px, 5vw, 72px)' }}><div className="text-center py-12 rounded-2xl border-2 border-app"><Brain size={32} className="mx-auto text-muted mb-2" /><p className="text-sm text-muted">Belum ada flashcard.</p></div></div>;
-  return <div className="mx-auto w-full space-y-3" style={{ maxWidth: '1120px', padding: '0 clamp(28px, 5vw, 72px)' }}>{cards.map((c, i) => (<button key={c.id} onClick={() => setFlipped(flipped === i ? null : i)} className="card-pjr w-full text-left flex items-center" style={{ minHeight: 120 }}>{flipped === i ? <><p className="text-xs text-muted mb-1">JAWABAN</p><p className="text-sm">{c.back}</p></> : <><p className="text-xs text-muted mb-1">PERTANYAAN</p><p className="text-sm">{c.front}</p><p className="text-xs text-muted mt-2">Klik untuk lihat jawaban</p></>}</button>))}</div>;
+  if (cards.length === 0) return <div className="mx-auto w-full" style={{ maxWidth: '1120px', padding: '0 clamp(28px, 5vw, 72px)' }}><div className="text-center py-12 rounded-2xl border-2 border-app"><Brain size={32} className="mx-auto text-muted mb-2" /><p className="text-sm text-muted mb-4">Belum ada flashcard.</p><button onClick={generate} disabled={generating} className="inline-flex items-center gap-2 rounded-full font-semibold" style={{ background: 'var(--accent-orange)', color: '#fff', fontSize: '14px', fontWeight: 600, padding: '0 24px', height: 44, borderRadius: '9999px' }}>{generating ? <Loader2 size={16} className="animate-spin" /> : <Plus size={16} />} Generate Flashcard</button></div></div>;
+  return <div className="mx-auto w-full space-y-3" style={{ maxWidth: '1120px', padding: '0 clamp(28px, 5vw, 72px)' }}>
+    {cards.map((c, i) => (<button key={c.id} onClick={() => setFlipped(flipped === i ? null : i)} className="card-pjr w-full text-left flex items-center" style={{ minHeight: 120 }}>{flipped === i ? <><p className="text-xs text-muted mb-1">JAWABAN</p><p className="text-sm">{c.back}</p></> : <><p className="text-xs text-muted mb-1">PERTANYAAN</p><p className="text-sm">{c.front}</p><p className="text-xs text-muted mt-2">Klik untuk lihat jawaban</p></>}</button>))}
+    <button onClick={generate} disabled={generating} className="inline-flex items-center gap-2 rounded-full font-semibold" style={{ background: 'var(--accent-orange)', color: '#fff', fontSize: '14px', fontWeight: 600, padding: '0 24px', height: 44, borderRadius: '9999px' }}>{generating ? <Loader2 size={16} className="animate-spin" /> : <Plus size={16} />} Generate Lagi</button>
+  </div>;
 }
 
 // === Tab 6: Sumber (Sources) — file list + per-document chat ===

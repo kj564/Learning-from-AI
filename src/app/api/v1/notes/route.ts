@@ -70,7 +70,7 @@ export async function POST(req: NextRequest) {
     },
   });
 
-  // If files attached, create async job for processing
+  // If files attached, create async job for processing — extract text + generate notes
   if (file_ids && file_ids.length > 0) {
     const job = await db.studyJob.create({
       data: {
@@ -81,6 +81,11 @@ export async function POST(req: NextRequest) {
       },
     });
     await db.studyNote.update({ where: { id: note.id }, data: { jobId: job.id, status: 'processing' } });
+
+    // Run processing in background (don't block the response)
+    processNoteInBackground(note.id, user.id, file_ids).catch(e => {
+      console.error('[notes] background processing failed:', e instanceof Error ? e.message : String(e));
+    });
   }
 
   // Increment usage
@@ -122,4 +127,91 @@ function noteSummary(n: any) {
     created_at: n.createdAt,
     updated_at: n.updatedAt,
   };
+}
+
+// ============================================================
+// Background processing: extract text → generate notes + chapters
+// ============================================================
+
+async function processNoteInBackground(noteId: string, userId: string, fileIds: string[]) {
+  const { db } = await import('@/lib/db');
+  const { extractText, chunkText } = await import('@/lib/document-processing');
+  const { generateNotes } = await import('@/lib/study-generator');
+
+  try {
+    // Update job status
+    const job = await db.studyJob.findFirst({ where: { noteId, jobType: 'note' } });
+    if (job) await db.studyJob.update({ where: { id: job.id }, data: { status: 'running', progress: 10, startedAt: new Date() } });
+
+    // 1. Extract text from all uploaded files
+    const docs = await db.studyDocument.findMany({ where: { id: { in: fileIds } } });
+    let allText = '';
+    for (const doc of docs) {
+      const text = await extractText(doc.storageKey, doc.contentType, doc.filename);
+      allText += text + '\n\n';
+      // Store extracted text on the document
+      await db.studyDocument.update({
+        where: { id: doc.id },
+        data: { extractedText: text.slice(0, 100000), extractionStatus: 'completed' },
+      });
+    }
+
+    if (job) await db.studyJob.update({ where: { id: job.id }, data: { progress: 40 } });
+
+    // 2. Generate structured notes (chapters)
+    const note = await db.studyNote.findUnique({ where: { id: noteId } });
+    if (!note) return;
+    const generated = await generateNotes(allText, note.title);
+
+    if (job) await db.studyJob.update({ where: { id: job.id }, data: { progress: 60 } });
+
+    // 3. Save chapters to DB
+    if (generated.chapters && generated.chapters.length > 0) {
+      // Delete existing chapters first
+      await db.chapter.deleteMany({ where: { noteId } });
+      // Create new chapters
+      for (let i = 0; i < generated.chapters.length; i++) {
+        const ch = generated.chapters[i];
+        await db.chapter.create({
+          data: {
+            noteId,
+            order: i,
+            title: ch.title,
+            content: ch.content,
+            sourcesJson: JSON.stringify(ch.keyTerms || []),
+          },
+        });
+      }
+    }
+
+    // 4. Update note with generated content
+    const contentMd = generated.chapters
+      ? generated.chapters.map((c, i) => `## ${i + 1}. ${c.title}\n\n${c.content}`).join('\n\n')
+      : generated.content || '';
+
+    await db.studyNote.update({
+      where: { id: noteId },
+      data: {
+        content: contentMd,
+        contentJson: JSON.stringify(generated),
+        status: 'completed',
+        totalChapters: generated.chapters?.length || 0,
+      },
+    });
+
+    if (job) await db.studyJob.update({
+      where: { id: job.id },
+      data: { status: 'completed', progress: 100, finishedAt: new Date(), resultJson: JSON.stringify({ chapters: generated.chapters?.length || 0 }) },
+    });
+
+    console.log(`[notes] background processing completed for note ${noteId}: ${generated.chapters?.length || 0} chapters`);
+  } catch (e) {
+    console.error('[notes] background processing error:', e instanceof Error ? e.message : String(e));
+    await db.studyNote.update({
+      where: { id: noteId },
+      data: { status: 'error', errorMessage: e instanceof Error ? e.message : String(e), canRetry: true },
+    });
+    const job = await db.studyJob.findFirst({ where: { noteId, jobType: 'note' } });
+    if (job) await db.studyJob.update({ where: { id: job.id }, data: { status: 'failed', errorMessage: e instanceof Error ? e.message : String(e), finishedAt: new Date() } });
+  }
 }
