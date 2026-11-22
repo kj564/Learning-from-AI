@@ -1,0 +1,677 @@
+{
+  "capture_metadata": {
+    "method": "REA (morluto/rea) + Craft Anything web_site_capture technique (CDP + getComputedStyle)",
+    "tools": [
+      "npx rea-agents@6.10.1 (REA CLI)",
+      "agent-browser (Chromium CDP)",
+      "getComputedStyle + getBoundingClientRect"
+    ],
+    "target": "https://app.pelajarin.ai/dashboard + /lesson/[id]?tab=[9 tabs]",
+    "date": "2026-11-22",
+    "authenticated": true,
+    "account": "levog98645@dsmspaces.com (throwaway temp email)",
+    "viewport": "1280x800",
+    "evidence_files": [
+      "rea-routes.json",
+      "rea-endpoints.json",
+      "rea-routes-mkt.json",
+      "rea-mkt-routes-v2.json",
+      "REA-EVIDENCE.json",
+      "app-full/dashboard.png",
+      "app-full/tab-belajar.png",
+      "app-full/tab-catatan.png",
+      "app-full/tab-mindmap.png",
+      "app-full/tab-kuis.png",
+      "app-full/tab-flashcard.png",
+      "app-full/tab-sumber.png",
+      "app-full/tab-chat.png",
+      "app-full/tab-podcast.png",
+      "app-full/tab-tempel.png"
+    ]
+  },
+  "rea_evidence": {
+    "tool": "REA (morluto/rea) v6.10.1 via CDP",
+    "evidence_records": [
+      {
+        "id": "ev_4564b0f7 (list-browser-targets)",
+        "confidence": "observed",
+        "authority": "external-service",
+        "result": "1 page target: app.pelajarin.ai/auth/signin"
+      },
+      {
+        "id": "ev_86e48aa5 (capture-web-screenshot)",
+        "confidence": "observed",
+        "authority": "external-service"
+      },
+      {
+        "id": "ev_93a8ab91 (analyze-web-bundle routes, signin)",
+        "confidence": "observed",
+        "authority": "external-service",
+        "routes": 0,
+        "inferences": 27,
+        "vendors_detected": [
+          "react-runtime"
+        ],
+        "runtimes_detected": [
+          "vite-runtime"
+        ],
+        "endpoint_candidates": 23,
+        "limitations": 5
+      },
+      {
+        "id": "ev_d15eab84 (analyze-web-bundle routes, marketing)",
+        "confidence": "observed",
+        "authority": "external-service",
+        "routes": 2,
+        "inferences": 18,
+        "vendors_detected": [
+          "next-runtime",
+          "react-runtime"
+        ],
+        "endpoint_candidates": 13,
+        "limitations": 5
+      }
+    ]
+  },
+  "theme": {
+    "mode": "LIGHT",
+    "bg_primary": "#ffffff",
+    "bg_surface": "#f3f4f6",
+    "bg_header_glass": "rgba(255,255,255,0.82)",
+    "bg_accent_soft": "#fff3eb",
+    "text_primary": "#1a1a2e",
+    "text_body": "#4b5053",
+    "text_muted": "#6b7280",
+    "border": "#e5e7eb",
+    "accent_orange": "#f76703",
+    "accent_green": "#3f8f01",
+    "accent_blue": "#0c8fc7",
+    "accent_red": "#ef4444",
+    "accent_purple": "#6c5ce4",
+    "accent_yellow_bg": "#fff8e0",
+    "accent_yellow_text": "#ffc700",
+    "font_body": "Poppins",
+    "font_heading": "Quicksand Variable",
+    "radius_card": "24px",
+    "radius_button": "16px",
+    "radius_pill": "9999px"
+  },
+  "dashboard": {
+    "header": {
+      "height": 64,
+      "padding": "0 28px",
+      "gap": "12px",
+      "bg": "rgba(255,255,255,0.82)",
+      "position": "sticky top-0 z-50",
+      "items": [
+        {
+          "type": "logo",
+          "text": "pelajarin.ai",
+          "rect": [
+            28,
+            16,
+            142,
+            32
+          ],
+          "font": "20px/700 Quicksand"
+        },
+        {
+          "type": "mode_toggle",
+          "text": "Classic",
+          "rect": [
+            182,
+            16,
+            32,
+            32
+          ],
+          "radius": "999px"
+        },
+        {
+          "type": "breadcrumb",
+          "text": "Home",
+          "rect": [
+            239,
+            22,
+            66,
+            20
+          ],
+          "font": "14px/600"
+        },
+        {
+          "type": "link",
+          "text": "Become a Creator",
+          "rect": [
+            637,
+            14,
+            187,
+            36
+          ],
+          "h": 36,
+          "radius": "999px"
+        },
+        {
+          "type": "badge",
+          "text": "Streak 1",
+          "rect": [
+            836,
+            14,
+            117,
+            36
+          ],
+          "radius": "999px",
+          "font": "14px/600"
+        },
+        {
+          "type": "badge",
+          "text": "Level 1",
+          "rect": [
+            965,
+            14,
+            107,
+            36
+          ],
+          "radius": "999px"
+        },
+        {
+          "type": "button",
+          "text": "Upgrade",
+          "rect": [
+            1084,
+            14,
+            120,
+            36
+          ],
+          "radius": "999px",
+          "bg": "#f76703",
+          "color": "#fff"
+        },
+        {
+          "type": "avatar",
+          "text": "D",
+          "rect": [
+            1216,
+            16,
+            36,
+            36
+          ],
+          "size": 36
+        }
+      ]
+    },
+    "sidebar": {
+      "width": 96,
+      "bg": "#fff",
+      "padding": "20px 8px",
+      "position": "sticky top-16 z-40"
+    },
+    "main": {
+      "max_width": 1360,
+      "padding": "32px clamp(24px,4vw,56px) 80px"
+    },
+    "hero": {
+      "layout": "flex items-center gap-8px",
+      "pai_image": {
+        "size": "132x132"
+      },
+      "h1": {
+        "text": "What do you want to learn today?",
+        "font": "clamp(28px,4.4vw,42px)/700 Quicksand"
+      }
+    },
+    "upload_box": {
+      "max_width": 760,
+      "border": "2px solid #e5e7eb",
+      "radius": "24px",
+      "bg": "#fff",
+      "padding": "18px 18px 14px",
+      "text_input": {
+        "font": "17px Poppins",
+        "color": "#1a1a2e",
+        "min_height": 52
+      },
+      "buttons": [
+        {
+          "text": "Record",
+          "bg": "#f3f4f6",
+          "color": "#3f8f01",
+          "font": "13px/600",
+          "radius": "999px",
+          "pad": "6px 14px",
+          "size": "99x32"
+        },
+        {
+          "text": "Upload",
+          "bg": "#f3f4f6",
+          "color": "#0c8fc7",
+          "font": "13px/600",
+          "radius": "999px",
+          "pad": "6px 14px",
+          "size": "99x32"
+        },
+        {
+          "text": "YouTube",
+          "bg": "#f3f4f6",
+          "color": "#ef4444",
+          "font": "13px/600",
+          "radius": "999px",
+          "pad": "6px 14px",
+          "size": "110x32"
+        },
+        {
+          "text": "Send",
+          "bg": "#fff3eb",
+          "color": "#f76703",
+          "size": "44x44",
+          "radius": "circle"
+        }
+      ]
+    },
+    "filter_buttons": {
+      "active": {
+        "bg": "#fff3eb",
+        "color": "#f76703",
+        "border": "2px solid #f76703"
+      },
+      "inactive": {
+        "color": "#6b7280",
+        "border": "2px solid #e5e7eb"
+      },
+      "style": "font: 13px/600, pad: 6px 12px, radius: 999px"
+    },
+    "notes_grid": {
+      "grid": "3 cols",
+      "gap": "20px",
+      "card": {
+        "border": "2px solid #e5e7eb",
+        "radius": "24px",
+        "bg": "#fff",
+        "pad": "12px"
+      }
+    }
+  },
+  "tabs": {
+    "belajar": {
+      "content": "Chapter list with progress 17%, Upgrade to Pro buttons, Pai image 160x160",
+      "main_max_width": "1120px",
+      "main_padding": "32px 64px 80px",
+      "sidebar_active_idx": 0,
+      "sidebar_active_color": "#f76703",
+      "sidebar_active_radius": "20px",
+      "buttons": [
+        {
+          "text": "Upgrade to Pro",
+          "bg": "#f76703",
+          "color": "#fff",
+          "font": "14px/600",
+          "radius": "20px",
+          "size": "188x44"
+        },
+        {
+          "text": "(circle)",
+          "bg": "#f76703",
+          "color": "#fff",
+          "radius": "9999px",
+          "size": "56x56"
+        }
+      ]
+    },
+    "catatan": {
+      "content": "Rich text editor: Heading 1, Format, Export PDF toolbar + markdown content",
+      "main_layout": "flex items-stretch h-[calc(100vh-4rem)]",
+      "sidebar_active_idx": 1,
+      "buttons": [
+        {
+          "text": "Heading 1",
+          "font": "14px/400",
+          "radius": "16px",
+          "size": "135x32"
+        },
+        {
+          "text": "Format",
+          "font": "14px/400",
+          "radius": "16px",
+          "size": "118x32"
+        },
+        {
+          "text": "Export PDF",
+          "font": "14px/400",
+          "radius": "16px",
+          "size": "113x32"
+        },
+        {
+          "text": "Percakapan Baru",
+          "font": "16px/400",
+          "radius": "16px",
+          "size": "164x31"
+        },
+        {
+          "text": "(send)",
+          "bg": "#f76703",
+          "color": "#fff",
+          "radius": "9999px",
+          "size": "56x56"
+        }
+      ]
+    },
+    "mindmap": {
+      "content": "ReactFlow canvas with zoom controls",
+      "main_layout": "flex h-[calc(100vh-4rem)] items-stretch",
+      "sidebar_active_idx": 2,
+      "buttons": [
+        {
+          "text": "(close)",
+          "bg": "#c45200",
+          "color": "#fff",
+          "font": "16px/700",
+          "radius": "9999px",
+          "size": "26x26"
+        },
+        {
+          "text": "(zoom+)",
+          "font": "16px/400",
+          "radius": "16px",
+          "size": "44x44"
+        },
+        {
+          "text": "(zoom-)",
+          "font": "16px/400",
+          "radius": "16px",
+          "size": "44x44"
+        },
+        {
+          "text": "(fit)",
+          "font": "16px/400",
+          "radius": "16px",
+          "size": "44x44"
+        },
+        {
+          "text": "(reset)",
+          "bg": "#f76703",
+          "color": "#fff",
+          "radius": "9999px",
+          "size": "56x56"
+        }
+      ]
+    },
+    "kuis": {
+      "content": "1/5 quiz question with MC options + Show Hint + Check answer",
+      "main_max_width": "1120px",
+      "sidebar_active_idx": 3,
+      "buttons": [
+        {
+          "text": "New Quiz",
+          "bg": "#e5e7eb",
+          "font": "14px/600",
+          "radius": "9999px",
+          "size": "125x36"
+        },
+        {
+          "text": "Repeat Quiz",
+          "bg": "#e5e7eb",
+          "font": "14px/600",
+          "radius": "9999px",
+          "size": "145x36"
+        },
+        {
+          "text": "Edit",
+          "bg": "#e5e7eb",
+          "font": "14px/600",
+          "radius": "9999px",
+          "size": "86x36"
+        },
+        {
+          "text": "Show Hint",
+          "bg": "#fff8e0",
+          "color": "#ffc700",
+          "font": "12px/600",
+          "radius": "9999px",
+          "size": "110x32"
+        },
+        {
+          "text": "Check answer",
+          "bg": "#f76703",
+          "color": "#fff",
+          "font": "15px/600",
+          "radius": "9999px",
+          "size": "176x44"
+        },
+        {
+          "text": "Previous",
+          "font": "15px/600",
+          "radius": "9999px",
+          "size": "133x44"
+        }
+      ],
+      "quiz_options": {
+        "bg": "#f3f4f6",
+        "color": "#1a1a2e",
+        "font": "16px/400",
+        "radius": "24px",
+        "size": "632x72"
+      }
+    },
+    "flashcard": {
+      "content": "1/5 flashcard with Question/Answer flip + Regenerate/Restart/Manage",
+      "main_max_width": "1120px",
+      "sidebar_active_idx": 4,
+      "buttons": [
+        {
+          "text": "Regenerate",
+          "bg": "#e5e7eb",
+          "font": "14px/600",
+          "radius": "9999px",
+          "size": "143x36"
+        },
+        {
+          "text": "Restart",
+          "bg": "#e5e7eb",
+          "font": "14px/600",
+          "radius": "9999px",
+          "size": "111x36"
+        },
+        {
+          "text": "Manage",
+          "bg": "#e5e7eb",
+          "font": "14px/600",
+          "radius": "9999px",
+          "size": "119x36"
+        },
+        {
+          "text": "Previous",
+          "font": "14px/700",
+          "radius": "20px",
+          "size": "109x44"
+        },
+        {
+          "text": "Next",
+          "font": "14px/700",
+          "radius": "20px",
+          "size": "84x44"
+        }
+      ],
+      "card": {
+        "font": "16px/400",
+        "radius": "32px",
+        "size": "632x352"
+      }
+    },
+    "sumber": {
+      "content": "PDF source file + Percakapan Baru + chat with document",
+      "main_layout": "flex h-[calc(100vh-4rem)] items-stretch",
+      "sidebar_active_idx": 5,
+      "buttons": [
+        {
+          "text": "Percakapan Baru",
+          "font": "16px/400",
+          "radius": "16px",
+          "size": "164x31"
+        },
+        {
+          "text": "Open ↗",
+          "font": "13px/600",
+          "size": "50x20"
+        }
+      ]
+    },
+    "chat": {
+      "content": "Percakapan Baru + Hi I'm Pai + textarea 632x72 + send buttons",
+      "main_layout": "flex h-[calc(100vh-4rem)] items-stretch",
+      "sidebar_active_idx": 6,
+      "buttons": [
+        {
+          "text": "Percakapan Baru",
+          "font": "16px/400",
+          "radius": "16px",
+          "size": "164x31"
+        },
+        {
+          "text": "(voice)",
+          "bg": "#6c5ce4",
+          "color": "#fff",
+          "radius": "9999px",
+          "size": "40x40"
+        },
+        {
+          "text": "(send)",
+          "bg": "#f76703",
+          "color": "#fff",
+          "radius": "9999px",
+          "size": "56x56"
+        }
+      ],
+      "textarea": {
+        "size": "632x72",
+        "font": "15px/400"
+      }
+    },
+    "podcast": {
+      "content": "Create podcast: 4 AI hosts + 5 style suggestions + 3/7 min + ID/EN + Upgrade",
+      "main_max_width": "1360px",
+      "sidebar_active_idx": 7,
+      "hosts": [
+        {
+          "name": "Pai",
+          "role": "Explainer",
+          "bg": "#ece9ff",
+          "size": "169x150",
+          "radius": "22px"
+        },
+        {
+          "name": "Kiko",
+          "role": "The curious one",
+          "bg": "#dcf7ef",
+          "size": "169x150",
+          "radius": "22px"
+        },
+        {
+          "name": "Bolu",
+          "role": "Storyteller",
+          "bg": "#fff",
+          "size": "169x150",
+          "radius": "22px"
+        },
+        {
+          "name": "Meli",
+          "role": "Exam coach",
+          "bg": "#fff",
+          "size": "169x150",
+          "radius": "22px"
+        }
+      ],
+      "suggestions": [
+        "Make it funnier",
+        "Use anime examples",
+        "Like canteen gossip",
+        "Focus on exam questions",
+        "Go slow I'm a beginner"
+      ],
+      "duration_buttons": [
+        {
+          "text": "3 min",
+          "bg": "#f76703",
+          "color": "#fff",
+          "font": "14px/600",
+          "radius": "24px",
+          "size": "167x44"
+        },
+        {
+          "text": "7 min",
+          "bg": "#fff",
+          "color": "#1a1a2e",
+          "font": "14px/600",
+          "radius": "24px",
+          "size": "167x44"
+        }
+      ],
+      "language_buttons": [
+        {
+          "text": "Indonesian",
+          "bg": "#f76703",
+          "color": "#fff",
+          "font": "14px/600",
+          "radius": "24px",
+          "size": "167x44"
+        },
+        {
+          "text": "English",
+          "bg": "#fff",
+          "color": "#1a1a2e",
+          "font": "14px/600",
+          "radius": "24px",
+          "size": "167x44"
+        }
+      ],
+      "generate_button": {
+        "text": "Upgrade to Pro",
+        "bg": "#f76703",
+        "color": "#fff",
+        "font": "15px/600",
+        "radius": "9999px",
+        "size": "182x44"
+      }
+    },
+    "tempel": {
+      "content": "Sticky notes board: New sticky note + drag notes + 56px add button",
+      "main_max_width": "1360px",
+      "sidebar_active_idx": 8,
+      "buttons": [
+        {
+          "text": "New sticky note",
+          "bg": "#f76703",
+          "color": "#fff",
+          "font": "14px/600",
+          "radius": "20px",
+          "size": "170x44"
+        },
+        {
+          "text": "(add)",
+          "bg": "#f76703",
+          "color": "#fff",
+          "radius": "9999px",
+          "size": "56x56"
+        }
+      ],
+      "input": {
+        "size": "232x20",
+        "font": "14px/400"
+      }
+    }
+  },
+  "evidence": {
+    "confidence": "observed",
+    "authority": "OurRun (CDP authenticated session + REA Evidence records)",
+    "environment": {
+      "engine": "agent-browser (Chromium CDP) + npx rea-agents@6.10.1",
+      "host": "linux-x86_64",
+      "viewport": "1280x800"
+    },
+    "limitations": [
+      "Quiz UI captured but interactive state (answer selection) not captured",
+      "Flashcard flip animation not captured (only static state)",
+      "Mindmap canvas content not captured (ReactFlow renders dynamically)",
+      "Chat streaming not captured (would need to send a message)",
+      "Podcast generation not captured (Pro feature, locked on free tier)"
+    ],
+    "coverage": "All 9 tabs with screenshots + computed styles + interactive elements + content text. Dashboard layout + header + sidebar + upload box + filter buttons + notes grid."
+  }
+}
