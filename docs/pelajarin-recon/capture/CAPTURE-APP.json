@@ -1,0 +1,102 @@
+{
+  "capture_metadata": {
+    "method": "Craft Anything web_site_capture + web_page_states_capture",
+    "tool": "agent-browser (Chromium CDP) — screenshots + getComputedStyle + getBoundingClientRect",
+    "target": "https://app.pelajarin.ai/dashboard",
+    "date": "2026-11-22",
+    "authenticated": true,
+    "viewport": "1280x800",
+    "screenshots": ["app/dashboard-1280.png", "app/note-detail-1280.png"]
+  },
+  "theme": {
+    "mode": "LIGHT",
+    "bg_primary": "#ffffff",
+    "bg_surface": "#f3f4f6",
+    "bg_header_glass": "rgba(255,255,255,0.82)",
+    "text_primary": "#1a1a2e",
+    "text_body": "#4b5053",
+    "text_muted": "#6b7280",
+    "border": "#e5e7eb",
+    "accent_orange": "#f76703",
+    "accent_orange_bg": "#fff3eb",
+    "accent_green": "#3f8f01",
+    "accent_blue": "#0c8fc7",
+    "accent_red": "#ef4444",
+    "font_body": "Poppins",
+    "font_heading": "Quicksand Variable",
+    "radius_card": "24px",
+    "radius_pill": "9999px",
+    "radius_button": "9999px"
+  },
+  "layout": {
+    "header": {
+      "height": 64, "padding": "0 28px", "gap": "12px",
+      "bg": "rgba(255,255,255,0.82)", "position": "sticky top-0 z-50",
+      "items": [
+        {"type": "logo", "text": "pelajarin.ai", "rect": [28,16,142,32], "font": "20px/700 Quicksand", "gap": "8px"},
+        {"type": "mode_toggle", "text": "Classic", "rect": [182,16,32,32], "radius": "999px"},
+        {"type": "breadcrumb", "text": "Home", "rect": [239,22,66,20], "font": "14px/600 Poppins"},
+        {"type": "link", "text": "Become a Creator", "rect": [637,14,187,36], "h": 36, "radius": "999px", "pad": "0 16px"},
+        {"type": "badge", "text": "Streak 1", "rect": [836,14,117,36], "radius": "999px", "pad": "0 16px", "font": "14px/600"},
+        {"type": "badge", "text": "Level 1", "rect": [965,14,107,36], "radius": "999px", "pad": "0 16px"},
+        {"type": "button", "text": "Upgrade", "rect": [1084,14,120,36], "radius": "999px", "pad": "0 16px"},
+        {"type": "avatar", "text": "D", "rect": [1216,16,36,36], "size": 36, "radius": "circle"}
+      ]
+    },
+    "sidebar": {"width": 96, "bg": "#ffffff", "padding": "20px 8px", "position": "sticky top-16 z-40"},
+    "main": {"max_width": 1360, "padding": "32px clamp(24px,4vw,56px) 80px", "bg": "transparent"},
+    "hero": {
+      "layout": "flex items-center gap-8px",
+      "rect": [147,144,1082,132],
+      "pai_image": {"size": "132x132", "rect": [275,144,132,132]},
+      "h1": {"text": "What do you want to learn today?", "rect": [415,186,685,48], "font": "clamp(28px,4.4vw,42px)/700 Quicksand", "class": "text-balance font-heading"}
+    },
+    "upload_box": {
+      "rect": [308,304,760,143], "max_width": 760,
+      "border": "2px solid #e5e7eb", "radius": "24px (rounded-2xl)",
+      "bg": "#ffffff", "padding": "18px 18px 14px",
+      "class": "mx-auto max-w-[760px] rounded-2xl border-2 bg-surface",
+      "text_input": {
+        "tag": "textarea", "font": "17px Poppins", "color": "#1a1a2e",
+        "min_height": 52, "class": "min-h-[52px] w-full resize-none border-none bg-transparent",
+        "placeholder": "What would you like to learn?"
+      },
+      "buttons": [
+        {"text": "Record", "bg": "#f3f4f6", "color": "#3f8f01", "font": "13px/600", "radius": "999px", "pad": "6px 14px", "gap": "6px", "rect": [328,393,99,32]},
+        {"text": "Upload", "bg": "#f3f4f6", "color": "#0c8fc7", "font": "13px/600", "radius": "999px", "pad": "6px 14px", "gap": "6px", "rect": [435,393,99,32]},
+        {"text": "YouTube", "bg": "#f3f4f6", "color": "#ef4444", "font": "13px/600", "radius": "999px", "pad": "6px 14px", "gap": "6px", "rect": [542,393,110,32]},
+        {"text": "Send", "bg": "#fff3eb", "color": "#f76703", "size": "44x44", "radius": "circle", "rect": [1004,387,44,44]}
+      ]
+    },
+    "notes_section": {"label": "Notes", "gap": "12px"},
+    "filter_buttons": {
+      "gap": "8px",
+      "buttons": [
+        {"text": "All", "active": true, "bg": "#fff3eb", "color": "#f76703", "border": "2px solid #f76703", "rect": [310,547,45,36]},
+        {"text": "Documents", "active": false, "color": "#6b7280", "border": "2px solid #e5e7eb", "rect": [363,547,104,36]},
+        {"text": "Slides", "active": false, "color": "#6b7280", "border": "2px solid #e5e7eb", "rect": [475,547,67,36]},
+        {"text": "Audio", "active": false, "color": "#6b7280", "border": "2px solid #e5e7eb", "rect": [550,547,67,36]},
+        {"text": "YouTube", "active": false, "color": "#6b7280", "border": "2px solid #e5e7eb", "rect": [625,547,86,36]}
+      ],
+      "style": "font: 13px/600 Poppins, pad: 6px 12px, radius: 999px, border: 2px solid",
+      "view_toggle": {"text": "Grid List", "rect": [1117,547,111,36], "gap": "6px"}
+    },
+    "notes_grid": {
+      "grid": "repeat(3, 1fr) at >900px, repeat(2, 1fr) at <900px",
+      "gap": "20px",
+      "card": {"border": "2px solid #e5e7eb", "radius": "24px", "bg": "#fff", "padding": "12px", "rect_first": [147,599,347,300]}
+    }
+  },
+  "evidence": {
+    "confidence": "Observed",
+    "authority": "OurRun (CDP authenticated browser session)",
+    "environment": {"engine": "agent-browser (Chromium CDP)", "host": "linux-x86_64", "viewport": "1280x800"},
+    "limitations": [
+      "Only dashboard captured — note detail tabs (Catatan/Mindmap/Kuis/Flashcard/Tanya AI) not yet captured",
+      "Page states (dropdown menus, dialogs, settings) not yet captured",
+      "Sidebar items not visible (empty — may need notes to populate)",
+      "Chat panel, flashcard review, quiz UI not yet captured"
+    ],
+    "coverage": "Dashboard layout: header, sidebar, hero, upload box, filter buttons, notes grid — all with exact computed styles, positions, and theme tokens"
+  }
+}

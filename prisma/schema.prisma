@@ -345,3 +345,359 @@ model SandboxJob {
   @@index([status])
   @@index([createdAt])
 }
+
+// ============================================================
+// === Learning product models (informed by pelajarin RE) ===
+// ============================================================
+// Patterns confirmed by authenticated RE (RECON-AUTHENTICATED.md):
+//   - Note: create-then-attach (POST /notes empty → add files later)
+//   - Document: presign R2 → PUT → POST /notes with file_ids
+//   - Async jobs for ALL LLM generation (note/flashcard/quiz/exam)
+//   - Chat: {note_id, session_id (uuid), message} → fetch+ReadableStream
+//   - Response envelope {data:...}; pagination page OR cursor based
+//   - FSRS for flashcards; gamification via /api/v1/events
+//   - Subjects first-class (id, name, icon, icon_color)
+//   - exam_type is free-form string (not enum)
+// Free tier: 15 notes/month, 50 chats/month, full quiz/flashcard (vs pelajarin 1 note, 0 chat, first-only)
+
+// === Subjects (organize notes/exams) ===
+model Subject {
+  id        String   @id @default(cuid())
+  userId    String
+  name      String
+  icon      String?
+  iconColor String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  notes StudyNote[]
+  exams Exam[]
+
+  @@index([userId])
+}
+
+// === Study notes (the central entity) ===
+model StudyNote {
+  id                 String   @id @default(cuid())
+  userId             String
+  title              String                    @default("Catatan Baru")
+  description        String?
+  // AI-generated content: markdown string + structured JSON for rich editor
+  content            String?
+  contentJson        String?
+  status             String   @default("ready")  // ready | processing | completed | error
+  studyMode          String   @default("standard")
+  tone               String   @default("friendly")
+  sourceLanguage     String?
+  generationLanguage String?
+  // Async job reference (for generation progress via SSE)
+  jobId              String?
+  // Public sharing (per pelajarin: is_public, is_owner)
+  isPublic           Boolean  @default(false)
+  // Soft censor flag (we don't censor on free, but keep the field)
+  isCensored         Boolean  @default(false)
+  // Error handling
+  errorMessage       String?
+  errorCode          String?
+  canRetry           Boolean  @default(false)
+  // Subject link
+  subjectId          String?
+  subject            Subject? @relation(fields: [subjectId], references: [id], onDelete: SetNull)
+  // Denormalized counts (for list views, per pelajarin)
+  totalChapters      Int      @default(0)
+  flashcardCount     Int      @default(0)
+  quizCount          Int      @default(0)
+  // File attachments (uploaded source documents)
+  fileIdsJson        String   @default("[]")  // JSON array of Document.id
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  chapters   Chapter[]
+  flashcards Flashcard[]
+  quizzes    Quiz[]
+  chatSessions ChatSession[]
+
+  @@index([userId])
+  @@index([subjectId])
+  @@index([status])
+  @@index([updatedAt])
+}
+
+// === Chapters (subdivisions of a note, per pelajarin) ===
+model Chapter {
+  id        String   @id @default(cuid())
+  noteId    String
+  note      StudyNote @relation(fields: [noteId], references: [id], onDelete: Cascade)
+  order     Int      @default(0)
+  title     String
+  content   String?
+  // Source references (citations back to uploaded material)
+  sourcesJson String? // JSON: [{file_id, page, snippet}]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([noteId])
+}
+
+// === Flashcards (FSRS spaced repetition, per RECON-DEEP-v3 E-016) ===
+model Flashcard {
+  id        String   @id @default(cuid())
+  noteId    String
+  note      StudyNote @relation(fields: [noteId], references: [id], onDelete: Cascade)
+  front     String
+  back      String
+  // FSRS state (computed by the FSRS algorithm after each review)
+  fsrsStateJson String? // JSON: {stability, difficulty, retrievability, lastReview, nextReview, reps, lapses}
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([noteId])
+}
+
+// === Quizzes ===
+model Quiz {
+  id        String   @id @default(cuid())
+  noteId    String
+  note      StudyNote @relation(fields: [noteId], references: [id], onDelete: Cascade)
+  title     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  questions Question[]
+
+  @@index([noteId])
+}
+
+// === Questions (MC or short-answer, per pelajarin) ===
+model Question {
+  id           String   @id @default(cuid())
+  quizId       String
+  quiz         Quiz     @relation(fields: [quizId], references: [id], onDelete: Cascade)
+  order        Int      @default(0)
+  type         String   @default("mc")     // mc | sa
+  question     String
+  optionsJson  String?                       // JSON string[] for MC
+  answer       String
+  explanation  String?
+  hint         String?
+  difficulty   String   @default("medium")   // easy | medium | hard
+  sourcesJson  String?                       // JSON [{file_id, snippet}]
+  xp           Int      @default(10)
+  // Hint usage tracking (per pelajarin: hint = -50% XP)
+  hintUsed     Boolean  @default(false)
+  createdAt    DateTime @default(now())
+
+  @@index([quizId])
+}
+
+// === Chat sessions (per note, per pelajarin E-AUTH-008) ===
+model ChatSession {
+  id        String   @id @default(cuid())
+  noteId    String
+  note      StudyNote @relation(fields: [noteId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  messages ChatMessage[]
+
+  @@index([noteId])
+}
+
+model ChatMessage {
+  id        String   @id @default(cuid())
+  sessionId String
+  session   ChatSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  role      String   // user | assistant
+  content   String
+  // RAG sources cited in the answer (per pelajarin Sumber feature)
+  sourcesJson String? // JSON [{file_id, snippet, page}]
+  createdAt DateTime @default(now())
+
+  @@index([sessionId])
+}
+
+// === Exams (aggregates questions from notes/quizzes) ===
+model Exam {
+  id              String   @id @default(cuid())
+  userId          String
+  title           String
+  // exam_type is free-form string (not enum, per E-AUTH-010)
+  examType        String   @default("quiz")
+  status          String   @default("pending") // pending | processing | completed | error
+  subjectId       String?
+  subject         Subject? @relation(fields: [subjectId], references: [id], onDelete: SetNull)
+  subjectIcon     String?
+  subjectIconColor String?
+  // Aggregates
+  paperCount      Int      @default(0)
+  insightsCount   Int      @default(0)
+  // Error handling
+  errorMessage    String?
+  errorCode       String?
+  failedAt        DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  papers ExamPaper[]
+
+  @@index([userId])
+  @@index([subjectId])
+  @@index([status])
+}
+
+model ExamPaper {
+  id        String   @id @default(cuid())
+  examId    String
+  exam      Exam     @relation(fields: [examId], references: [id], onDelete: Cascade)
+  title     String?
+  // Source note IDs that contributed questions
+  sourceNoteIdsJson String @default("[]")
+  // Generated questions (JSON array inline for simplicity)
+  questionsJson String @default("[]")
+  createdAt DateTime @default(now())
+
+  @@index([examId])
+}
+
+// === Gamification: streak + XP + level ===
+model UserStreak {
+  id              String   @id @default(cuid())
+  userId          String   @unique
+  currentStreak   Int      @default(0)
+  longestStreak   Int      @default(0)
+  lastActivityDate DateTime?
+  updatedAt       DateTime @updatedAt
+}
+
+model XPEvent {
+  id        String   @id @default(cuid())
+  userId    String
+  amount    Int                  // positive for gain, negative for loss (hint = -50%)
+  reason    String               // quiz_passed | flashcard_reviewed | chat_session | daily_login
+  metadataJson String?          // JSON context
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([createdAt])
+}
+
+// === Affiliate program ===
+model AffiliateCode {
+  id              String   @id @default(cuid())
+  userId          String   @unique
+  code            String   @unique
+  discountPercent Int      @default(5)
+  tier            String   @default("bronze") // bronze | silver | gold | platinum | diamond
+  active          Boolean  @default(true)
+  totalConversions Int     @default(0)
+  totalEarnings   Int      @default(0) // in IDR cents
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  conversions AffiliateConversion[]
+}
+
+model AffiliateConversion {
+  id            String   @id @default(cuid())
+  affiliateId   String
+  affiliate     AffiliateCode @relation(fields: [affiliateId], references: [id], onDelete: Cascade)
+  referredUserId String
+  plan          String   // free | pro | unlimited
+  amount        Int      // in IDR cents
+  commissionPercent Int
+  commissionAmount Int   // in IDR cents
+  status        String   @default("pending") // pending | paid | refunded
+  convertedAt   DateTime @default(now())
+
+  @@index([affiliateId])
+  @@index([referredUserId])
+}
+
+// === Subscriptions (per pelajarin E-AUTH-003) ===
+model Subscription {
+  id              String   @id @default(cuid())
+  userId          String   @unique
+  plan            String   @default("free") // free | pro | unlimited | institutional
+  status          String   @default("active") // active | trialing | past_due | canceled | expired
+  // Usage counters (reset weekly/monthly per plan)
+  notesUsed       Int      @default(0)
+  chatsUsed       Int      @default(0)
+  examsUsed       Int      @default(0)
+  podcastSecondsUsed Int   @default(0)
+  notesResetDate  DateTime?
+  chatResetDate   DateTime?
+  examsResetDate  DateTime?
+  podcastResetDate DateTime?
+  // Stripe + RevenueCat integration (per E-003)
+  stripeCustomerId String?
+  stripeSubscriptionId String?
+  revenuecatId     String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([userId])
+  @@index([plan])
+  @@index([status])
+}
+
+// === Study documents (uploaded source files, per pelajarin Document model) ===
+// Separate from WorkspaceFile — these are user-facing study materials,
+// while WorkspaceFile is the agent-internal file system. StudyDocument
+// links to the actual storage (R2 key) and the workspace file (for
+// text extraction + RAG indexing).
+model StudyDocument {
+  id           String   @id @default(cuid())
+  userId       String
+  filename     String
+  contentType   String
+  sizeBytes    Int
+  // Storage key in R2 (per pelajarin E-AUTH-009: owned/<user_id>/uploads/<uuid>.<ext>)
+  storageKey   String
+  // Linked workspace file (for text extraction + RAG)
+  workspaceFileId String?
+  // Extraction status
+  extractionStatus String @default("pending") // pending | extracting | completed | error
+  extractedText String?  // cached extracted text (truncated to fit)
+  extractedChunksJson String? // JSON [{chunk_idx, text, tokens, page?}]
+  // For audio/video
+  durationSeconds Int?
+  transcriptText String?
+  // For YouTube
+  youtubeVideoId String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([userId])
+  @@index([extractionStatus])
+}
+
+// === Async jobs (generalize pelajarin pattern: note-<id>, quiz-<id>, flashcard-<id>) ===
+model StudyJob {
+  id           String   @id @default(cuid())
+  // Job type prefix (note-, quiz-, flashcard-, exam-, chat-, extraction-)
+  jobType      String
+  userId       String
+  // Reference to the entity being processed
+  noteId       String?
+  quizId       String?
+  flashcardId  String?
+  examId       String?
+  sessionId    String?
+  documentId   String?
+  // Status machine
+  status       String   @default("queued") // queued | running | completed | failed | timeout | cancelled
+  progress     Int      @default(0) // 0-100
+  // Result + error
+  resultJson   String?  // JSON result data
+  errorMessage String?
+  // Timing
+  startedAt    DateTime?
+  finishedAt   DateTime?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([userId])
+  @@index([status])
+  @@index([jobType])
+  @@index([createdAt])
+}

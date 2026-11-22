@@ -51,4 +51,62 @@ prompt
 
 server.log
 # Skills directory
-/skills/
+/skills/rea/
+
+# === Cleanup: removed legacy game + junk (kept on disk, untracked) ===
+# Game engine (Minecraft clone — not part of learning-AI product)
+src/engine/
+src/game/
+VoxelCraft/
+.cache/
+.tmp-work/
+tool-results/
+# Legacy project junk
+lol/
+my-new-project/
+download/
+upload/
+scripts/
+skills/
+tests/
+examples/
+.zscripts/
+# Old game assets in public/
+public/assets/
+public/mcpe-wasm/
+public/minecraft.html
+public/voxelcraft-*.js
+public/voxelcraft-*.html
+# Legacy game docs (keep docs/agent/ and docs/pelajarin-recon/)
+docs/ASSETS.md
+docs/DEVELOPMENT-RULES.md
+docs/FOUNDATION-REFERENCE-MAP.md
+docs/REFERENCE-SOURCE-AUDIT.md
+docs/STRUCTURE.md
+docs/VANILLA-PACK-COMPLETENESS-AUDIT.md
+docs/day-night.md
+docs/durability.md
+docs/gui.md
+docs/materials.md
+docs/mining.md
+docs/physics.md
+docs/rendering.md
+docs/tools.md
+docs/world-gen.md
+# DB data (keep schema, not data)
+db/assets/
+db/*.db
+db/*.db-journal
+# Misc
+story.md
+worklog.md
+test.txt
+styles.css
+*.bak
+*.new
+*.fix2
+*.fix
+server.pid
+rea-server.pid
+rea/
+db/custom.db

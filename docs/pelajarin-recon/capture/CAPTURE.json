@@ -1,0 +1,228 @@
+{
+  "capture_metadata": {
+    "method": "Craft Anything web_site_capture technique",
+    "tool": "agent-browser (CDP/Chromium) — computed styles + accessibility tree + screenshots",
+    "target": "https://pelajarin.ai/",
+    "date": "2026-11-22",
+    "widths_captured": [1280, 768, 375],
+    "screenshots": [
+      "mkt-desktop-1280.png",
+      "mkt-tablet-768.png",
+      "mkt-mobile-375.png"
+    ]
+  },
+  "design_tokens": {
+    "css_custom_properties": {
+      "--primary": "#f76703",
+      "--primary-foreground": "#fff",
+      "--secondary": "#262c46",
+      "--secondary-foreground": "#fff",
+      "--highlight": "#fac800",
+      "--brand": "#3080ff",
+      "--background": "var(--secondary)",
+      "--foreground": "#000",
+      "--card": "#fff",
+      "--card-foreground": "#000",
+      "--muted": "#f2f2f2",
+      "--muted-foreground": "#555",
+      "--destructive": "#e40014",
+      "--border": "#dedede",
+      "--input": "#dedede",
+      "--radius": ".625rem",
+      "--glass-bg": "#ffffff0d",
+      "--glass-border": "#ffffff1a",
+      "--glass-highlight": "#fff3",
+      "--glass-shadow": "0 4px 30px #0000001a"
+    },
+    "colors": {
+      "bg_marketing_light": "#f6fafe",
+      "bg_marketing_section": "transparent (aurora gradient)",
+      "bg_card": "#fff",
+      "bg_footer": "#f6fafe",
+      "text_primary": "#1a1a2e",
+      "text_body": "#4b5053",
+      "text_muted": "#555",
+      "accent_orange": "#f76703",
+      "accent_yellow": "#fac800",
+      "accent_blue": "#3080ff",
+      "border_light": "#dedede",
+      "glass_bg": "#ffffff0d",
+      "glass_border": "#ffffff1a"
+    },
+    "fonts": {
+      "body": "Poppins, \"Poppins Fallback\"",
+      "headings": "Quicksand, \"Quicksand Fallback\", Quicksand, sans-serif",
+      "body_weight": "400",
+      "heading_weight": "700",
+      "h1_size": "60.544px",
+      "h1_line_height": "69.444px",
+      "h2_size": "26px",
+      "h2_line_height": "39px",
+      "h3_size": "22px",
+      "p_size": "19px",
+      "p_line_height": "30px",
+      "nav_size": "15px",
+      "badge_size": "9px",
+      "button_size": "14px"
+    },
+    "spacing": {
+      "hero_padding": "112px 80px 120px",
+      "hero_gap": "72px",
+      "nav_gap": "36px",
+      "card_gap": "20px",
+      "footer_padding": "72px 80px 40px",
+      "p_max_width": "620px",
+      "content_max_width": "1088px"
+    },
+    "border_radius": {
+      "default": "0.625rem (10px)",
+      "badge": "999px (pill)",
+      "button": "999px (pill)",
+      "card": "var(--radius)"
+    }
+  },
+  "layout_outline": {
+    "body": { "rect": [0, 0, 1280, 9286], "bg": "transparent" },
+    "ticker": { "rect": [0, 0, 1280, 40], "bg": "dark gradient" },
+    "header": { "rect": [0, 40, 1280, 78], "content": "logo + nav + Masuk button" },
+    "hero_section": { "rect": [0, 118, 1280, 1300], "padding": "112px 80px 120px", "gap": "72px", "display": "flex" },
+    "universities_section": { "rect": [0, 1418, 1280, 224], "content": "university logos" },
+    "normalisation_section": { "rect": [0, 1642, 1280, 800] },
+    "features_section": { "rect": [0, 2442, 1280, 1136] },
+    "upload_section": { "rect": [0, 3578, 1280, 800] },
+    "comparison_section": { "rect": [0, 4378, 1280, 869] },
+    "social_section": { "rect": [0, 5246, 1280, 1016] },
+    "mobile_app_section": { "rect": [0, 6262, 1280, 804] },
+    "cta_section": { "rect": [0, 7066, 1280, 620] },
+    "faq_section": { "rect": [0, 7686, 1280, 961] },
+    "sponsor": { "rect": [0, 8647, 1280, 249], "content": "Dewaweb" },
+    "footer": { "rect": [0, 8896, 1280, 390], "bg": "#f6fafe", "padding": "72px 80px 40px" }
+  },
+  "computed_styles": {
+    "body": {
+      "font": "Poppins",
+      "font_size": "16px",
+      "line_height": "24px",
+      "color": "transparent (inherits)",
+      "bg": "transparent"
+    },
+    "h1": {
+      "font": "Quicksand",
+      "font_size": "60.544px",
+      "font_weight": "700",
+      "line_height": "69.444px",
+      "color": "#1a1a2e",
+      "rect": [365, 230, 549, 139]
+    },
+    "h2": {
+      "font": "Quicksand",
+      "font_size": "26px",
+      "font_weight": "700",
+      "line_height": "39px",
+      "color": "#1a1a2e",
+      "margin": "0 0 18px",
+      "rect": [43, 1053, 1193, 43]
+    },
+    "h3": {
+      "font": "Quicksand",
+      "font_size": "22px",
+      "font_weight": "700",
+      "line_height": "33px",
+      "color": "#1a1a2e",
+      "margin": "10px 0 0"
+    },
+    "p": {
+      "font": "Poppins",
+      "font_size": "19px",
+      "font_weight": "400",
+      "line_height": "30px",
+      "color": "#4b5053",
+      "max_width": "620px",
+      "margin": "28px 0 0"
+    },
+    "nav": {
+      "font": "Poppins",
+      "font_size": "15px",
+      "font_weight": "500",
+      "gap": "36px",
+      "display": "flex"
+    },
+    "button": {
+      "font": "Poppins",
+      "font_size": "14px",
+      "font_weight": "500",
+      "border_radius": "999px (pill)",
+      "padding": "0 16px"
+    },
+    "badge": {
+      "bg": "#f76703",
+      "color": "#fff",
+      "font_size": "9px",
+      "font_weight": "700",
+      "border_radius": "999px",
+      "padding": "1px 6px",
+      "box_shadow": "#fff 0 0 0 2px"
+    },
+    "section_hero": {
+      "padding": "112px 80px 120px",
+      "gap": "72px",
+      "display": "flex"
+    },
+    "footer": {
+      "bg": "#f6fafe",
+      "padding": "72px 80px 40px",
+      "border_top": "1.5px dashed"
+    }
+  },
+  "asset_inventory": {
+    "images_count": 42,
+    "scripts_count": 34,
+    "stylesheets_count": 5,
+    "fonts_count": 7,
+    "key_images": [
+      "logo.png (32x32)",
+      "read.webp, nap.webp, idle.webp, thumbsup.webp (hero motion)",
+      "pai-pointing.png, pai-confused.png, pai-thinking.png, pai-head.png, pai-thumbsup.png, pai-books.png, pai-dancing.png",
+      "ui.png (UI logo), itb.png, goto.svg, ugm.png, unair.png, binus.png, google.svg, telkom.png, brawijaya.png, its.png, penabur.png"
+    ],
+    "font_files": [
+      "13958cae6c93c43e.woff2",
+      "22a701959b157a82.woff2",
+      "3679aa72a9b9035f.woff2",
+      "47227609666e7f48.woff2",
+      "6bafae418e8a1b08.woff2",
+      "76e9fd951b869c7b.woff2",
+      "dd9dfc3601372168.woff2"
+    ]
+  },
+  "link_inventory": {
+    "total_links": 29,
+    "key_links": [
+      { "href": "https://app.pelajarin.ai/", "text": "Masuk" },
+      { "href": "https://app.pelajarin.ai/", "text": "Mulai Gratis Sekarang" },
+      { "href": "https://app.pelajarin.ai/", "text": "Upload Materimu — Gratis" },
+      { "href": "https://pelajarin.ai/pricing", "text": "Harga" },
+      { "href": "https://pelajarin.ai/career", "text": "Karier" },
+      { "href": "https://pelajarin.ai/blog", "text": "Blog" },
+      { "href": "https://play.google.com/store/apps/details?id=com.triputra.pelajarin_ai", "text": "Google Play" },
+      { "href": "https://discord.gg/q7CvJudJtd", "text": "Discord" },
+      { "href": "https://support.pelajarin.ai/", "text": "Dukungan" }
+    ]
+  },
+  "evidence": {
+    "confidence": "Observed",
+    "authority": "OurRun (CDP browser session)",
+    "environment": {
+      "engine": "agent-browser (Chromium CDP)",
+      "host": "linux-x86_64",
+      "viewport": "1280x800"
+    },
+    "limitations": [
+      "Marketing site only — app.pelajarin.ai requires authentication",
+      "No page states captured yet (menus/dialogs not opened)",
+      "Mobile app (Google Play) not captured",
+      "Dark mode variant not captured (marketing site is light-mode default)"
+    ],
+    "coverage": "Marketing homepage layout + design tokens + assets + links. Does not cover app UI (dashboard, note detail, chat, flashcard, quiz)."
+  }
+}
