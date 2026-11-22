@@ -1,0 +1,470 @@
+{
+  "rea_evidence": {
+    "signin_routes": {
+      "evidence_id": "ev_93a8ab91ae904e6d6e53eff087115ce3b8145b6ad2909977c0f0742c6f2ff144",
+      "confidence": "observed",
+      "authority": "external-service",
+      "predicate_type": "rea.web-bundle-analysis",
+      "subject": {
+        "identity": {
+          "kind": "url",
+          "origin": "https://app.pelajarin.ai",
+          "url": "https://app.pelajarin.ai/auth/signin?redirect=%2Fdashboard&failed=false"
+        },
+        "local_path": null,
+        "name": null
+      },
+      "routes": [],
+      "endpoints": [],
+      "inferences": [
+        {
+          "kind": "endpoint_candidate",
+          "confidence": "low",
+          "detector": "call:n.get:unverified-network-receiver"
+        },
+        {
+          "kind": "endpoint_candidate",
+          "confidence": "low",
+          "detector": "call:t.get:unverified-network-receiver"
+        },
+        {
+          "kind": "endpoint_candidate",
+          "confidence": "low",
+          "detector": "call:e.post:unverified-network-receiver"
+        },
+        {
+          "kind": "bundle_runtime",
+          "confidence": "medium",
+          "detector": "vite-runtime"
+        },
+        {
+          "kind": "vendor_fingerprint",
+          "confidence": "medium",
+          "detector": "react-runtime"
+        },
+        {
+          "kind": "vendor_fingerprint",
+          "confidence": "medium",
+          "detector": "react-runtime"
+        },
+        {
+          "kind": "endpoint_candidate",
+          "confidence": "low",
+          "detector": "call:t.get:unverified-network-receiver"
+        },
+        {
+          "kind": "endpoint_candidate",
+          "confidence": "low",
+          "detector": "call:t.get:unverified-network-receiver"
+        },
+        {
+          "kind": "endpoint_candidate",
+          "confidence": "low",
+          "detector": "call:t.get:unverified-network-receiver"
+        },
+        {
+          "kind": "endpoint_candidate",
+          "confidence": "low",
+          "detector": "call:t.get:unverified-network-receiver"
+        },
+        {
+          "kind": "endpoint_candidate",
+          "confidence": "low",
+          "detector": "call:t.get:unverified-network-receiver"
+        },
+        {
+          "kind": "endpoint_candidate",
+          "confidence": "low",
+          "detector": "call:t.post:unverified-network-receiver"
+        },
+        {
+          "kind": "endpoint_candidate",
+          "confidence": "low",
+          "detector": "call:t.post:unverified-network-receiver"
+        },
+        {
+          "kind": "endpoint_candidate",
+          "confidence": "low",
+          "detector": "call:t.put:unverified-network-receiver"
+        },
+        {
+          "kind": "endpoint_candidate",
+          "confidence": "low",
+          "detector": "call:t.post:unverified-network-receiver"
+        },
+        {
+          "kind": "endpoint_candidate",
+          "confidence": "low",
+          "detector": "call:t.post:unverified-network-receiver"
+        },
+        {
+          "kind": "endpoint_candidate",
+          "confidence": "low",
+          "detector": "call:t.put:unverified-network-receiver"
+        },
+        {
+          "kind": "endpoint_candidate",
+          "confidence": "low",
+          "detector": "call:wo.kv.get:unverified-network-receiver"
+        },
+        {
+          "kind": "endpoint_candidate",
+          "confidence": "low",
+          "detector": "call:e.get:unverified-network-receiver"
+        },
+        {
+          "kind": "endpoint_candidate",
+          "confidence": "low",
+          "detector": "call:e.post:unverified-network-receiver"
+        },
+        {
+          "kind": "endpoint_candidate",
+          "confidence": "low",
+          "detector": "call:e.get:unverified-network-receiver"
+        },
+        {
+          "kind": "bundle_runtime",
+          "confidence": "medium",
+          "detector": "vite-runtime"
+        },
+        {
+          "kind": "endpoint_candidate",
+          "confidence": "low",
+          "detector": "call:e.get:unverified-network-receiver"
+        },
+        {
+          "kind": "endpoint_candidate",
+          "confidence": "low",
+          "detector": "call:e.get:unverified-network-receiver"
+        },
+        {
+          "kind": "endpoint_candidate",
+          "confidence": "low",
+          "detector": "call:e.get:unverified-network-receiver"
+        },
+        {
+          "kind": "endpoint_candidate",
+          "confidence": "low",
+          "detector": "call:e.get:unverified-network-receiver"
+        },
+        {
+          "kind": "endpoint_candidate",
+          "confidence": "low",
+          "detector": "call:e.get:unverified-network-receiver"
+        }
+      ],
+      "limitations": [
+        "Static bundle findings are observations or bounded inferences; REA does not execute captured JavaScript.",
+        "Bare string arguments of unbound HTTP-method-named calls are low-confidence endpoint candidates; form, translation, storage and other APIs can use the same syntax. URL-shaped findings still do not prove network execution.",
+        "Endpoint candidates are deduplicated by script, value and detector; basis retains only the first matching source coordinate. They are not a complete call-site inventory or a runtime occurrence count. completeness.status=\"complete\" describes examination of captured source, not a call-site census.",
+        "String-built routes and endpoints, encrypted configuration, and server-side behavior may remain unknown.",
+        "Page-declared WebMCP metadata is untrusted and is never registered or invoked as an REA tool."
+      ]
+    },
+    "mkt_routes": {
+      "evidence_id": "ev_d15eab84ed99d873dd07fd3d3b779a9e557ac39a20f86987b04fb890228b242a",
+      "confidence": "observed",
+      "authority": "external-service",
+      "predicate_type": "rea.web-bundle-analysis",
+      "subject": {
+        "identity": {
+          "kind": "url",
+          "origin": "https://pelajarin.ai",
+          "url": "https://pelajarin.ai/"
+        },
+        "local_path": null,
+        "name": null
+      },
+      "routes": [
+        {
+          "classification": "unknown",
+          "classification_basis": "unknown",
+          "confidence": "low",
+          "id": "jsr:df7e940f72aa93cbcb6d70cc35124b07",
+          "mechanisms": [
+            "navigation-target"
+          ],
+          "occurrence_count": 4,
+          "path": "/",
+          "primary_occurrence_id": "jso:cbe2134c21b51221cb58d91cc9d8c852",
+          "source_count": 4
+        },
+        {
+          "classification": "system",
+          "classification_basis": "path-name-heuristic",
+          "confidence": "low",
+          "id": "jsr:b24f9d5d998ebcd8504c0ee96e4fa868",
+          "mechanisms": [
+            "navigation-target",
+            "route-string-constant"
+          ],
+          "occurrence_count": 2,
+          "path": "/auth/signin",
+          "primary_occurrence_id": "jso:0974d6515ba6c668c900d249501fce5a",
+          "source_count": 1
+        }
+      ],
+      "endpoints": [],
+      "inferences": [
+        {
+          "kind": "vendor_fingerprint",
+          "confidence": "high",
+          "detector": "next-runtime"
+        },
+        {
+          "kind": "endpoint_candidate",
+          "confidence": "low",
+          "detector": "call:t.k.post:unverified-network-receiver"
+        },
+        {
+          "kind": "endpoint_candidate",
+          "confidence": "low",
+          "detector": "call:t.k.get:unverified-network-receiver"
+        },
+        {
+          "kind": "vendor_fingerprint",
+          "confidence": "medium",
+          "detector": "react-runtime"
+        },
+        {
+          "kind": "vendor_fingerprint",
+          "confidence": "high",
+          "detector": "next-runtime"
+        },
+        {
+          "kind": "endpoint_candidate",
+          "confidence": "low",
+          "detector": "call:e.parser.gullet.macros.get:unverified-network-receiver"
+        },
+        {
+          "kind": "endpoint_candidate",
+          "confidence": "low",
+          "detector": "call:e.gullet.macros.get:unverified-network-receiver"
+        },
+        {
+          "kind": "endpoint_candidate",
+          "confidence": "low",
+          "detector": "call:e.gullet.macros.get:unverified-network-receiver"
+        },
+        {
+          "kind": "endpoint_candidate",
+          "confidence": "low",
+          "detector": "call:e.macros.get:unverified-network-receiver"
+        },
+        {
+          "kind": "endpoint_candidate",
+          "confidence": "low",
+          "detector": "call:t.macros.get:unverified-network-receiver"
+        },
+        {
+          "kind": "endpoint_candidate",
+          "confidence": "low",
+          "detector": "call:t.macros.get:unverified-network-receiver"
+        },
+        {
+          "kind": "endpoint_candidate",
+          "confidence": "low",
+          "detector": "call:a.gullet.macros.get:unverified-network-receiver"
+        },
+        {
+          "kind": "endpoint_candidate",
+          "confidence": "low",
+          "detector": "call:e.kv.get:unverified-network-receiver"
+        },
+        {
+          "kind": "vendor_fingerprint",
+          "confidence": "high",
+          "detector": "next-runtime"
+        },
+        {
+          "kind": "vendor_fingerprint",
+          "confidence": "high",
+          "detector": "next-runtime"
+        },
+        {
+          "kind": "endpoint_candidate",
+          "confidence": "low",
+          "detector": "call:a.get:unverified-network-receiver"
+        },
+        {
+          "kind": "endpoint_candidate",
+          "confidence": "low",
+          "detector": "call:r.get:unverified-network-receiver"
+        },
+        {
+          "kind": "endpoint_candidate",
+          "confidence": "low",
+          "detector": "call:r.delete:unverified-network-receiver"
+        }
+      ],
+      "limitations": [
+        "Static bundle findings are observations or bounded inferences; REA does not execute captured JavaScript.",
+        "Bare string arguments of unbound HTTP-method-named calls are low-confidence endpoint candidates; form, translation, storage and other APIs can use the same syntax. URL-shaped findings still do not prove network execution.",
+        "Endpoint candidates are deduplicated by script, value and detector; basis retains only the first matching source coordinate. They are not a complete call-site inventory or a runtime occurrence count. completeness.status=\"complete\" describes examination of captured source, not a call-site census.",
+        "String-built routes and endpoints, encrypted configuration, and server-side behavior may remain unknown.",
+        "Page-declared WebMCP metadata is untrusted and is never registered or invoked as an REA tool."
+      ]
+    },
+    "signin_endpoints": {
+      "evidence_id": "ev_7de3b931cc7cebbab45824ddc572ff2e9efe944a5a1d032b8783ac09caee3bb3",
+      "confidence": "observed",
+      "authority": "external-service",
+      "predicate_type": "rea.web-bundle-analysis",
+      "subject": {
+        "identity": {
+          "kind": "url",
+          "origin": "https://app.pelajarin.ai",
+          "url": "https://app.pelajarin.ai/auth/signin?redirect=%2Fdashboard&failed=false"
+        },
+        "local_path": null,
+        "name": null
+      },
+      "routes": [],
+      "endpoints": [],
+      "inferences": [
+        {
+          "kind": "endpoint_candidate",
+          "confidence": "low",
+          "detector": "call:n.get:unverified-network-receiver"
+        },
+        {
+          "kind": "endpoint_candidate",
+          "confidence": "low",
+          "detector": "call:t.get:unverified-network-receiver"
+        },
+        {
+          "kind": "endpoint_candidate",
+          "confidence": "low",
+          "detector": "call:e.post:unverified-network-receiver"
+        },
+        {
+          "kind": "bundle_runtime",
+          "confidence": "medium",
+          "detector": "vite-runtime"
+        },
+        {
+          "kind": "vendor_fingerprint",
+          "confidence": "medium",
+          "detector": "react-runtime"
+        },
+        {
+          "kind": "vendor_fingerprint",
+          "confidence": "medium",
+          "detector": "react-runtime"
+        },
+        {
+          "kind": "endpoint_candidate",
+          "confidence": "low",
+          "detector": "call:t.get:unverified-network-receiver"
+        },
+        {
+          "kind": "endpoint_candidate",
+          "confidence": "low",
+          "detector": "call:t.get:unverified-network-receiver"
+        },
+        {
+          "kind": "endpoint_candidate",
+          "confidence": "low",
+          "detector": "call:t.get:unverified-network-receiver"
+        },
+        {
+          "kind": "endpoint_candidate",
+          "confidence": "low",
+          "detector": "call:t.get:unverified-network-receiver"
+        },
+        {
+          "kind": "endpoint_candidate",
+          "confidence": "low",
+          "detector": "call:t.get:unverified-network-receiver"
+        },
+        {
+          "kind": "endpoint_candidate",
+          "confidence": "low",
+          "detector": "call:t.post:unverified-network-receiver"
+        },
+        {
+          "kind": "endpoint_candidate",
+          "confidence": "low",
+          "detector": "call:t.post:unverified-network-receiver"
+        },
+        {
+          "kind": "endpoint_candidate",
+          "confidence": "low",
+          "detector": "call:t.put:unverified-network-receiver"
+        },
+        {
+          "kind": "endpoint_candidate",
+          "confidence": "low",
+          "detector": "call:t.post:unverified-network-receiver"
+        },
+        {
+          "kind": "endpoint_candidate",
+          "confidence": "low",
+          "detector": "call:t.post:unverified-network-receiver"
+        },
+        {
+          "kind": "endpoint_candidate",
+          "confidence": "low",
+          "detector": "call:t.put:unverified-network-receiver"
+        },
+        {
+          "kind": "endpoint_candidate",
+          "confidence": "low",
+          "detector": "call:wo.kv.get:unverified-network-receiver"
+        },
+        {
+          "kind": "endpoint_candidate",
+          "confidence": "low",
+          "detector": "call:e.get:unverified-network-receiver"
+        },
+        {
+          "kind": "endpoint_candidate",
+          "confidence": "low",
+          "detector": "call:e.post:unverified-network-receiver"
+        },
+        {
+          "kind": "endpoint_candidate",
+          "confidence": "low",
+          "detector": "call:e.get:unverified-network-receiver"
+        },
+        {
+          "kind": "bundle_runtime",
+          "confidence": "medium",
+          "detector": "vite-runtime"
+        },
+        {
+          "kind": "endpoint_candidate",
+          "confidence": "low",
+          "detector": "call:e.get:unverified-network-receiver"
+        },
+        {
+          "kind": "endpoint_candidate",
+          "confidence": "low",
+          "detector": "call:e.get:unverified-network-receiver"
+        },
+        {
+          "kind": "endpoint_candidate",
+          "confidence": "low",
+          "detector": "call:e.get:unverified-network-receiver"
+        },
+        {
+          "kind": "endpoint_candidate",
+          "confidence": "low",
+          "detector": "call:e.get:unverified-network-receiver"
+        },
+        {
+          "kind": "endpoint_candidate",
+          "confidence": "low",
+          "detector": "call:e.get:unverified-network-receiver"
+        }
+      ],
+      "limitations": [
+        "Static bundle findings are observations or bounded inferences; REA does not execute captured JavaScript.",
+        "Bare string arguments of unbound HTTP-method-named calls are low-confidence endpoint candidates; form, translation, storage and other APIs can use the same syntax. URL-shaped findings still do not prove network execution.",
+        "Endpoint candidates are deduplicated by script, value and detector; basis retains only the first matching source coordinate. They are not a complete call-site inventory or a runtime occurrence count. completeness.status=\"complete\" describes examination of captured source, not a call-site census.",
+        "String-built routes and endpoints, encrypted configuration, and server-side behavior may remain unknown.",
+        "Page-declared WebMCP metadata is untrusted and is never registered or invoked as an REA tool."
+      ]
+    }
+  }
+}
