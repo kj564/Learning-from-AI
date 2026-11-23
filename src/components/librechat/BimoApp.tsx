@@ -35,7 +35,7 @@ import {
   Network, FolderOpen, GraduationCap, Plus, Download,
   Bold, Italic, Underline, Type, AlignLeft,
   RotateCcw, Star, Trophy, Crown, Sparkles,
-  MoreHorizontal, Home,
+  MoreHorizontal, Home, Search,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import Markdown from '@/components/librechat/Markdown';
@@ -934,11 +934,12 @@ function ChatTab({ noteId, noteTitle, usage }: { noteId: string; noteTitle: stri
 
 // === Tab 8: Podcast — 4 AI host personas + generate + sequential playback ===
 function PodcastTab({ noteId, noteTitle }: { noteId: string; noteTitle: string }) {
+  // Hosts — 1:1 from auth HTML: real host images + bg-host-*-light classes
   const HOSTS = [
-    { name: 'Pai', role: 'Explainer', color: 'var(--accent-orange)' },
-    { name: 'Kiko', role: 'The curious one', color: 'var(--accent-blue)' },
-    { name: 'Bolu', role: 'Storyteller', color: 'var(--accent-green)' },
-    { name: 'Meli', role: 'Exam coach', color: 'var(--accent-red)' },
+    { name: 'Pai', role: 'Explainer', color: 'var(--accent-orange)', img: '/pelajarin-assets/img/app-pai.png', bgLight: '#fff3eb' },
+    { name: 'Kiko', role: 'The curious one', color: 'var(--accent-blue)', img: '/pelajarin-assets/img/app-kiko.png', bgLight: '#e3f2fd' },
+    { name: 'Bolu', role: 'Storyteller', color: 'var(--accent-green)', img: '/pelajarin-assets/img/app-bolu.png', bgLight: '#e8f5e9' },
+    { name: 'Meli', role: 'Exam coach', color: 'var(--accent-red)', img: '/pelajarin-assets/img/app-meli.png', bgLight: '#fce4ec' },
   ];
   const SUGGESTIONS = ['Make it funnier', 'Use anime examples', 'Like canteen gossip', 'Focus on exam questions', "Go slow, I'm a beginner"];
   const [selected, setSelected] = useState<string[]>(['Pai', 'Kiko']);
@@ -1073,82 +1074,142 @@ function PodcastTab({ noteId, noteTitle }: { noteId: string; noteTitle: string }
     );
   }
 
-  // === Setup view — pick hosts, style, duration, generate ===
+  // === Setup view — 1:1 from auth HTML: radial gradient purple container + host cards ===
   return (
-    <div className="mx-auto flex w-full flex-col" style={{ maxWidth: '1360px', minHeight: 'calc(100svh - 4rem)' }}>
-      <div className="mx-auto w-full" style={{ maxWidth: '760px', padding: '32px clamp(28px, 5vw, 72px)' }}>
-        <h2 className="text-2xl font-bold mb-1" style={{ fontFamily: 'var(--font-heading)' }}>Create a podcast</h2>
-        <p className="text-sm text-muted mb-6">From the lesson {noteTitle}</p>
-        {/* Pick 2 hosts — captured: 169x150 cards, radius 22px */}
-        <p className="text-sm font-semibold mb-3">Pick 2 hosts <span className="text-muted">({selected.length} of 2 picked)</span></p>
-        <div className="grid grid-cols-2 gap-4 sm:grid-cols-4 mb-6">
-          {HOSTS.map(h => (
-            <button key={h.name} onClick={() => setSelected(prev => prev.includes(h.name) ? prev.filter(n => n !== h.name) : prev.length < 2 ? [...prev, h.name] : [prev[1], h.name])}
-              className="flex flex-col items-center justify-center rounded-2xl border-2 p-4 text-center transition-colors"
-              style={{ borderRadius: '22px', borderColor: selected.includes(h.name) ? h.color : 'var(--border)', background: selected.includes(h.name) ? 'var(--bg-accent)' : 'var(--bg-primary)', minHeight: 150 }}>
-              <div className="flex h-12 w-12 items-center justify-center rounded-full mb-2" style={{ background: h.color, color: '#fff', fontWeight: 700 }}>{h.name[0]}</div>
-              <p className="text-sm font-semibold">{h.name}</p>
-              <p className="text-xs text-muted">{h.role}</p>
+    <div className="mx-auto flex w-full flex-col justify-center" style={{ minHeight: 'calc(100svh - 4rem)', maxWidth: '1360px', padding: '32px clamp(20px, 4vw, 56px) 80px' }}>
+      <div className="mx-auto w-full" style={{ maxWidth: '760px' }}>
+        {/* Radial gradient purple container — captured: rounded-[28px] bg-[radial-gradient(130% 100% at 30% 0%, ...)] */}
+        <div className="overflow-hidden rounded-[28px] text-white" style={{ background: 'radial-gradient(130% 100% at 30% 0%, #6c5ce0 0%, #4834b8 55%, #2d1b6e 100%)' }}>
+          {/* Header */}
+          <div className="flex items-start gap-4 px-7 pb-2.5 pt-6">
+            <div className="flex min-w-0 flex-1 flex-col gap-1">
+              <h2 className="font-bold tracking-tight text-white" style={{ fontFamily: 'var(--font-heading)', fontSize: '26px' }}>Create a podcast</h2>
+              <p className="text-sm" style={{ color: 'rgba(255,255,255,0.7)' }}>From the lesson {noteTitle}</p>
+            </div>
+          </div>
+          {/* Body */}
+          <div className="flex flex-col gap-5 px-7 pb-5 pt-2.5">
+            {/* Pick 2 hosts — captured: host cards with bg-host-*-light + real host images */}
+            <section className="flex flex-col gap-2.5">
+              <div className="flex items-baseline justify-between gap-3">
+                <h3 className="font-bold text-white" style={{ fontFamily: 'var(--font-heading)', fontSize: '17px' }}>Pick 2 hosts</h3>
+                <span className="text-[13px] font-semibold text-white">{selected.length} of 2 picked</span>
+              </div>
+              <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-4">
+                {HOSTS.map(h => {
+                  const isSelected = selected.includes(h.name);
+                  return (
+                    <button key={h.name} type="button" aria-pressed={isSelected} onClick={() => setSelected(prev => prev.includes(h.name) ? prev.filter(n => n !== h.name) : prev.length < 2 ? [...prev, h.name] : [prev[1], h.name])}
+                      className="relative flex flex-col items-center gap-1 rounded-[22px] px-2.5 pb-3.5 pt-4 transition-colors"
+                      style={{ background: isSelected ? h.bgLight : 'rgba(255,255,255,0.1)' }}>
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img alt="" width={72} height={72} className="size-[72px] rounded-full" src={h.img} />
+                      <span className="font-bold" style={{ fontFamily: 'var(--font-heading)', fontSize: '16px', color: isSelected ? 'var(--text-primary)' : '#fff' }}>{h.name}</span>
+                      <span className="text-xs" style={{ color: isSelected ? 'rgba(26,26,46,0.7)' : 'rgba(255,255,255,0.7)' }}>{h.role}</span>
+                      {/* Check badge when selected */}
+                      {isSelected && (
+                        <span className="absolute right-2.5 top-2.5 grid size-6 place-items-center rounded-full" style={{ background: 'var(--accent-orange)', color: '#fff' }}>
+                          <CheckCircle size={14} />
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            </section>
+            {/* Style suggestions */}
+            <section className="flex flex-col gap-2.5">
+              <h3 className="font-bold text-white" style={{ fontFamily: 'var(--font-heading)', fontSize: '17px' }}>What should the chat be like?</h3>
+              <div className="flex flex-wrap gap-2">
+                {SUGGESTIONS.map(s => (
+                  <button key={s} onClick={() => setActiveStyle(prev => prev === s ? null : s)} className="inline-flex items-center rounded-full font-semibold transition-colors" style={{ background: activeStyle === s ? 'var(--accent-orange)' : 'rgba(255,255,255,0.15)', color: '#fff', fontSize: '13px', fontWeight: 600, padding: '6px 16px', borderRadius: '9999px' }}>{s}</button>
+                ))}
+              </div>
+            </section>
+            {/* Duration + language — captured: 167x44, radius 24px */}
+            <section className="flex flex-col gap-2.5">
+              <div className="flex gap-2">
+                {['3 min', '7 min'].map((d, i) => (
+                  <button key={d} onClick={() => setDuration(i === 0 ? '3' : '7')} className="font-semibold transition-colors" style={{ width: 167, height: 44, borderRadius: '24px', fontSize: '14px', fontWeight: 600, background: duration === (i === 0 ? '3' : '7') ? 'var(--accent-orange)' : 'rgba(255,255,255,0.15)', color: '#fff', border: '2px solid ' + (duration === (i === 0 ? '3' : '7') ? 'var(--accent-orange)' : 'transparent') }}>{d}</button>
+                ))}
+              </div>
+              <div className="flex gap-2">
+                {['Indonesian', 'English'].map((l, i) => (
+                  <button key={l} onClick={() => setLanguage(i === 0 ? 'id' : 'en')} className="font-semibold transition-colors" style={{ width: 167, height: 44, borderRadius: '24px', fontSize: '14px', fontWeight: 600, background: language === (i === 0 ? 'id' : 'en') ? 'var(--accent-orange)' : 'rgba(255,255,255,0.15)', color: '#fff', border: '2px solid ' + (language === (i === 0 ? 'id' : 'en') ? 'var(--accent-orange)' : 'transparent') }}>{l}</button>
+                ))}
+              </div>
+            </section>
+            {/* Generate button */}
+            <button onClick={generate} disabled={generating || selected.length !== 2} className="inline-flex items-center justify-center gap-2 rounded-xl font-semibold transition-transform active:translate-y-0.5 disabled:opacity-60" style={{ height: 48, padding: '0 32px', fontSize: '15px', fontWeight: 600, background: 'var(--accent-orange)', color: '#fff', boxShadow: '0 4px 0 #c5520a' }}>
+              {generating ? <Loader2 size={18} className="animate-spin" /> : <Headphones size={18} />}
+              {generating ? (progress || 'Generating...') : 'Generate Podcast'}
             </button>
-          ))}
+            {generating && <p className="text-xs" style={{ color: 'rgba(255,255,255,0.7)' }}>Bimo nulis skrip + bikin suara host satu-satu. Biasanya 30-60 detik.</p>}
+          </div>
         </div>
-        {/* Style suggestions — captured: pill 13px/600 */}
-        <p className="text-sm font-semibold mb-3">What should the chat be like?</p>
-        <div className="mb-6 flex flex-wrap gap-2">
-          {SUGGESTIONS.map(s => (
-            <button key={s} onClick={() => setActiveStyle(prev => prev === s ? null : s)} className="inline-flex items-center rounded-full font-semibold transition-colors" style={{ background: activeStyle === s ? 'var(--accent-orange)' : 'var(--bg-surface)', color: activeStyle === s ? '#fff' : 'var(--text-primary)', fontSize: '13px', fontWeight: 600, padding: '6px 16px', borderRadius: '9999px' }}>{s}</button>
-          ))}
-        </div>
-        {/* Duration + language — captured: 167x44, radius 24px */}
-        <div className="mb-6 flex gap-2">
-          {['3 min', '7 min'].map((d, i) => <button key={d} onClick={() => setDuration(i === 0 ? '3' : '7')} className="font-semibold" style={{ width: 167, height: 44, borderRadius: '24px', fontSize: '14px', fontWeight: 600, border: `2px solid ${duration === (i === 0 ? '3' : '7') ? 'var(--accent-orange)' : 'var(--border)'}`, background: duration === (i === 0 ? '3' : '7') ? 'var(--bg-accent)' : 'var(--bg-primary)', color: duration === (i === 0 ? '3' : '7') ? 'var(--accent-orange)' : 'var(--text-muted)' }}>{d}</button>)}
-        </div>
-        <div className="mb-6 flex gap-2">
-          {['Indonesian', 'English'].map((l, i) => <button key={l} onClick={() => setLanguage(i === 0 ? 'id' : 'en')} className="font-semibold" style={{ width: 167, height: 44, borderRadius: '24px', fontSize: '14px', fontWeight: 600, border: `2px solid ${language === (i === 0 ? 'id' : 'en') ? 'var(--accent-orange)' : 'var(--border)'}`, background: language === (i === 0 ? 'id' : 'en') ? 'var(--bg-accent)' : 'var(--bg-primary)', color: language === (i === 0 ? 'id' : 'en') ? 'var(--accent-orange)' : 'var(--text-muted)' }}>{l}</button>)}
-        </div>
-        {/* Generate button — free users can do 3-min; 7-min shows Pro hint */}
-        <button onClick={generate} disabled={generating || selected.length !== 2} className="inline-flex items-center gap-2 rounded-full font-semibold disabled:opacity-60" style={{ background: 'var(--accent-orange)', color: '#fff', fontSize: '15px', fontWeight: 600, padding: '0 24px', height: 44, borderRadius: '9999px' }}>
-          {generating ? <Loader2 size={16} className="animate-spin" /> : <Headphones size={16} />}
-          {generating ? (progress || 'Generating...') : 'Generate Podcast'}
-        </button>
-        {generating && (
-          <p className="mt-3 text-xs text-muted">Bimo nulis skrip + bikin suara host satu-satu. Biasanya 30-60 detik.</p>
-        )}
       </div>
     </div>
   );
 }
 
-// === Tab 9: Tempel (Sticky notes) ===
+// === Tab 9: Tempel (Sticky notes) — 1:1 from auth HTML ===
 function StickyTab() {
   const [notes, setNotes] = useState<{ id: string; text: string; color: string }[]>([]);
   const [newText, setNewText] = useState('');
+  const [search, setSearch] = useState('');
   const COLORS = ['#fff3eb', '#e8f5e9', '#e3f2fd', '#fce4ec'];
+
+  function addNote(text?: string) {
+    const content = (text ?? newText).trim() || 'New note';
+    setNotes(prev => [...prev, { id: crypto.randomUUID(), text: content, color: COLORS[prev.length % COLORS.length] }]);
+    if (!text) setNewText('');
+  }
+
+  const filtered = search.trim() ? notes.filter(n => n.text.toLowerCase().includes(search.toLowerCase())) : notes;
+
   return (
-    <div className="mx-auto w-full" style={{ maxWidth: '1360px', padding: '0 clamp(28px, 5vw, 72px) 8px' }}>
-      <div className="mb-4">
-        <h2 className="text-xl font-bold" style={{ fontFamily: 'var(--font-heading)' }}>Sticky notes</h2>
-        <p className="text-sm text-muted">Drag a note off the board to stick it on the page.</p>
+    <div className="mx-auto w-full" style={{ maxWidth: '1360px', padding: '32px clamp(28px, 5vw, 72px) 80px' }}>
+      <div className="flex flex-col gap-8">
+        {/* Header — captured: title + search input + New sticky note button */}
+        <header className="flex flex-wrap items-end justify-between gap-4">
+          <div className="min-w-0">
+            <h1 className="font-bold leading-tight" style={{ fontFamily: 'var(--font-heading)', fontSize: '32px', color: 'var(--text-primary)' }}>Sticky notes</h1>
+            <p className="mt-1 text-sm" style={{ color: 'var(--text-muted)' }}>Drag a note off the board to stick it on the page.</p>
+          </div>
+          <div className="flex w-full flex-wrap items-center gap-3 sm:w-auto">
+            {/* Search input — captured: rounded-xl border-2 with search icon */}
+            <label className="flex h-11 min-w-0 flex-1 items-center gap-2 rounded-xl px-3 sm:w-72 sm:flex-none" style={{ border: '2px solid var(--border)', background: 'var(--bg-surface)', color: 'var(--text-muted)' }}>
+              <Search size={16} className="shrink-0" />
+              <input placeholder="Search notes" aria-label="Search notes" className="min-w-0 flex-1 bg-transparent text-sm outline-none" style={{ color: 'var(--text-primary)' }} type="search" value={search} onChange={(e) => setSearch(e.target.value)} />
+            </label>
+            {/* New sticky note button — captured: neo-brutalist with shadow */}
+            <button type="button" onClick={() => addNote()} className="inline-flex h-11 flex-none items-center gap-2 rounded-xl px-4 text-sm font-semibold transition-all active:translate-y-0.5" style={{ background: 'var(--accent-orange)', color: '#fff', boxShadow: '0 4px 0 #c5520a' }}>
+              <Plus size={18} /> New sticky note
+            </button>
+          </div>
+        </header>
+
+        {/* Empty state — captured: write.webp illustration + "No sticky notes yet" */}
+        {filtered.length === 0 && notes.length === 0 ? (
+          <div className="mx-auto flex max-w-md flex-col items-center gap-3 py-16 text-center">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img alt="" aria-hidden="true" className="object-contain size-40" src="/pelajarin-assets/img/write-Bi8IeuzT.webp" />
+            <h2 className="font-bold" style={{ fontFamily: 'var(--font-heading)', fontSize: '20px', color: 'var(--text-primary)' }}>No sticky notes yet</h2>
+            <p className="text-sm leading-relaxed" style={{ color: 'var(--text-muted)' }}>Press + in the top-right to add one, or drag a note off the board to stick it on the page.</p>
+          </div>
+        ) : filtered.length === 0 ? (
+          <div className="text-center py-12"><p className="text-sm text-muted">No notes match "{search}".</p></div>
+        ) : (
+          /* Sticky notes grid */
+          <div className="flex flex-wrap gap-3">
+            {filtered.map(n => (
+              <div key={n.id} className="rounded-2xl p-4 shadow-sm" style={{ background: n.color, borderRadius: '16px', width: 220, minHeight: 120 }}>
+                <p className="text-sm" style={{ color: 'var(--text-primary)' }}>{n.text}</p>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
-      {/* New sticky note input — captured: 232x20 input + "New sticky note" 170x44 button */}
-      <div className="mb-4 flex items-center gap-2">
-        <input value={newText} onChange={(e) => setNewText(e.target.value)} placeholder="New sticky note" className="border-none bg-transparent outline-none text-sm" style={{ fontSize: '14px' }} />
-        <button onClick={() => { if (newText.trim()) { setNotes(prev => [...prev, { id: crypto.randomUUID(), text: newText, color: COLORS[prev.length % COLORS.length] }]); setNewText(''); } }} className="inline-flex items-center rounded-full font-semibold" style={{ fontSize: '14px', fontWeight: 600, padding: '0 20px', height: 44, borderRadius: '20px', background: 'var(--accent-orange)', color: '#fff' }}>New sticky note</button>
-      </div>
-      {/* Sticky notes board */}
-      {notes.length === 0 ? (
-        <div className="text-center py-12"><StickyNote size={32} className="mx-auto text-muted mb-2" /><p className="text-sm text-muted">No sticky notes yet. Press + in the bottom-right to add one.</p></div>
-      ) : (
-        <div className="flex flex-wrap gap-3">
-          {notes.map(n => (
-            <div key={n.id} className="rounded-2xl p-4 shadow-sm" style={{ background: n.color, borderRadius: '16px', width: 200, minHeight: 100 }}>
-              <p className="text-sm">{n.text}</p>
-            </div>
-          ))}
-        </div>
-      )}
-      {/* Add button — captured: 56px circle bottom-right */}
-      <button onClick={() => setNotes(prev => [...prev, { id: crypto.randomUUID(), text: 'New note', color: COLORS[prev.length % COLORS.length] }])} className="fixed bottom-8 right-8 flex h-14 w-14 items-center justify-center rounded-full shadow-lg" style={{ background: 'var(--accent-orange)', color: '#fff', borderRadius: '9999px' }}><Plus size={24} /></button>
     </div>
   );
 }
