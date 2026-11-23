@@ -4,7 +4,7 @@
  */
 
 import { NextRequest } from 'next/server';
-import { ensureDevUser, setDevUserCookie, success, error, notFound, cursorPaginationMeta } from '@/lib/learning';
+import { ensureDevUser, setDevUserCookie, successWithPagination, success, error, notFound, cursorPaginationMeta } from '@/lib/learning';
 import { db } from '@/lib/db';
 import { generateFlashcards } from '@/lib/study-generator';
 import { extractText } from '@/lib/document-processing';
@@ -27,7 +27,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   });
   const hasMore = cards.length > limit;
   const items = hasMore ? cards.slice(0, limit) : cards;
-  return setDevUserCookie(success(
+  return setDevUserCookie(successWithPagination(
     items.map(c => ({ id: c.id, front: c.front, back: c.back, fsrs_state: c.fsrsStateJson })),
     cursorPaginationMeta(hasMore ? items[items.length - 1].id : null, limit),
   ), user.id);

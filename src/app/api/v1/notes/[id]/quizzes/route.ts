@@ -3,7 +3,7 @@
  */
 
 import { NextRequest } from 'next/server';
-import { ensureDevUser, setDevUserCookie, success, error, notFound, cursorPaginationMeta } from '@/lib/learning';
+import { ensureDevUser, setDevUserCookie, successWithPagination, error, notFound, cursorPaginationMeta } from '@/lib/learning';
 import { db } from '@/lib/db';
 import { generateQuiz } from '@/lib/study-generator';
 
@@ -26,7 +26,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   });
   const hasMore = quizzes.length > limit;
   const items = hasMore ? quizzes.slice(0, limit) : quizzes;
-  return setDevUserCookie(success(
+  return setDevUserCookie(successWithPagination(
     items.map(q => ({ id: q.id, title: q.title, question_count: q.questions.length, questions: q.questions.map(qs => ({ id: qs.id, type: qs.type, question: qs.question, options: qs.optionsJson ? JSON.parse(qs.optionsJson) : null, answer: qs.answer, explanation: qs.explanation, hint: qs.hint, difficulty: qs.difficulty, xp: qs.xp })) })),
     cursorPaginationMeta(hasMore ? items[items.length - 1].id : null, limit),
   ), user.id);
