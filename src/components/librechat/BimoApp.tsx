@@ -444,32 +444,119 @@ function BimoNoteDetail({ note, activeTab, usage, onUpgrade, onBack }: { note: N
   );
 }
 
-// === Tab 1: Belajar (Learn) — chapter list with progress + locked chapters ===
+// === Tab 1: Belajar (Learn) — 3D island journey map (1:1 from authenticated capture) ===
+// Per authenticated capture: 6 bromo islands in zig-zag layout (RIGHT, LEFT, RIGHT...),
+// dotted path connecting them, first chapter completed (green check), rest locked.
+// Top: Pai mascot + badge + title + progress bar + "N of M done".
+const BROMO_ISLANDS = [
+  '/pelajarin-assets/img/bromo-01-CeLXIM2X.webp',
+  '/pelajarin-assets/img/bromo-07-Q2mrRcas.webp',
+  '/pelajarin-assets/img/bromo-13-CLYdEMAj.webp',
+  '/pelajarin-assets/img/bromo-18-DfKN9Si-.webp',
+  '/pelajarin-assets/img/bromo-24-DTjGE7XZ.webp',
+  '/pelajarin-assets/img/bromo-30-CszJu1cD.webp',
+];
+
 function BelajarTab({ note, onUpgrade, onBack }: { note: any; onUpgrade: () => void; onBack: () => void }) {
   if (!note) return <Loader2 className="animate-spin text-muted mx-auto" size={24} />;
-  const progress = note?.total_chapters > 0 ? Math.round((note?.flashcard_count || 0) * 100 / Math.max(note?.total_chapters, 1)) : 0;
+  const chapters = note?.chapters || [];
+  const totalChapters = chapters.length;
+  const completedCount = 1; // first chapter free, rest locked
+  const progress = totalChapters > 0 ? Math.round(completedCount * 100 / totalChapters) : 0;
+
   return (
-    <div className="mx-auto w-full" style={{ maxWidth: '1120px', padding: '0 clamp(28px, 5vw, 72px) 8px' }}>
-      {/* Progress + Upgrade */}
-      <div className="mb-4 flex items-center gap-4">
-        <h1 className="text-xl font-bold" style={{ fontFamily: 'var(--font-heading)' }}>{note.title || 'Catatan Baru'}</h1>
-        <span className="text-sm text-muted">{progress}%</span>
-        <button onClick={onUpgrade} className="inline-flex items-center rounded-full font-semibold transition-transform hover:-translate-y-0.5 active:translate-y-0.5" style={{ background: 'var(--accent-orange)', color: '#fff', fontSize: '14px', fontWeight: 600, padding: '0 20px', height: 44, borderRadius: '20px' }}>Upgrade to Pro</button>
-      </div>
-      {/* Chapter list */}
-      {note?.chapters && note.chapters.length > 0 ? (
-        <div className="space-y-2">
-          {note.chapters.map((c: any, i: number) => (
-            <div key={c.id} className="flex items-center gap-3 rounded-2xl border-2 border-app p-4" style={{ borderRadius: '24px' }}>
-              <div className="flex h-10 w-10 items-center justify-center rounded-full" style={{ background: i === 0 ? 'var(--accent-orange)' : 'var(--bg-surface)', color: i === 0 ? '#fff' : 'var(--text-muted)' }}>{i + 1}</div>
-              <div className="flex-1"><h3 className="text-sm font-semibold">{c.title}</h3>{c.content && <p className="text-xs text-muted mt-1 truncate">{c.content.slice(0, 60)}...</p>}</div>
-              {i > 0 && <button onClick={onUpgrade} className="inline-flex items-center rounded-full font-semibold transition-transform hover:-translate-y-0.5 active:translate-y-0.5" style={{ background: 'var(--accent-orange)', color: '#fff', fontSize: '14px', fontWeight: 600, padding: '0 20px', height: 44, borderRadius: '20px' }}>Upgrade to Pro</button>}
+    <div className="mx-auto w-full overflow-y-auto" style={{ maxWidth: '1120px', padding: '0 clamp(28px, 5vw, 72px) 80px' }}>
+      {/* Top section — captured: Pai mascot + badge + title + progress + "N of M done" */}
+      <div className="mb-8 flex items-center gap-4">
+        {/* Pai mascot (3D purple robot) */}
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src="/pelajarin-assets/img/pai-pointing.png" alt="Pai" width={80} height={80} style={{ objectFit: 'contain' }} />
+        <div className="flex-1">
+          {/* Badge — "Bromo Expedition" style grey pill */}
+          <span className="inline-block rounded-full px-3 py-1 text-xs font-semibold mb-2" style={{ background: 'var(--bg-surface)', color: 'var(--text-muted)', borderRadius: '9999px' }}>
+            {note?.subject?.name || 'Adventure'}
+          </span>
+          <h1 className="font-bold leading-tight" style={{ fontFamily: 'var(--font-heading)', fontSize: 'clamp(20px, 3vw, 28px)', color: 'var(--text-primary)' }}>{note.title || 'Catatan Baru'}</h1>
+          {/* Progress bar + label */}
+          <div className="mt-2 flex items-center gap-3">
+            <div className="h-2 flex-1 max-w-xs rounded-full" style={{ background: 'var(--bg-surface)' }}>
+              <div className="h-full rounded-full transition-all" style={{ width: `${progress}%`, background: 'var(--accent-orange)' }} />
             </div>
-          ))}
+            <span className="text-sm" style={{ color: 'var(--text-muted)' }}>{progress}%</span>
+          </div>
+        </div>
+        <button onClick={onUpgrade} className="inline-flex items-center rounded-full font-semibold transition-transform hover:-translate-y-0.5 active:translate-y-0.5 shrink-0" style={{ background: 'var(--accent-orange)', color: '#fff', fontSize: '14px', fontWeight: 600, padding: '0 20px', height: 44, borderRadius: '20px' }}>Upgrade to Pro</button>
+      </div>
+
+      {/* "Chapters" label + "N of M done" — captured: right-aligned count */}
+      <div className="mb-4 flex items-center justify-between">
+        <span className="text-lg font-bold" style={{ fontFamily: 'var(--font-heading)' }}>Chapters</span>
+        <span className="text-sm" style={{ color: 'var(--text-muted)' }}>{completedCount} of {totalChapters} done</span>
+      </div>
+
+      {/* Journey map — 3D islands in zig-zag with dotted path */}
+      {chapters.length > 0 ? (
+        <div className="relative" style={{ minHeight: chapters.length * 240 }}>
+          {/* Dotted vertical path — captured: orange dotted line connecting islands */}
+          <div className="absolute left-1/2 top-0 -translate-x-1/2" style={{ width: 0, height: '100%', borderLeft: '4px dotted var(--accent-orange)' }} />
+          {chapters.map((c: any, i: number) => {
+            const isRight = i % 2 === 0; // first island RIGHT, alternating
+            const isCompleted = i === 0;
+            const isLocked = i > 0;
+            const islandImg = BROMO_ISLANDS[i % BROMO_ISLANDS.length];
+
+            return (
+              <div key={c.id} className="relative flex items-center" style={{ marginBottom: 60, minHeight: 200 }}>
+                {/* Island image — alternating left/right */}
+                <div className={`flex items-center justify-center ${isRight ? 'order-2 ml-auto' : 'order-1'}`} style={{ width: 200, height: 200 }}>
+                  <div className="relative" style={{ width: 160, height: 160 }}>
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={islandImg} alt="" width={160} height={160} style={{ objectFit: 'contain' }} draggable={false} />
+                    {/* Status badge on island — green check if completed, lock if locked */}
+                    {isCompleted && (
+                      <div className="absolute -top-1 -right-1 flex h-8 w-8 items-center justify-center rounded-full" style={{ background: 'var(--accent-green)', color: '#fff' }}>
+                        <CheckCircle size={18} />
+                      </div>
+                    )}
+                    {isLocked && (
+                      <div className="absolute -top-1 -right-1 flex h-8 w-8 items-center justify-center rounded-full" style={{ background: 'var(--bg-surface)', color: 'var(--text-muted)' }}>
+                        <span style={{ fontSize: 14 }}>🔒</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Chapter card — opposite side */}
+                <div className={`flex-1 ${isRight ? 'order-1 pr-8 text-right' : 'order-2 pl-8'}`} style={{ maxWidth: 400 }}>
+                  {/* Location name — small text (like "Gapura Tengger") */}
+                  <p className="text-xs mb-1" style={{ color: 'var(--text-muted)', fontWeight: 600 }}>{c.location_name || `Bab ${i + 1}`}</p>
+                  {/* Chapter title — bold */}
+                  <h3 className="text-base font-bold mb-2" style={{ fontFamily: 'var(--font-heading)', color: 'var(--text-primary)' }}>{c.title}</h3>
+                  {/* Status: completed or locked */}
+                  {isCompleted ? (
+                    <span className="inline-flex items-center gap-1 text-sm font-semibold" style={{ color: 'var(--accent-green)' }}>
+                      <CheckCircle size={14} /> Selesai
+                    </span>
+                  ) : (
+                    <button onClick={onUpgrade} className="inline-flex items-center rounded-full font-semibold transition-transform hover:-translate-y-0.5 active:translate-y-0.5" style={{ background: 'var(--accent-orange)', color: '#fff', fontSize: '13px', fontWeight: 600, padding: '0 16px', height: 36, borderRadius: '18px' }}>Upgrade to Pro</button>
+                  )}
+                </div>
+              </div>
+            );
+          })}
         </div>
       ) : (
-        <div className="text-center py-12 rounded-2xl border-2 border-app"><BookOpen size={32} className="mx-auto text-muted mb-2" /><p className="text-sm text-muted">Catatan belum diproses. Upload materi untuk mulai belajar!</p></div>
+        <div className="text-center py-12 rounded-2xl border-2 border-app">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/pelajarin-assets/img/pai-thinking.png" alt="" width={64} height={64} className="mx-auto mb-2" style={{ objectFit: 'contain', opacity: 0.7 }} />
+          <p className="text-sm text-muted">Catatan belum diproses. Upload materi untuk mulai belajar!</p>
+        </div>
       )}
+
+      {/* FAB — captured: orange plus button bottom-right */}
+      <button onClick={onUpgrade} className="fixed bottom-8 right-8 flex h-14 w-14 items-center justify-center rounded-full shadow-lg transition-transform hover:scale-105 active:scale-95" style={{ background: 'var(--accent-orange)', color: '#fff', borderRadius: '9999px' }}>
+        <Plus size={24} />
+      </button>
     </div>
   );
 }
