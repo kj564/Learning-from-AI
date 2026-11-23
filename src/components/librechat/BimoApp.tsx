@@ -193,13 +193,7 @@ export function BimoApp() {
         )}
       </div>
 
-      {/* Footer — only on dashboard (per pelajarin capture: app view has no footer) */}
-      {view === 'dashboard' && (
-        <footer className="border-t border-app px-20 py-6 text-center text-xs text-muted">
-          <p>Bimo — Teman belajar AI untuk siswa Indonesia. Gratis selamanya, Pro mulai Rp 20 ribu.</p>
-          <p className="mt-1">60% lebih murah · 15 catatan/bulan · 50 chat/bulan</p>
-        </footer>
-      )}
+      {/* No footer — per pelajarin.ai capture: app view has NO footer */}
 
       {/* Pricing modal — triggered by "Upgrade" pill in the header */}
       <PricingModal open={pricingOpen} onOpenChange={setPricingOpen} />
@@ -312,7 +306,7 @@ function BimoDashboard({ notes, usage, onNoteClick, onNoteCreated }: { notes: No
       {/* Hero — COPY PASTE 1:1 from pelajarin.ai dashboard.html */}
       <section className="mb-7 mt-[clamp(24px,6vh,64px)] flex items-center justify-center gap-2 text-left max-sm:flex-col max-sm:gap-0 max-sm:text-center">
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img sizes="132px" alt="" aria-hidden="true" decoding="async" className="object-contain pointer-events-none size-[132px] flex-none max-sm:size-[104px]" src="/pelajarin-assets/img/pai-pointing.png" />
+        <img sizes="132px" alt="" aria-hidden="true" decoding="async" className="object-contain pointer-events-none size-[132px] flex-none max-sm:size-[104px]" srcset="/assets/yoyo-CLVpPPxW.webp 288w, /assets/yoyo-576-Mwnvh0Dn.webp 576w" src="/assets/yoyo-CLVpPPxW.webp" />
         <h1 className="text-balance font-heading text-[clamp(28px,4.4vw,42px)] font-bold leading-[1.15] tracking-[-0.01em] text-text-primary">What do you want to learn today?</h1>
       </section>
       {/* Upload box — COPY PASTE 1:1 from pelajarin.ai */}
