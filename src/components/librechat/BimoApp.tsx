@@ -34,7 +34,7 @@ import {
   BookOpen, Layers, Grid3x3, List, Headphones, StickyNote,
   Network, FolderOpen, GraduationCap, Plus, Download,
   Bold, Italic, Underline, Type, AlignLeft,
-  RotateCcw,
+  RotateCcw, Star, Trophy, Crown, Sparkles,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import Markdown from '@/components/librechat/Markdown';
@@ -99,9 +99,11 @@ export function BimoApp() {
     <div className="min-h-screen bg-app text-app flex flex-col" style={{ fontFamily: 'var(--font-body)', color: 'var(--text-primary)' }}>
       {/* Header — captured: h-64, glass bg, sticky, pad 0 28px, gap 12px */}
       <header className="sticky top-0 z-50 flex items-center gap-3 header-glass border-b border-app" style={{ height: 'var(--header-h)', padding: 'var(--header-pad)', gap: 'var(--header-gap)' }}>
-        <a href="/" className="flex items-center gap-2">
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg" style={{ background: 'var(--accent-orange)', color: '#fff', fontFamily: 'var(--font-heading)', fontSize: 'var(--text-logo)' }}>B</div>
-          <span className="font-bold" style={{ fontFamily: 'var(--font-heading)', fontSize: 'var(--text-logo)' }}>bimo.ai</span>
+        <a href="/" className="flex items-center" style={{ gap: 8 }}>
+          {/* Real pelajarin.ai logo (64x64 logo.png) — used as-is per "pakai aset asli dulu" */}
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/pelajarin-assets/img/logo.png" alt="Bimo logo" width={32} height={32} style={{ objectFit: 'contain' }} />
+          <span className="font-bold" style={{ fontFamily: 'var(--font-heading)', fontSize: 'var(--text-logo)', fontWeight: 700 }}>bimo.ai</span>
         </a>
         <button className="flex h-8 w-8 items-center justify-center rounded-full border-2 border-app text-xs font-semibold text-muted" style={{ fontSize: '11px' }}>C</button>
         <nav className="flex items-center gap-2 text-sm font-semibold" style={{ fontSize: 'var(--text-nav)' }}>
@@ -109,15 +111,22 @@ export function BimoApp() {
           {view === 'note' && <><span className="text-muted">›</span><span style={{ color: 'var(--accent-orange)' }}>{TABS.find(t => t.url === activeTab)?.label}</span></>}
         </nav>
         <div className="ml-auto flex items-center gap-2">
-          <a href="#" className="inline-flex h-9 items-center gap-2 rounded-full px-4 text-sm font-semibold" style={{ padding: '0 16px', height: 36, fontSize: 'var(--text-nav)', border: '2px solid var(--border)' }}>Become a Creator</a>
-          {usage && (
-            <span className="inline-flex h-9 items-center gap-2 rounded-full px-4 text-sm font-semibold" style={{ background: 'var(--bg-accent)', color: 'var(--accent-orange)', padding: '0 16px', height: 36, fontSize: 'var(--text-nav)' }}>
-              <Flame size={14} /> Streak {usage.notesUsed > 0 ? 1 : 0}
-            </span>
-          )}
-          <span className="inline-flex h-9 items-center gap-2 rounded-full px-4 text-sm font-semibold" style={{ border: '2px solid var(--border)', padding: '0 16px', height: 36, fontSize: 'var(--text-nav)' }}>Level 1</span>
-          <span className="inline-flex h-9 items-center gap-2 rounded-full px-4 text-sm font-semibold" style={{ background: 'var(--accent-orange)', color: '#fff', padding: '0 16px', height: 36, fontSize: 'var(--text-nav)' }}>Upgrade</span>
-          <div className="flex h-9 w-9 items-center justify-center rounded-full text-sm font-bold" style={{ background: 'var(--bg-surface)', width: 36, height: 36 }}>{user?.name?.[0] || 'B'}</div>
+          {/* Become a Creator — captured: outline pill */}
+          <a href="#" className="inline-flex h-9 items-center gap-2 rounded-full px-4 text-sm font-semibold" style={{ padding: '0 16px', height: 36, fontSize: 'var(--text-nav)', border: '2px solid var(--border)', color: 'var(--text-primary)' }}>Become a Creator</a>
+          {/* Streak — captured: yellow bg pill with Flame icon */}
+          <span className="inline-flex h-9 items-center gap-1.5 rounded-full px-4 text-sm font-semibold" style={{ background: '#fef9c3', color: '#a16207', padding: '0 14px', height: 36, fontSize: 'var(--text-nav)' }}>
+            <Flame size={14} /> Streak {usage && usage.notesUsed > 0 ? 1 : 0}
+          </span>
+          {/* Level — captured: blue bg pill with Trophy icon */}
+          <span className="inline-flex h-9 items-center gap-1.5 rounded-full px-4 text-sm font-semibold" style={{ background: '#dbeafe', color: '#1d4ed8', padding: '0 14px', height: 36, fontSize: 'var(--text-nav)' }}>
+            <Trophy size={14} /> Level 1
+          </span>
+          {/* Upgrade — captured: orange bg pill with Sparkles icon */}
+          <span className="inline-flex h-9 items-center gap-1.5 rounded-full px-4 text-sm font-semibold" style={{ background: 'var(--accent-orange)', color: '#fff', padding: '0 16px', height: 36, fontSize: 'var(--text-nav)' }}>
+            <Sparkles size={14} /> Upgrade
+          </span>
+          {/* Avatar — captured: 36x36 round with initial */}
+          <div className="flex items-center justify-center rounded-full text-sm font-bold" style={{ background: 'var(--bg-surface)', width: 36, height: 36, color: 'var(--text-primary)' }}>{user?.name?.[0] || 'B'}</div>
         </div>
       </header>
 
@@ -231,12 +240,14 @@ function BimoDashboard({ notes, usage, onNoteClick, onNoteCreated }: { notes: No
   return (
     <main className="mx-auto w-full flex-1" style={{ maxWidth: 'var(--main-max)', padding: 'var(--main-pad)' }}>
       <input ref={fileInputRef} type="file" onChange={handleUpload} className="hidden" accept=".pdf,.docx,.pptx,.xlsx,.txt,.png,.jpg,.mp3,.mp4" />
-      {/* Hero */}
-      <section className="mb-7 flex items-center gap-2">
-        <div className="flex items-center justify-center rounded-2xl" style={{ width: 132, height: 132, background: 'var(--bg-accent)' }}>
-          <span style={{ fontFamily: 'var(--font-heading)', fontSize: '60px', fontWeight: 700, color: 'var(--accent-orange)' }}>B</span>
+      {/* Hero — captured: 132x132 Pai mascot + "What do you want to learn today?" */}
+      <section className="mb-7 flex items-center" style={{ gap: 8 }}>
+        {/* Real Pai mascot from pelajarin.ai (pai-pointing.png, 212x212) */}
+        <div className="flex items-center justify-center" style={{ width: 132, height: 132 }}>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/pelajarin-assets/img/pai-pointing.png" alt="Bimo mascot" width={132} height={132} style={{ objectFit: 'contain' }} />
         </div>
-        <h1 className="font-bold" style={{ fontFamily: 'var(--font-heading)', fontSize: 'var(--text-h1)', lineHeight: 'var(--text-h1-lh)' }}>What do you want to learn today?</h1>
+        <h1 className="font-bold text-balance" style={{ fontFamily: 'var(--font-heading)', fontSize: 'var(--text-h1)', lineHeight: 'var(--text-h1-lh)' }}>What do you want to learn today?</h1>
       </section>
       {/* Upload box */}
       <section className="mx-auto mb-12 rounded-2xl border-2 border-app bg-app transition-colors" style={{ maxWidth: 'var(--upload-max)', padding: 'var(--upload-pad)' }}>
@@ -255,15 +266,25 @@ function BimoDashboard({ notes, usage, onNoteClick, onNoteCreated }: { notes: No
           <button onClick={handleCreateNote} className="ml-auto grid place-items-center rounded-full" style={{ width: 44, height: 44, background: 'var(--bg-accent)', color: 'var(--accent-orange)' }}><Send size={18} /></button>
         </div>
       </section>
-      {/* Notes + filters */}
-      <div className="mb-4 flex items-center gap-3"><span className="text-lg font-semibold" style={{ fontFamily: 'var(--font-heading)' }}>Notes</span></div>
+      {/* Notes + filters — captured: "Notes" heading + "All folders" dropdown + filter chips + Grid/List pill toggle */}
+      <div className="mb-4 flex items-center gap-3">
+        <span className="text-lg font-bold" style={{ fontFamily: 'var(--font-heading)' }}>Notes</span>
+        {/* All folders dropdown — captured: pill with chevron */}
+        <button className="inline-flex items-center gap-1.5 rounded-full border-2 border-app font-semibold" style={{ fontSize: 'var(--text-btn-sm)', fontWeight: 600, padding: '6px 14px', color: 'var(--text-primary)' }}>
+          All folders <ChevronRight size={12} className="rotate-90" />
+        </button>
+      </div>
       <div className="mb-4 flex flex-wrap items-center gap-2">
-        {filters.map((f, i) => (
+        {filters.map((f) => (
           <button key={f} onClick={() => setFilter(f.toLowerCase())}
             className={`inline-flex items-center gap-1.5 rounded-full border-2 font-semibold transition-colors ${filter === f.toLowerCase() ? 'filter-active' : 'filter-inactive'}`}
             style={{ fontSize: 'var(--text-btn-sm)', fontWeight: 600, padding: '6px 12px', borderRadius: 'var(--radius-pill)' }}>{f}</button>
         ))}
-        <div className="ml-auto flex items-center gap-1.5"><button className="rounded-full p-1.5 text-muted hover:bg-surface"><Grid3x3 size={16} /></button><button className="rounded-full p-1.5 text-muted hover:bg-surface"><List size={16} /></button></div>
+        {/* Grid/List pill toggle — captured: pill container with active Grid (orange) */}
+        <div className="ml-auto inline-flex items-center gap-0.5 rounded-full p-1" style={{ background: 'var(--bg-surface)', borderRadius: 'var(--radius-pill)' }}>
+          <button onClick={() => setView('dashboard')} className="grid place-items-center rounded-full p-1.5 transition-colors" style={{ background: 'var(--bg-primary)', color: 'var(--accent-orange)', borderRadius: 'var(--radius-pill)' }} aria-label="Grid view"><Grid3x3 size={16} /></button>
+          <button className="grid place-items-center rounded-full p-1.5 text-muted transition-colors" style={{ borderRadius: 'var(--radius-pill)' }} aria-label="List view"><List size={16} /></button>
+        </div>
       </div>
       {/* Notes grid */}
       {notes.length === 0 ? (

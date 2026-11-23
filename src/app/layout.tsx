@@ -7,13 +7,21 @@ import Rehydrate from "@/components/Rehydrate";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Z.ai - Advanced AI Chatbot & Agent powered by GLM-5.3-Flash",
-  description: "Meet Z.ai, the AI assistant powered by GLM-5.3-Flash. Build websites, write code, handle long-horizon tasks, and get instant answers. Fast, smart, and reliable.",
+  title: "Bimo — Teman belajar AI untuk siswa Indonesia",
+  description: "Upload materi, dapatkan rangkuman, flashcard, kuis, mindmap, podcast, dan chat AI — semua dalam satu tempat. Gratis selamanya, Pro mulai Rp 20 ribu.",
+  icons: {
+    icon: [
+      { url: "/pelajarin-assets/img/favicon.ico", sizes: "any" },
+      { url: "/pelajarin-assets/img/favicon-32x32.png", sizes: "32x32", type: "image/png" },
+      { url: "/pelajarin-assets/img/favicon-16x16.png", sizes: "16x16", type: "image/png" },
+    ],
+    apple: "/pelajarin-assets/img/apple-touch-icon.png",
+  },
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" suppressHydrationWarning className={`${GeistSans.variable} ${GeistMono.variable}`}>
+    <html lang="id" suppressHydrationWarning className={`${GeistSans.variable} ${GeistMono.variable}`}>
       <head>
         <style>{`
           :root {
@@ -23,7 +31,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         `}</style>
       </head>
       <body>
-        <ThemeProvider attribute="class" defaultTheme="dark" enableSystem disableTransitionOnChange>
+        <ThemeProvider attribute="class" defaultTheme="light" enableSystem disableTransitionOnChange>
           <Rehydrate />
           {children}
           <Toaster richColors position="top-center" />

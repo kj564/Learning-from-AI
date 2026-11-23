@@ -1,14 +1,36 @@
 @import "tailwindcss";
 
 /* ============================================================
-   BIMO design system — CAPTURED from app.pelajarin.ai via Craft Anything
-   web_site_capture (CDP authenticated session, getComputedStyle per element)
-   
-   KEY FINDING: app is LIGHT theme, not dark!
-   bg: #ffffff, text: #1a1a2e, border: #e5e7eb
-   
-   Source: CAPTURE-APP.json (authenticated browser capture)
+   BIMO design system — 1:1 from pelajarin.ai
+   Sources:
+   - /pelajarin-assets/css/ (downloaded from pelajarin.ai)
+   - /docs/pelajarin-recon/capture/CAPTURE-APP.json (computed styles)
+   - body.font captured: 'Poppins, "Poppins Fallback"' (16px)
+   - h1/h2.font-family: 'Quicksand, "Quicksand Fallback"'
+   - Theme: LIGHT, bg #ffffff, text #1a1a2e, accent #f76703
    ============================================================ */
+
+/* === @font-face — pelajarin.ai original fonts (served locally) ===
+   Poppins (body) + Quicksand (headings) + Caveat (accent), all weights.
+   Woff2 from pelajarin's Next.js build + TTF from Google Fonts CDN. */
+@font-face{font-family:Poppins;font-style:normal;font-weight:400;font-display:swap;src:url(/pelajarin-assets/fonts/gf-pxiEyp8kv8JHgFVrFJA.ttf) format('truetype')}
+@font-face{font-family:Poppins;font-style:normal;font-weight:500;font-display:swap;src:url(/pelajarin-assets/fonts/gf-pxiByp8kv8JHgFVrLGT9V1s.ttf) format('truetype')}
+@font-face{font-family:Poppins;font-style:normal;font-weight:600;font-display:swap;src:url(/pelajarin-assets/fonts/gf-pxiByp8kv8JHgFVrLEj6V1s.ttf) format('truetype')}
+@font-face{font-family:Poppins;font-style:normal;font-weight:700;font-display:swap;src:url(/pelajarin-assets/fonts/gf-pxiByp8kv8JHgFVrLCz7V1s.ttf) format('truetype')}
+@font-face{font-family:Quicksand;font-style:normal;font-weight:500;font-display:swap;src:url(/pelajarin-assets/fonts/gf-6xK-dSZaM9iE8KbpRA_LJ3z8mH9BOJvgkM0o18E.ttf) format('truetype')}
+@font-face{font-family:Quicksand;font-style:normal;font-weight:600;font-display:swap;src:url(/pelajarin-assets/fonts/gf-6xK-dSZaM9iE8KbpRA_LJ3z8mH9BOJvgkCEv18E.ttf) format('truetype')}
+@font-face{font-family:Quicksand;font-style:normal;font-weight:700;font-display:swap;src:url(/pelajarin-assets/fonts/gf-6xK-dSZaM9iE8KbpRA_LJ3z8mH9BOJvgkBgv18E.ttf) format('truetype')}
+
+/* Quicksand Variable (woff2 from Next.js build, with unicode-range splits) */
+@font-face{font-family:Quicksand;font-style:normal;font-weight:500;font-display:swap;src:url(/pelajarin-assets/fonts/659375fb877c71b9-s.3uuzd4ky6sm1t.woff2) format("woff2");unicode-range:U+102-103,U+110-111,U+128-129,U+168-169,U+1A0-1A1,U+1AF-1B0,U+300-301,U+303-304,U+308-309,U+323,U+329,U+1EA0-1EF9,U+20AB}
+@font-face{font-family:Quicksand;font-style:normal;font-weight:500;font-display:swap;src:url(/pelajarin-assets/fonts/18f52720ad5fdf06-s.403cfnf7b-1vb.woff2) format("woff2");unicode-range:U+100-2BA,U+2BD-2C5,U+2C7-2CC,U+2CE-2D7,U+2DD-2FF,U+304,U+308,U+329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C4,U+2113,U+2C60-2C7F,U+A720-A7FF}
+@font-face{font-family:Quicksand;font-style:normal;font-weight:500;font-display:swap;src:url(/pelajarin-assets/fonts/47227609666e7f48-s.p.3jc5sq-923m_s.woff2) format("woff2");unicode-range:U+??,U+131,U+152-153,U+2BB-2BC,U+2C6,U+2DA,U+2DC,U+304,U+308,U+329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD}
+@font-face{font-family:Quicksand;font-style:normal;font-weight:600;font-display:swap;src:url(/pelajarin-assets/fonts/659375fb877c71b9-s.3uuzd4ky6sm1t.woff2) format("woff2");unicode-range:U+102-103,U+110-111,U+128-129,U+168-169,U+1A0-1A1,U+1AF-1B0,U+300-301,U+303-304,U+308-309,U+323,U+329,U+1EA0-1EF9,U+20AB}
+@font-face{font-family:Quicksand;font-style:normal;font-weight:600;font-display:swap;src:url(/pelajarin-assets/fonts/18f52720ad5fdf06-s.403cfnf7b-1vb.woff2) format("woff2");unicode-range:U+100-2BA,U+2BD-2C5,U+2C7-2CC,U+2CE-2D7,U+2DD-2FF,U+304,U+308,U+329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C4,U+2113,U+2C60-2C7F,U+A720-A7FF}
+@font-face{font-family:Quicksand;font-style:normal;font-weight:600;font-display:swap;src:url(/pelajarin-assets/fonts/47227609666e7f48-s.p.3jc5sq-923m_s.woff2) format("woff2");unicode-range:U+??,U+131,U+152-153,U+2BB-2BC,U+2C6,U+2DA,U+2DC,U+304,U+308,U+329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD}
+@font-face{font-family:Quicksand;font-style:normal;font-weight:700;font-display:swap;src:url(/pelajarin-assets/fonts/659375fb877c71b9-s.3uuzd4ky6sm1t.woff2) format("woff2");unicode-range:U+102-103,U+110-111,U+128-129,U+168-169,U+1A0-1A1,U+1AF-1B0,U+300-301,U+303-304,U+308-309,U+323,U+329,U+1EA0-1EF9,U+20AB}
+@font-face{font-family:Quicksand;font-style:normal;font-weight:700;font-display:swap;src:url(/pelajarin-assets/fonts/18f52720ad5fdf06-s.403cfnf7b-1vb.woff2) format("woff2");unicode-range:U+100-2BA,U+2BD-2C5,U+2C7-2CC,U+2CE-2D7,U+2DD-2FF,U+304,U+308,U+329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C4,U+2113,U+2C60-2C7F,U+A720-A7FF}
+@font-face{font-family:Quicksand;font-style:normal;font-weight:700;font-display:swap;src:url(/pelajarin-assets/fonts/47227609666e7f48-s.p.3jc5sq-923m_s.woff2) format("woff2");unicode-range:U+??,U+131,U+152-153,U+2BB-2BC,U+2C6,U+2DA,U+2DC,U+304,U+308,U+329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD}
 
 :root {
   /* === Theme (CAPTURED from app.pelajarin.ai computed styles) === */
@@ -16,23 +38,25 @@
   --bg-surface: #f3f4f6;
   --bg-header: rgba(255, 255, 255, 0.82);
   --bg-accent: #fff3eb;
-  
+
   --text-primary: #1a1a2e;
   --text-body: #4b5053;
   --text-muted: #6b7280;
-  
+
   --border: #e5e7eb;
   --border-active: #f76703;
-  
+
   --accent-orange: #f76703;
   --accent-green: #3f8f01;
   --accent-blue: #0c8fc7;
   --accent-red: #ef4444;
-  
-  /* === Fonts (CAPTURED) === */
-  --font-body: "Poppins", -apple-system, sans-serif;
-  --font-heading: "Quicksand", -apple-system, sans-serif;
-  
+  --accent-yellow: #fac800;
+
+  /* === Fonts (CAPTURED: body=Poppins, heading=Quicksand) === */
+  --font-body: "Poppins", "Poppins Fallback", -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-heading: "Quicksand", "Quicksand Fallback", -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-accent: "Caveat", cursive;
+
   /* Font sizes (CAPTURED from getComputedStyle) */
   --text-h1: clamp(28px, 4.4vw, 42px);
   --text-h1-lh: 1.14;
@@ -42,7 +66,7 @@
   --text-btn-sm: 13px;
   --text-badge: 9px;
   --text-logo: 20px;
-  
+
   /* Spacing (CAPTURED) */
   --header-h: 64px;
   --header-pad: 0 28px;
@@ -54,25 +78,30 @@
   --upload-pad: 18px;
   --card-pad: 12px;
   --grid-gap: 20px;
-  
+
   /* Border radius (CAPTURED) */
   --radius-card: 24px;
   --radius-pill: 9999px;
+  --radius-btn: 9999px;
 }
 
-/* === Body — LIGHT theme (matching pelajarin app) === */
+/* === Body — LIGHT theme (matching pelajarin app: Poppins 16px/24px) === */
 body {
   font-family: var(--font-body);
   font-size: 16px;
   line-height: 24px;
   background: var(--bg-primary);
   color: var(--text-primary);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
+/* === Headings — Quicksand 700 (matching pelajarin) === */
 h1, h2, h3, h4, h5, h6 {
   font-family: var(--font-heading);
   font-weight: 700;
   color: var(--text-primary);
+  letter-spacing: -0.01em;
 }
 
 /* === Utility classes (matching pelajarin's actual classes) === */
@@ -117,11 +146,20 @@ h1, h2, h3, h4, h5, h6 {
 .header-glass {
   background: var(--bg-header);
   backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
 }
 
 /* === Scrollbar === */
-::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
 
 ::selection { background: var(--accent-orange); color: #fff; }
+
+/* === Smooth focus rings (matching pelajarin's accessibility) === */
+*:focus-visible {
+  outline: 2px solid var(--accent-orange);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
