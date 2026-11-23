@@ -42,6 +42,8 @@ import Markdown from '@/components/librechat/Markdown';
 import { MindmapView } from '@/components/librechat/MindmapView';
 import { PricingModal } from '@/components/librechat/PricingModal';
 import { OnboardingModal, shouldShowOnboarding } from '@/components/librechat/OnboardingModal';
+import { GamificationHubModal } from '@/components/librechat/GamificationHubModal';
+import { CelebrationsModal } from '@/components/librechat/CelebrationsModal';
 
 // Types
 interface User { id: string; name: string; email: string; plan: string; }
@@ -77,6 +79,8 @@ export function BimoApp() {
   const [pricingOpen, setPricingOpen] = useState(false);
   const [onboardingOpen, setOnboardingOpen] = useState(false);
   const [gamification, setGamification] = useState<Gamification | null>(null);
+  const [hubOpen, setHubOpen] = useState(false);
+  const [celebrationsOpen, setCelebrationsOpen] = useState(false);
 
   // Show onboarding on first visit (once per browser)
   useEffect(() => {
@@ -134,14 +138,14 @@ export function BimoApp() {
         <div className="ml-auto flex items-center gap-2">
           {/* Become a Creator — captured: outline pill */}
           <a href="#" className="inline-flex h-9 items-center gap-2 rounded-full px-4 text-sm font-semibold" style={{ padding: '0 16px', height: 36, fontSize: 'var(--text-nav)', border: '2px solid var(--border)', color: 'var(--text-primary)' }}>Become a Creator</a>
-          {/* Streak — captured: yellow bg pill with Flame icon. Reads real streak from /gamification. */}
-          <span className="inline-flex h-9 items-center gap-1.5 rounded-full px-4 text-sm font-semibold" style={{ background: '#fef9c3', color: '#a16207', padding: '0 14px', height: 36, fontSize: 'var(--text-nav)' }}>
+          {/* Streak — captured: yellow bg pill with Flame icon. Click → gamification hub. */}
+          <button onClick={() => setHubOpen(true)} className="inline-flex h-9 items-center gap-1.5 rounded-full px-4 text-sm font-semibold transition-transform hover:-translate-y-0.5 active:translate-y-0.5" style={{ background: '#fef9c3', color: '#a16207', padding: '0 14px', height: 36, fontSize: 'var(--text-nav)' }}>
             <Flame size={14} /> Streak {gamification?.streak?.current ?? 0}
-          </span>
-          {/* Level — captured: blue bg pill with Trophy icon. Reads real level from /gamification. */}
-          <span className="inline-flex h-9 items-center gap-1.5 rounded-full px-4 text-sm font-semibold" style={{ background: '#dbeafe', color: '#1d4ed8', padding: '0 14px', height: 36, fontSize: 'var(--text-nav)' }}>
+          </button>
+          {/* Level — captured: blue bg pill with Trophy icon. Click → gamification hub. */}
+          <button onClick={() => setHubOpen(true)} className="inline-flex h-9 items-center gap-1.5 rounded-full px-4 text-sm font-semibold transition-transform hover:-translate-y-0.5 active:translate-y-0.5" style={{ background: '#dbeafe', color: '#1d4ed8', padding: '0 14px', height: 36, fontSize: 'var(--text-nav)' }}>
             <Trophy size={14} /> Level {gamification?.level ?? 1}
-          </span>
+          </button>
           {/* Upgrade — captured: orange bg pill with Sparkles icon. Opens PricingModal. */}
           <button onClick={() => setPricingOpen(true)} className="inline-flex h-9 items-center gap-1.5 rounded-full px-4 text-sm font-semibold transition-transform hover:-translate-y-0.5 active:translate-y-0.5" style={{ background: 'var(--accent-orange)', color: '#fff', padding: '0 16px', height: 36, fontSize: 'var(--text-nav)' }}>
             <Sparkles size={14} /> Upgrade
@@ -180,6 +184,10 @@ export function BimoApp() {
       <PricingModal open={pricingOpen} onOpenChange={setPricingOpen} />
       {/* Onboarding modal — first-visit welcome carousel */}
       <OnboardingModal open={onboardingOpen} onOpenChange={setOnboardingOpen} />
+      {/* Gamification hub modal — triggered by Streak/Level badge click */}
+      <GamificationHubModal open={hubOpen} onOpenChange={setHubOpen} />
+      {/* Celebrations modal — auto-shows pending level-up/streak/achievement */}
+      <CelebrationsModal open={celebrationsOpen} onOpenChange={setCelebrationsOpen} />
     </div>
   );
 }
@@ -227,7 +235,23 @@ function BimoDashboard({ notes, usage, onNoteClick, onNoteCreated }: { notes: No
   const [uploading, setUploading] = useState(false);
   const [inputText, setInputText] = useState('');
   const [filter, setFilter] = useState('all');
+  const [folders, setFolders] = useState<{ id: string; name: string; color: string; note_count: number }[]>([]);
+  const [activeFolder, setActiveFolder] = useState<string | null>(null); // null = All folders
+  const [foldersOpen, setFoldersOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Load folders for the "All folders" dropdown (per pelajarin RE: /folders)
+  useEffect(() => {
+    fetch('/api/v1/folders').then(r => r.json()).then(d => setFolders(d.data || [])).catch(() => {});
+  }, []);
+
+  async function createFolder(name: string) {
+    try {
+      const res = await fetch('/api/v1/folders', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) });
+      const d = await res.json();
+      if (d.data) { toast.success(`Folder "${name}" dibuat`); const r2 = await fetch('/api/v1/folders'); const d2 = await r2.json(); setFolders(d2.data || []); }
+    } catch { toast.error('Gagal buat folder'); }
+  }
 
   async function handleUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]; if (!file) return;
@@ -296,10 +320,26 @@ function BimoDashboard({ notes, usage, onNoteClick, onNoteCreated }: { notes: No
       {/* Notes + filters — captured: "Notes" heading + "All folders" dropdown + filter chips + Grid/List pill toggle */}
       <div className="mb-4 flex items-center gap-3">
         <span className="text-lg font-bold" style={{ fontFamily: 'var(--font-heading)' }}>Notes</span>
-        {/* All folders dropdown — captured: pill with chevron */}
-        <button className="inline-flex items-center gap-1.5 rounded-full border-2 border-app font-semibold" style={{ fontSize: 'var(--text-btn-sm)', fontWeight: 600, padding: '6px 14px', color: 'var(--text-primary)' }}>
-          All folders <ChevronRight size={12} className="rotate-90" />
-        </button>
+        {/* All folders dropdown — per pelajarin RE: real folders from /folders + create new */}
+        <div className="relative">
+          <button onClick={() => setFoldersOpen(prev => !prev)} className="inline-flex items-center gap-1.5 rounded-full border-2 border-app font-semibold transition-colors hover:border-[var(--accent-orange)]" style={{ fontSize: 'var(--text-btn-sm)', fontWeight: 600, padding: '6px 14px', color: 'var(--text-primary)' }}>
+            {activeFolder ? (folders.find(f => f.id === activeFolder)?.name || 'Folder') : 'All folders'} <ChevronRight size={12} className="rotate-90" />
+          </button>
+          {foldersOpen && (
+            <div className="absolute left-0 top-full mt-1 z-50 w-56 rounded-2xl border-2 shadow-lg" style={{ background: 'var(--bg-primary)', borderColor: 'var(--border)', borderRadius: '16px' }}>
+              <button onClick={() => { setActiveFolder(null); setFoldersOpen(false); }} className="block w-full text-left px-3 py-2 text-sm hover:bg-surface" style={{ borderRadius: '12px 12px 0 0', color: 'var(--text-primary)' }}>All folders</button>
+              {folders.map(f => (
+                <button key={f.id} onClick={() => { setActiveFolder(f.id); setFoldersOpen(false); }} className="flex w-full items-center gap-2 px-3 py-2 text-sm hover:bg-surface" style={{ color: 'var(--text-primary)' }}>
+                  <span className="h-2.5 w-2.5 rounded-full" style={{ background: f.color }} /> {f.name} <span className="ml-auto text-xs text-muted">{f.note_count}</span>
+                </button>
+              ))}
+              <div className="border-t" style={{ borderColor: 'var(--border)' }} />
+              <button onClick={() => { const name = prompt('Nama folder baru?'); if (name && name.trim()) { createFolder(name.trim()); } setFoldersOpen(false); }} className="flex w-full items-center gap-2 px-3 py-2 text-sm hover:bg-surface" style={{ borderRadius: '0 0 12px 12px', color: 'var(--accent-orange)', fontWeight: 600 }}>
+                <Plus size={14} /> Folder baru
+              </button>
+            </div>
+          )}
+        </div>
       </div>
       <div className="mb-4 flex flex-wrap items-center gap-2">
         {filters.map((f) => (
@@ -354,6 +394,19 @@ function BimoNoteDetail({ note, activeTab, usage, onUpgrade, onBack }: { note: N
 
   useEffect(() => { setTab(activeTab); }, [activeTab]);
   useEffect(() => { fetch(`/api/v1/notes/${note.id}`).then(r => r.json()).then(d => setNoteDetail(d.data)).catch(() => {}); }, [note.id]);
+
+  // Study heartbeat — per pelajarin RE (RECON-DEEP-v4 §2.6): POST /gamification/study/heartbeat
+  // Auto-send every 60s while the user is viewing a note detail. Awards 3 XP
+  // per 5-min milestone + keeps the streak alive. Cleans up on unmount.
+  useEffect(() => {
+    const interval = setInterval(() => {
+      fetch('/api/v1/gamification/study/heartbeat', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ minutes: 1 }),
+      }).catch(() => {});
+    }, 60000);
+    return () => clearInterval(interval);
+  }, [note.id]);
 
   // Per-tab main content max-width (captured):
   // belajar/kuis/flashcard/tempel: max-w-[1120px] px-[clamp(28px,5vw,72px)]
@@ -562,10 +615,29 @@ function ChatTab({ noteId, noteTitle, usage }: { noteId: string; noteTitle: stri
   const [messages, setMessages] = useState<{ role: string; content: string }[]>([]);
   const [input, setInput] = useState('');
   const [streaming, setStreaming] = useState(false);
+  const [clarifying, setClarifying] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const sessionIdRef = useRef<string>('');
   useEffect(() => { sessionIdRef.current = crypto.randomUUID(); }, [noteId]);
   useEffect(() => { scrollRef.current?.scrollTo(0, scrollRef.current.scrollHeight); }, [messages]);
+
+  // Stream an SSE response (shared by send + clarify). Returns the full text.
+  async function streamSSE(res: Response, onDelta: (text: string) => void): Promise<string> {
+    const reader = res.body?.getReader(); const decoder = new TextDecoder();
+    let fullText = ''; let buf = '';
+    while (reader) {
+      const { done, value } = await reader.read(); if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      const events = buf.split('\n\n'); buf = events.pop() || '';
+      for (const evt of events) {
+        const lines = evt.split('\n'); let eventType = ''; let dataStr = '';
+        for (const line of lines) { if (line.startsWith('event:')) eventType = line.slice(6).trim(); if (line.startsWith('data:')) dataStr = line.slice(5).trim(); }
+        if (!dataStr) continue;
+        try { const data = JSON.parse(dataStr); if (eventType === 'text-delta' && data.text) { fullText += data.text; onDelta(fullText); } } catch {}
+      }
+    }
+    return fullText;
+  }
 
   async function send() {
     if (!input.trim() || streaming) return;
@@ -576,24 +648,38 @@ function ChatTab({ noteId, noteTitle, usage }: { noteId: string; noteTitle: stri
     try {
       const res = await fetch('/api/v1/chat/completions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ note_id: noteId, session_id: sessionIdRef.current, message: msg }) });
       if (!res.ok) { const err = await res.json(); toast.error(err.error?.message || 'Chat gagal'); return; }
-      const reader = res.body?.getReader(); const decoder = new TextDecoder();
-      let assistantText = ''; let buf = '';
       setMessages(prev => [...prev, { role: 'assistant', content: '' }]);
-      while (reader) {
-        const { done, value } = await reader.read(); if (done) break;
-        buf += decoder.decode(value, { stream: true });
-        const events = buf.split('\n\n'); buf = events.pop() || '';
-        for (const evt of events) {
-          const lines = evt.split('\n'); let eventType = ''; let dataStr = '';
-          for (const line of lines) { if (line.startsWith('event:')) eventType = line.slice(6).trim(); if (line.startsWith('data:')) dataStr = line.slice(5).trim(); }
-          if (!dataStr) continue;
-          try { const data = JSON.parse(dataStr); if (eventType === 'text-delta' && data.text) { assistantText += data.text; setMessages(prev => { const c = [...prev]; c[c.length - 1] = { role: 'assistant', content: assistantText }; return c; }); } } catch {}
-        }
-      }
+      await streamSSE(res, (text) => setMessages(prev => { const c = [...prev]; c[c.length - 1] = { role: 'assistant', content: text }; return c; }));
       fetch('/api/v1/events', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ event_name: 'chat_session', note_id: noteId }) }).catch(() => {});
     } catch { toast.error('Chat error'); }
     finally { setStreaming(false); }
   }
+
+  // Clarify the last assistant answer with a different style.
+  // Per RECON-DEEP-v4 §2.1: POST /api/v2/chat/clarify/stream (SSE).
+  async function clarify(mode: 'simpler' | 'shorter' | 'detailed' | 'example') {
+    if (streaming || clarifying) return;
+    const lastAssistant = [...messages].reverse().find(m => m.role === 'assistant');
+    if (!lastAssistant || !lastAssistant.content) { toast.error('Belum ada jawaban untuk dijelaskan ulang'); return; }
+    setClarifying(true);
+    try {
+      const res = await fetch('/api/v2/chat/clarify/stream', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ session_id: sessionIdRef.current, mode }) });
+      if (!res.ok) { const err = await res.json(); toast.error(err.error?.message || 'Clarify gagal'); return; }
+      setMessages(prev => [...prev, { role: 'assistant', content: '' }]);
+      await streamSSE(res, (text) => setMessages(prev => { const c = [...prev]; c[c.length - 1] = { role: 'assistant', content: text }; return c; }));
+    } catch { toast.error('Clarify error'); }
+    finally { setClarifying(false); }
+  }
+
+  const CLARIFY_BUTTONS: { mode: 'simpler' | 'shorter' | 'detailed' | 'example'; label: string }[] = [
+    { mode: 'simpler', label: 'Jelaskan ulang' },
+    { mode: 'shorter', label: 'Lebih ringkas' },
+    { mode: 'detailed', label: 'Lebih detail' },
+    { mode: 'example', label: 'Dengan contoh' },
+  ];
+
+  const lastMsg = messages[messages.length - 1];
+  const showClarify = lastMsg?.role === 'assistant' && lastMsg.content && !streaming && !clarifying;
 
   return (
     <div className="flex h-full items-stretch">
@@ -616,10 +702,20 @@ function ChatTab({ noteId, noteTitle, usage }: { noteId: string; noteTitle: stri
           {messages.map((m, i) => (
             <div key={i} className={`mb-3 flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
               <div className={`max-w-[80%] rounded-2xl px-3 py-2 text-sm ${m.role === 'user' ? '' : 'bg-surface'}`} style={{ background: m.role === 'user' ? 'var(--accent-orange)' : 'var(--bg-surface)', color: m.role === 'user' ? '#fff' : 'var(--text-primary)' }}>
-                {m.role === 'assistant' && m.content === '' && streaming ? <Loader2 size={14} className="animate-spin" /> : m.role === 'assistant' ? <div className="prose prose-sm max-w-none"><Markdown content={m.content} /></div> : m.content}
+                {m.role === 'assistant' && m.content === '' && (streaming || clarifying) ? <Loader2 size={14} className="animate-spin" /> : m.role === 'assistant' ? <div className="prose prose-sm max-w-none"><Markdown content={m.content} /></div> : m.content}
               </div>
             </div>
           ))}
+          {/* Clarify buttons — appear after the last assistant answer (per pelajarin RE: /api/v2/chat/clarify/stream) */}
+          {showClarify && (
+            <div className="mb-3 flex flex-wrap gap-2 pl-1">
+              {CLARIFY_BUTTONS.map(b => (
+                <button key={b.mode} onClick={() => clarify(b.mode)} disabled={clarifying || streaming} className="inline-flex items-center gap-1.5 rounded-full border-2 font-semibold transition-colors hover:border-[var(--accent-orange)] disabled:opacity-50" style={{ fontSize: '12px', fontWeight: 600, padding: '5px 12px', borderColor: 'var(--border)', color: 'var(--text-muted)', borderRadius: '9999px' }}>
+                  <Sparkles size={11} /> {b.label}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
         {/* Input — captured: textarea 632x72 + 40x40 buttons + 56x56 send */}
         <div className="flex gap-2 p-3 border-t border-app">
