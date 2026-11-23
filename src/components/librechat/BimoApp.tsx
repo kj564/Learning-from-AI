@@ -35,7 +35,7 @@ import {
   Network, FolderOpen, GraduationCap, Plus, Download,
   Bold, Italic, Underline, Type, AlignLeft,
   RotateCcw, Star, Trophy, Crown, Sparkles,
-  MoreHorizontal,
+  MoreHorizontal, Home,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import Markdown from '@/components/librechat/Markdown';
@@ -131,9 +131,19 @@ export function BimoApp() {
           <span className="font-bold" style={{ fontFamily: 'var(--font-heading)', fontSize: 'var(--text-logo)', fontWeight: 700 }}>bimo.ai</span>
         </a>
         <button className="flex h-8 w-8 items-center justify-center rounded-full border-2 border-app text-xs font-semibold text-muted" style={{ fontSize: '11px' }}>C</button>
-        <nav className="flex items-center gap-2 text-sm font-semibold" style={{ fontSize: 'var(--text-nav)' }}>
-          <span>{view === 'dashboard' ? 'Home' : activeNote?.title.slice(0, 30)}</span>
-          {view === 'note' && <><span className="text-muted">›</span><span style={{ color: 'var(--accent-orange)' }}>{TABS.find(t => t.url === activeTab)?.label}</span></>}
+        {/* Breadcrumb — captured: home icon (Home from lucide) + black bold text + › separator + orange active tab */}
+        <nav className="flex items-center gap-2 text-sm font-semibold" style={{ fontSize: 'var(--text-nav)' }} aria-label="Breadcrumb">
+          {view === 'dashboard' ? (
+            <span className="flex items-center gap-1.5" style={{ color: 'var(--text-primary)' }}><Home size={14} /> Home</span>
+          ) : (
+            <>
+              <a href="/" className="flex items-center gap-1.5" style={{ color: 'var(--text-primary)' }}><Home size={14} /> Home</a>
+              <ChevronRight size={12} className="text-muted" />
+              <span style={{ color: 'var(--text-primary)' }}>{activeNote?.title.slice(0, 30)}</span>
+              <ChevronRight size={12} className="text-muted" />
+              <span style={{ color: 'var(--accent-orange)' }}>{TABS.find(t => t.url === activeTab)?.label}</span>
+            </>
+          )}
         </nav>
         <div className="ml-auto flex items-center gap-2">
           {/* Become a Creator — captured: orange solid pill (per VLM, pelajarin uses gradient orange) */}
@@ -175,10 +185,13 @@ export function BimoApp() {
         )}
       </div>
 
-      <footer className="border-t border-app px-20 py-6 text-center text-xs text-muted">
-        <p>Bimo — Teman belajar AI untuk siswa Indonesia. Gratis selamanya, Pro mulai Rp 20 ribu.</p>
-        <p className="mt-1">60% lebih murah · 15 catatan/bulan · 50 chat/bulan</p>
-      </footer>
+      {/* Footer — only on dashboard (per pelajarin capture: app view has no footer) */}
+      {view === 'dashboard' && (
+        <footer className="border-t border-app px-20 py-6 text-center text-xs text-muted">
+          <p>Bimo — Teman belajar AI untuk siswa Indonesia. Gratis selamanya, Pro mulai Rp 20 ribu.</p>
+          <p className="mt-1">60% lebih murah · 15 catatan/bulan · 50 chat/bulan</p>
+        </footer>
+      )}
 
       {/* Pricing modal — triggered by "Upgrade" pill in the header */}
       <PricingModal open={pricingOpen} onOpenChange={setPricingOpen} />
@@ -693,10 +706,11 @@ function ChatTab({ noteId, noteTitle, usage }: { noteId: string; noteTitle: stri
         <div ref={scrollRef} className="flex-1 overflow-y-auto p-4">
           {messages.length === 0 && (
             <div className="flex h-full flex-col items-center justify-center text-center">
-              <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-xl" style={{ background: 'var(--bg-accent)' }}><span style={{ color: 'var(--accent-orange)', fontWeight: 700, fontSize: '20px' }}>B</span></div>
-              <p className="text-sm font-semibold">Hi, I'm Bimo!</p>
+              {/* Real Pai mascot from pelajarin.ai (per authenticated capture: 3D purple robot) */}
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src="/pelajarin-assets/img/pai-pointing.png" alt="Pai" width={120} height={120} style={{ objectFit: 'contain' }} className="mx-auto mb-3" />
+              <p className="text-sm font-semibold">Hi, I&apos;m Pai!</p>
               <p className="text-xs text-muted mt-1">I can help you understand these notes and answer any question.</p>
-              <div className="mt-4 space-y-2">{['Jelaskan konsep utama dari materi ini', 'Buat ringkasan singkat', 'Soal apa yang mungkin keluar?'].map(s => <button key={s} onClick={() => setInput(s)} className="block w-full rounded-lg border-2 border-app px-3 py-2 text-xs text-muted hover:border-[var(--accent-orange)] hover:text-app transition-all">{s}</button>)}</div>
             </div>
           )}
           {messages.map((m, i) => (
@@ -717,10 +731,12 @@ function ChatTab({ noteId, noteTitle, usage }: { noteId: string; noteTitle: stri
             </div>
           )}
         </div>
-        {/* Input — captured: textarea 632x72 + 40x40 buttons + 56x56 send */}
-        <div className="flex gap-2 p-3 border-t border-app">
-          <textarea value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }} placeholder="Ask anything about this note..." rows={1} className="flex-1 resize-none border-none bg-transparent outline-none" style={{ fontSize: '15px' }} />
-          <button onClick={send} disabled={streaming || !input.trim()} className="grid place-items-center rounded-full" style={{ width: 40, height: 40, background: 'var(--bg-accent)', color: 'var(--accent-orange)', borderRadius: '9999px' }}>{streaming ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />}</button>
+        {/* Input — captured: large grey card in center with mic + send buttons */}
+        <div className="p-4">
+          <div className="flex items-end gap-2 rounded-2xl p-3" style={{ background: 'var(--bg-surface)', borderRadius: '20px' }}>
+            <textarea value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }} placeholder="Ask anything about this note..." rows={1} className="flex-1 resize-none border-none bg-transparent outline-none" style={{ fontSize: '15px', color: 'var(--text-primary)' }} />
+            <button onClick={send} disabled={streaming || !input.trim()} className="grid place-items-center rounded-full shrink-0" style={{ width: 40, height: 40, background: 'var(--accent-orange)', color: '#fff', borderRadius: '9999px' }}>{streaming ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />}</button>
+          </div>
         </div>
       </div>
     </div>
