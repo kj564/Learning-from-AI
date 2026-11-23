@@ -310,35 +310,36 @@ function BimoDashboard({ notes, usage, onNoteClick, onNoteCreated }: { notes: No
   const filters = ['All', 'Documents', 'Slides', 'Audio', 'YouTube'];
 
   return (
-    <main className="mx-auto w-full flex-1" style={{ maxWidth: 'var(--main-max)', padding: 'var(--main-pad)' }}>
-      <input ref={fileInputRef} type="file" onChange={handleUpload} className="hidden" accept=".pdf,.docx,.pptx,.xlsx,.txt,.png,.jpg,.mp3,.mp4" />
-      {/* Hero — captured: 132x132 Pai mascot + "What do you want to learn today?" */}
-      <section className="mb-7 flex items-center" style={{ gap: 8 }}>
-        {/* Real Pai mascot from pelajarin.ai (pai-pointing.png, 212x212) */}
-        <div className="flex items-center justify-center" style={{ width: 132, height: 132 }}>
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="/pelajarin-assets/img/pai-pointing.png" alt="Bimo mascot" width={132} height={132} style={{ objectFit: 'contain' }} />
-        </div>
-        <h1 className="font-bold text-balance" style={{ fontFamily: 'var(--font-heading)', fontSize: 'var(--text-h1)', lineHeight: 'var(--text-h1-lh)' }}>What do you want to learn today?</h1>
+    <main className="mx-auto w-full flex-1 px-[clamp(24px,4vw,56px)] pb-20 pt-8 max-lg:px-5 max-lg:pb-[72px]">
+      <input ref={fileInputRef} type="file" onChange={handleUpload} className="hidden" accept=".pdf,.docx,.doc,.pptx,.ppt,.xlsx,.xls,.txt,.md,.jpg,.png,.webp,.heic,.heif,.mp3,.wav,.weba,.m4a,.ogg,.mp4,.webm,.mov,.avi,.mkv,.jpeg,.markdown,.mpeg,.mpga" multiple />
+      {/* Hero — COPY PASTE 1:1 from pelajarin.ai dashboard.html */}
+      <section className="mb-7 mt-[clamp(24px,6vh,64px)] flex items-center justify-center gap-2 text-left max-sm:flex-col max-sm:gap-0 max-sm:text-center">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img sizes="132px" alt="" aria-hidden="true" decoding="async" className="object-contain pointer-events-none size-[132px] flex-none max-sm:size-[104px]" src="/pelajarin-assets/img/pai-pointing.png" />
+        <h1 className="text-balance font-heading text-[clamp(28px,4.4vw,42px)] font-bold leading-[1.15] tracking-[-0.01em] text-text-primary">What do you want to learn today?</h1>
       </section>
-      {/* Upload box */}
-      <section className="mx-auto mb-12 rounded-2xl border-2 border-app bg-app transition-colors" style={{ maxWidth: 'var(--upload-max)', padding: 'var(--upload-pad)' }}>
-        <textarea
-          value={inputText}
-          onChange={(e) => setInputText(e.target.value)}
-          onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleCreateNote(); } }}
-          placeholder="What would you like to learn?"
-          className="w-full resize-none border-none bg-transparent outline-none"
-          style={{ minHeight: 52, fontFamily: 'var(--font-body)', fontSize: 'var(--text-input)', color: 'var(--text-primary)' }}
-        />
-        <div className="mt-1 flex items-center gap-2">
-          <button className="inline-flex items-center gap-1.5 rounded-full font-semibold" style={{ background: 'var(--bg-surface)', color: 'var(--accent-green)', fontSize: 'var(--text-btn-sm)', fontWeight: 600, padding: '6px 14px' }}><Mic size={14} /> Record</button>
-          <button onClick={() => fileInputRef.current?.click()} className="inline-flex items-center gap-1.5 rounded-full font-semibold" style={{ background: 'var(--bg-surface)', color: 'var(--accent-blue)', fontSize: 'var(--text-btn-sm)', fontWeight: 600, padding: '6px 14px' }} disabled={uploading}><Upload size={14} /> {uploading ? 'Uploading...' : 'Upload'}</button>
-          <button className="inline-flex items-center gap-1.5 rounded-full font-semibold" style={{ background: 'var(--bg-surface)', color: 'var(--accent-red)', fontSize: 'var(--text-btn-sm)', fontWeight: 600, padding: '6px 14px' }}><Video size={14} /> YouTube</button>
-          <button onClick={handleCreateNote} className="ml-auto grid place-items-center rounded-full" style={{ width: 44, height: 44, background: 'var(--bg-accent)', color: 'var(--accent-orange)' }}><Send size={18} /></button>
+      {/* Upload box — COPY PASTE 1:1 from pelajarin.ai */}
+      <section className="mx-auto mb-12 max-w-[760px] rounded-2xl border-2 bg-surface px-[18px] pb-3.5 pt-[18px] transition-[border-color,box-shadow] border-border focus-within:border-primary focus-within:shadow-[0_0_0_4px_color-mix(in_srgb,var(--color-primary)_18%,transparent)]">
+        <div className="relative">
+          <textarea
+            value={inputText}
+            onChange={(e) => setInputText(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleCreateNote(); } }}
+            placeholder="Teach me the basics of microeconomics"
+            className="min-h-[52px] w-full resize-none border-none bg-transparent px-0.5 py-1 font-body text-[17px] leading-normal text-text-primary outline-none placeholder:text-text-muted"
+            rows={1}
+            aria-label="What would you like to learn?"
+          />
+        </div>
+        <div className="mt-1 flex flex-wrap items-center gap-2">
+          <button className="inline-flex items-center gap-1.5 rounded-full bg-surface-tertiary px-3.5 py-1.5 font-body text-[13px] font-semibold transition-colors hover:bg-border text-success-dark" type="button"><Mic size={18} className="shrink-0" />Record</button>
+          <button onClick={() => fileInputRef.current?.click()} disabled={uploading} className="inline-flex items-center gap-1.5 rounded-full bg-surface-tertiary px-3.5 py-1.5 font-body text-[13px] font-semibold transition-colors hover:bg-border text-secondary-dark disabled:opacity-50" type="button"><Upload size={18} className="shrink-0" />{uploading ? 'Uploading...' : 'Upload'}</button>
+          <button className="inline-flex items-center gap-1.5 rounded-full bg-surface-tertiary px-3.5 py-1.5 font-body text-[13px] font-semibold transition-colors hover:bg-border text-error" type="button"><Video size={18} className="shrink-0" />YouTube</button>
+          <span className="flex-1" />
+          <button onClick={handleCreateNote} type="button" aria-label="Send" disabled={uploading} className="grid size-11 flex-none place-items-center rounded-full transition-[transform,box-shadow,background-color] bg-primary-light text-primary"><Send size={20} className="shrink-0" /></button>
         </div>
       </section>
-      {/* Notes + filters — captured: "Notes" heading + "All folders" dropdown + filter chips + Grid/List pill toggle */}
+      {/* Notes + filters */}
       <div className="mb-4 flex items-center gap-3">
         <span className="text-lg font-bold" style={{ fontFamily: 'var(--font-heading)' }}>Notes</span>
         {/* All folders dropdown — per pelajarin RE: real folders from /folders + create new */}
