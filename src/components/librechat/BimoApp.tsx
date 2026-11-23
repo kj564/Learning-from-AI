@@ -339,69 +339,77 @@ function BimoDashboard({ notes, usage, onNoteClick, onNoteCreated }: { notes: No
           <button onClick={handleCreateNote} type="button" aria-label="Send" disabled={uploading} className="grid size-11 flex-none place-items-center rounded-full transition-[transform,box-shadow,background-color] bg-primary-light text-primary"><Send size={20} className="shrink-0" /></button>
         </div>
       </section>
-      {/* Notes + filters */}
-      <div className="mb-4 flex items-center gap-3">
-        <span className="text-lg font-bold" style={{ fontFamily: 'var(--font-heading)' }}>Notes</span>
-        {/* All folders dropdown — per pelajarin RE: real folders from /folders + create new */}
+      {/* Notes section — COPY PASTE 1:1 from pelajarin.ai dashboard.html */}
+      <div className="mb-4 mt-12 flex items-center gap-3">
+        <span className="min-w-0 flex-1">
+          <h2 className="font-heading text-[clamp(20px,3vw,24px)] font-bold text-text-primary">Notes</h2>
+        </span>
+      </div>
+      {/* Filter bar — COPY PASTE: folders dropdown + chips + grid/list toggle */}
+      <div className="mb-4 flex flex-wrap items-center gap-2">
+        {/* All folders dropdown */}
         <div className="relative">
-          <button onClick={() => setFoldersOpen(prev => !prev)} className="inline-flex items-center gap-1.5 rounded-full border-2 border-app font-semibold transition-colors hover:border-[var(--accent-orange)]" style={{ fontSize: 'var(--text-btn-sm)', fontWeight: 600, padding: '6px 14px', color: 'var(--text-primary)' }}>
-            {activeFolder ? (folders.find(f => f.id === activeFolder)?.name || 'Folder') : 'All folders'} <ChevronRight size={12} className="rotate-90" />
+          <button type="button" onClick={() => setFoldersOpen(prev => !prev)} className="inline-flex items-center gap-1.5 rounded-full border-2 px-3.5 py-1.5 font-body text-[13px] font-semibold transition-colors border-border text-text-secondary hover:border-text-muted">
+            <FolderOpen size={15} className="shrink-0" />
+            <span className="max-w-[160px] truncate">{activeFolder ? (folders.find(f => f.id === activeFolder)?.name || 'Folder') : 'All folders'}</span>
+            <ChevronRight size={14} className="shrink-0 rotate-90" />
           </button>
           {foldersOpen && (
-            <div className="absolute left-0 top-full mt-1 z-50 w-56 rounded-2xl border-2 shadow-lg" style={{ background: 'var(--bg-primary)', borderColor: 'var(--border)', borderRadius: '16px' }}>
-              <button onClick={() => { setActiveFolder(null); setFoldersOpen(false); }} className="block w-full text-left px-3 py-2 text-sm hover:bg-surface" style={{ borderRadius: '12px 12px 0 0', color: 'var(--text-primary)' }}>All folders</button>
+            <div className="absolute left-0 top-full mt-1 z-50 w-56 rounded-2xl border-2 border-border bg-surface p-2 shadow-xl">
+              <button onClick={() => { setActiveFolder(null); setFoldersOpen(false); }} className="block w-full rounded-lg px-2 py-2 text-left font-body text-sm font-semibold text-text-secondary hover:bg-surface-secondary hover:text-text-primary">All folders</button>
               {folders.map(f => (
-                <button key={f.id} onClick={() => { setActiveFolder(f.id); setFoldersOpen(false); }} className="flex w-full items-center gap-2 px-3 py-2 text-sm hover:bg-surface" style={{ color: 'var(--text-primary)' }}>
-                  <span className="h-2.5 w-2.5 rounded-full" style={{ background: f.color }} /> {f.name} <span className="ml-auto text-xs text-muted">{f.note_count}</span>
+                <button key={f.id} onClick={() => { setActiveFolder(f.id); setFoldersOpen(false); }} className="flex w-full items-center gap-2.5 rounded-lg px-2 py-2 font-body text-sm font-semibold text-text-secondary hover:bg-surface-secondary hover:text-text-primary">
+                  <span className="size-2.5 rounded-full shrink-0" style={{ background: f.color }} /> {f.name} <span className="ml-auto text-xs text-text-muted">{f.note_count}</span>
                 </button>
               ))}
-              <div className="border-t" style={{ borderColor: 'var(--border)' }} />
-              <button onClick={() => { const name = prompt('Nama folder baru?'); if (name && name.trim()) { createFolder(name.trim()); } setFoldersOpen(false); }} className="flex w-full items-center gap-2 px-3 py-2 text-sm hover:bg-surface" style={{ borderRadius: '0 0 12px 12px', color: 'var(--accent-orange)', fontWeight: 600 }}>
-                <Plus size={14} /> Folder baru
+              <div className="mx-1 my-1 h-px bg-border-light" />
+              <button onClick={() => { const name = prompt('Nama folder baru?'); if (name && name.trim()) { createFolder(name.trim()); } setFoldersOpen(false); }} className="flex w-full items-center gap-2.5 rounded-lg px-2 py-2 font-body text-sm font-semibold text-primary hover:bg-surface-secondary">
+                <Plus size={16} className="shrink-0" /> Folder baru
               </button>
             </div>
           )}
         </div>
-      </div>
-      <div className="mb-4 flex flex-wrap items-center gap-2">
+        <span aria-hidden="true" className="mx-1 h-5 w-px flex-none bg-border" />
+        {/* Filter chips — COPY PASTE: border-2 rounded-full text-[13px] */}
         {filters.map((f) => (
-          <button key={f} onClick={() => setFilter(f.toLowerCase())}
-            className={`inline-flex items-center gap-1.5 rounded-full border-2 font-semibold transition-colors ${filter === f.toLowerCase() ? 'filter-active' : 'filter-inactive'}`}
-            style={{ fontSize: 'var(--text-btn-sm)', fontWeight: 600, padding: '6px 12px', borderRadius: 'var(--radius-pill)' }}>{f}</button>
+          <button key={f} type="button" onClick={() => setFilter(f.toLowerCase())}
+            className={`rounded-full border-2 px-3 py-1.5 text-[13px] font-semibold transition-colors ${filter === f.toLowerCase() ? 'border-primary bg-primary-light text-primary' : 'border-border text-text-secondary hover:border-text-muted'}`}>{f}</button>
         ))}
-        {/* Grid/List pill toggle — captured: pill container with active Grid (orange) */}
-        <div className="ml-auto inline-flex items-center gap-0.5 rounded-full p-1" style={{ background: 'var(--bg-surface)', borderRadius: 'var(--radius-pill)' }}>
-          <button onClick={() => setView('dashboard')} className="grid place-items-center rounded-full p-1.5 transition-colors" style={{ background: 'var(--bg-primary)', color: 'var(--accent-orange)', borderRadius: 'var(--radius-pill)' }} aria-label="Grid view"><Grid3x3 size={16} /></button>
-          <button className="grid place-items-center rounded-full p-1.5 text-muted transition-colors" style={{ borderRadius: 'var(--radius-pill)' }} aria-label="List view"><List size={16} /></button>
+        {/* Grid/List toggle — COPY PASTE: border-2 rounded-full */}
+        <div className="ml-auto flex gap-1.5">
+          <button type="button" aria-pressed={true} onClick={() => setView('dashboard')} className="rounded-full border-2 px-3 py-1.5 text-[13px] font-semibold transition-colors border-primary bg-primary-light text-primary">Grid</button>
+          <button type="button" aria-pressed={false} className="rounded-full border-2 px-3 py-1.5 text-[13px] font-semibold transition-colors border-border text-text-secondary hover:border-text-muted">List</button>
         </div>
       </div>
-      {/* Notes grid */}
+      {/* Note cards grid — COPY PASTE: grid gap-5 [grid-template-columns:repeat(3,...)] */}
       {notes.length === 0 ? (
-        <div className="text-center py-12 rounded-2xl border-2 border-app"><BookOpen size={32} className="mx-auto text-muted mb-2" /><p className="text-sm text-muted">Belum ada catatan. Upload materi untuk mulai belajar!</p></div>
+        <div className="text-center py-12"><BookOpen size={32} className="mx-auto text-text-muted mb-2" /><p className="text-sm text-text-muted">Belum ada catatan. Upload materi untuk mulai belajar!</p></div>
       ) : (
-        <div className="grid gap-5" style={{ gridTemplateColumns: 'repeat(3, minmax(0, 1fr))' }}>
+        <div className="grid gap-5 [grid-template-columns:repeat(3,minmax(0,1fr))] max-[900px]:[grid-template-columns:repeat(2,minmax(0,1fr))] max-[600px]:[grid-template-columns:minmax(0,1fr)]">
           {notes.map(n => (
-            <button key={n.id} onClick={() => onNoteClick(n)} className="group text-left transition-all hover:-translate-y-0.5 hover:shadow-lg" style={{ border: '2px solid var(--border)', borderRadius: 'var(--radius-card)', background: 'var(--bg-primary)', padding: 'var(--card-pad)' }}>
-              {/* Top-left badge: file type (PDF/DOC/IMG/etc) — captured: red PDF badge */}
-              <div className="flex items-start justify-between mb-2">
-                <span className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] font-bold" style={{ background: '#fee2e2', color: 'var(--accent-red)', borderRadius: '6px' }}>
-                  <FileText size={10} /> {n.status === 'processing' ? 'NEW' : 'PDF'}
+            <div key={n.id} className="group relative rounded-2xl border-2 border-border bg-surface p-3 transition-colors hover:border-text-muted">
+              <a className="relative block overflow-hidden rounded-xl" href="#" onClick={(e) => { e.preventDefault(); onNoteClick(n); }}>
+                {/* Preview area — COPY PASTE: aspect-video w-full overflow-hidden bg-surface-secondary */}
+                <div className="relative aspect-video w-full overflow-hidden bg-surface-secondary">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img alt="" aria-hidden="true" loading="lazy" decoding="async" className="size-full object-cover" src="/pelajarin-assets/img/pai-head.png" />
+                </div>
+                {/* PDF badge — COPY PASTE: absolute left-2.5 top-2.5 rounded-lg bg-white px-2.5 py-1 */}
+                <span className="absolute left-2.5 top-2.5 inline-flex items-center gap-1.5 rounded-lg bg-white px-2.5 py-1 text-xs font-semibold text-[#1b2430] shadow-[0_1px_4px_rgba(0,0,0,.16)]">
+                  <FileText size={14} className="flex-none" />
+                  {n.status === 'processing' ? 'NEW' : 'PDF'}
                 </span>
-                {/* 3-dot menu — captured */}
-                <MoreHorizontal size={16} className="text-muted opacity-0 group-hover:opacity-100 transition-opacity" />
+              </a>
+              {/* Card content — COPY PASTE: px-1 pb-1 pt-3.5 */}
+              <div className="px-1 pb-1 pt-3.5">
+                <div className="flex items-start gap-2">
+                  <a className="line-clamp-2 min-h-[2lh] min-w-0 flex-1 font-body text-base font-semibold leading-[1.38] text-text-primary" href="#" onClick={(e) => { e.preventDefault(); onNoteClick(n); }}>{n.title}</a>
+                  <button type="button" aria-label="More actions" className="grid size-8 flex-none place-items-center rounded-lg text-text-muted transition-colors hover:bg-surface-secondary hover:text-text-primary"><MoreHorizontal size={18} /></button>
+                </div>
+                <p className="mt-2.5 text-[13.5px] text-text-muted">Created {new Date(n.updated_at).toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: 'numeric' })}</p>
+                {n.status === 'processing' && <div className="mt-2 flex items-center gap-1 text-xs text-primary"><Loader2 size={10} className="animate-spin" /> Processing...</div>}
               </div>
-              {/* Preview area — captured: light grey bg with mascot in center */}
-              <div className="flex items-center justify-center mb-3 rounded-xl" style={{ background: 'var(--bg-surface)', borderRadius: '16px', height: 140 }}>
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src="/pelajarin-assets/img/pai-head.png" alt="" width={64} height={64} style={{ objectFit: 'contain', opacity: 0.7 }} />
-              </div>
-              {/* Title — captured: bold 2-line with ellipsis */}
-              <h4 className="text-sm font-semibold leading-snug mb-1" style={{ color: 'var(--text-primary)', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden', minHeight: '2.6em' }}>{n.title}</h4>
-              {/* Date — captured: "Created Nov 22, 2026" */}
-              <p className="text-xs text-muted">Created {new Date(n.updated_at).toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: 'numeric' })}</p>
-              {/* Processing indicator */}
-              {n.status === 'processing' && <div className="mt-2 flex items-center gap-1 text-xs" style={{ color: 'var(--accent-orange)' }}><Loader2 size={10} className="animate-spin" /> Processing...</div>}
-            </button>
+            </div>
           ))}
         </div>
       )}
