@@ -306,7 +306,7 @@ function BimoDashboard({ notes, usage, onNoteClick, onNoteCreated }: { notes: No
       {/* Hero — COPY PASTE 1:1 from pelajarin.ai dashboard.html */}
       <section className="mb-7 mt-[clamp(24px,6vh,64px)] flex items-center justify-center gap-2 text-left max-sm:flex-col max-sm:gap-0 max-sm:text-center">
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img sizes="132px" alt="" aria-hidden="true" decoding="async" className="object-contain pointer-events-none size-[132px] flex-none max-sm:size-[104px]" srcset="/assets/yoyo-CLVpPPxW.webp 288w, /assets/yoyo-576-Mwnvh0Dn.webp 576w" src="/assets/yoyo-CLVpPPxW.webp" />
+        <img sizes="132px" alt="" aria-hidden="true" decoding="async" className="object-contain pointer-events-none size-[132px] flex-none max-sm:size-[104px]" srcSet="/assets/yoyo-CLVpPPxW.webp 288w, /assets/yoyo-576-Mwnvh0Dn.webp 576w" src="/assets/yoyo-CLVpPPxW.webp" />
         <h1 className="text-balance font-heading text-[clamp(28px,4.4vw,42px)] font-bold leading-[1.15] tracking-[-0.01em] text-text-primary">What do you want to learn today?</h1>
       </section>
       {/* Upload box — COPY PASTE 1:1 from pelajarin.ai */}
