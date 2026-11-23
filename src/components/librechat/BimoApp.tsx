@@ -35,7 +35,7 @@ import {
   Network, FolderOpen, GraduationCap, Plus, Download,
   Bold, Italic, Underline, Type, AlignLeft,
   RotateCcw, Star, Trophy, Crown, Sparkles,
-  MoreHorizontal, Home, Search, Lightbulb, RefreshCw, RotateCw, Settings,
+  MoreHorizontal, Home, Search, Lightbulb, RefreshCw, RotateCw, Settings, History, Star,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import Markdown from '@/components/librechat/Markdown';
@@ -130,8 +130,8 @@ export function BimoApp() {
           <img src="/pelajarin-assets/img/logo.png" alt="Bimo logo" width={32} height={32} style={{ objectFit: 'contain' }} />
           <span className="font-bold" style={{ fontFamily: 'var(--font-heading)', fontSize: 'var(--text-logo)', fontWeight: 700 }}>bimo.ai</span>
         </a>
-        <button className="flex h-8 w-8 items-center justify-center rounded-full border-2 border-app text-xs font-semibold text-muted" style={{ fontSize: '11px' }}>C</button>
-        {/* Breadcrumb — captured: home icon (Home from lucide) + black bold text + › separator + orange active tab */}
+        <button className="flex h-8 w-8 items-center justify-center rounded-full border-2 border-app transition-colors hover:border-[var(--accent-orange)]" style={{ fontSize: '11px', color: 'var(--text-muted)' }} aria-label="Toggle mode"><History size={14} /></button>
+        {/* Breadcrumb — captured: home icon + black bold text + › separator + orange active tab */}
         <nav className="flex items-center gap-2 text-sm font-semibold" style={{ fontSize: 'var(--text-nav)' }} aria-label="Breadcrumb">
           {view === 'dashboard' ? (
             <span className="flex items-center gap-1.5" style={{ color: 'var(--text-primary)' }}><Home size={14} /> Home</span>
@@ -146,8 +146,8 @@ export function BimoApp() {
           )}
         </nav>
         <div className="ml-auto flex items-center gap-2">
-          {/* Become a Creator — captured: orange solid pill (per VLM, pelajarin uses gradient orange) */}
-          <a href="#" className="inline-flex h-9 items-center gap-2 rounded-full px-4 text-sm font-semibold transition-transform hover:-translate-y-0.5 active:translate-y-0.5" style={{ padding: '0 16px', height: 36, fontSize: 'var(--text-nav)', background: 'var(--accent-orange)', color: '#fff' }}>Become a Creator</a>
+          {/* Become a Creator — captured: gradient orange pill with shadow */}
+          <a href="#" className="inline-flex h-9 items-center gap-2 rounded-full px-4 text-sm font-semibold transition-transform hover:-translate-y-0.5 active:translate-y-0.5" style={{ padding: '0 16px', height: 36, fontSize: 'var(--text-nav)', background: 'linear-gradient(90deg, #f76703, #fa9a3c)', color: '#fff', boxShadow: '0 4px 0 #c45200' }}><Star size={14} /> Become a Creator</a>
           {/* Streak — captured: yellow bg pill with Flame icon. Click → gamification hub. */}
           <button onClick={() => setHubOpen(true)} className="inline-flex h-9 items-center gap-1.5 rounded-full px-4 text-sm font-semibold transition-transform hover:-translate-y-0.5 active:translate-y-0.5" style={{ background: '#fef9c3', color: '#a16207', padding: '0 14px', height: 36, fontSize: 'var(--text-nav)' }}>
             <Flame size={14} /> Streak {gamification?.streak?.current ?? 0}
@@ -1278,9 +1278,17 @@ function PodcastTab({ noteId, noteTitle }: { noteId: string; noteTitle: string }
                 })}
               </div>
             </section>
-            {/* Style suggestions */}
+            {/* Style suggestions — captured: textarea input with 0/200 counter + "Optional" label */}
             <section className="flex flex-col gap-2.5">
-              <h3 className="font-bold text-white" style={{ fontFamily: 'var(--font-heading)', fontSize: '17px' }}>What should the chat be like?</h3>
+              <div className="flex items-baseline justify-between gap-3">
+                <label htmlFor="podcast-prompt" className="font-bold text-white" style={{ fontFamily: 'var(--font-heading)', fontSize: '17px' }}>What should the chat be like?</label>
+                <span className="text-xs" style={{ color: 'rgba(255,255,255,0.6)' }}>Optional</span>
+              </div>
+              <div className="flex flex-col gap-2 rounded-[18px] px-3.5 py-3" style={{ background: 'var(--bg-surface)' }}>
+                <textarea id="podcast-prompt" rows={3} maxLength={200} placeholder="E.g. make Bolu joke a lot, use canteen snack examples, don't be too serious" className="w-full resize-none border-none bg-transparent outline-none text-sm" style={{ color: 'var(--text-primary)' }} value={activeStyle || ''} onChange={(e) => setActiveStyle(e.target.value || null)} />
+                <span className="text-right text-xs" style={{ color: 'var(--text-muted)' }}>{(activeStyle || '').length}/200</span>
+              </div>
+              {/* Style suggestion chips — still available as quick presets */}
               <div className="flex flex-wrap gap-2">
                 {SUGGESTIONS.map(s => (
                   <button key={s} onClick={() => setActiveStyle(prev => prev === s ? null : s)} className="inline-flex items-center rounded-full font-semibold transition-colors" style={{ background: activeStyle === s ? 'var(--accent-orange)' : 'rgba(255,255,255,0.15)', color: '#fff', fontSize: '13px', fontWeight: 600, padding: '6px 16px', borderRadius: '9999px' }}>{s}</button>
