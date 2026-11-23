@@ -35,6 +35,7 @@ import {
   Network, FolderOpen, GraduationCap, Plus, Download,
   Bold, Italic, Underline, Type, AlignLeft,
   RotateCcw, Star, Trophy, Crown, Sparkles,
+  MoreHorizontal,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import Markdown from '@/components/librechat/Markdown';
@@ -310,17 +311,25 @@ function BimoDashboard({ notes, usage, onNoteClick, onNoteCreated }: { notes: No
       ) : (
         <div className="grid gap-5" style={{ gridTemplateColumns: 'repeat(3, minmax(0, 1fr))' }}>
           {notes.map(n => (
-            <button key={n.id} onClick={() => onNoteClick(n)} className="group card-pjr text-left transition-colors hover:border-[var(--accent-orange)]">
-              <div className="mb-2 flex items-start justify-between">
-                <div className="flex items-center gap-2"><div className="flex h-8 w-8 items-center justify-center rounded-lg bg-[var(--bg-surface)]"><FileText size={16} style={{ color: 'var(--accent-blue)' }} /></div><h4 className="text-sm font-semibold truncate" style={{ maxWidth: 200 }}>{n.title}</h4></div>
-                <ChevronRight size={16} className="text-muted group-hover:text-[var(--accent-orange)]" />
+            <button key={n.id} onClick={() => onNoteClick(n)} className="group text-left transition-all hover:-translate-y-0.5 hover:shadow-lg" style={{ border: '2px solid var(--border)', borderRadius: 'var(--radius-card)', background: 'var(--bg-primary)', padding: 'var(--card-pad)' }}>
+              {/* Top-left badge: file type (PDF/DOC/IMG/etc) — captured: red PDF badge */}
+              <div className="flex items-start justify-between mb-2">
+                <span className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] font-bold" style={{ background: '#fee2e2', color: 'var(--accent-red)', borderRadius: '6px' }}>
+                  <FileText size={10} /> {n.status === 'processing' ? 'NEW' : 'PDF'}
+                </span>
+                {/* 3-dot menu — captured */}
+                <MoreHorizontal size={16} className="text-muted opacity-0 group-hover:opacity-100 transition-opacity" />
               </div>
-              <div className="flex items-center gap-3 text-xs text-muted">
-                {n.total_chapters > 0 && <span className="flex items-center gap-1"><Layers size={10} /> {n.total_chapters} bab</span>}
-                {n.flashcard_count > 0 && <span className="flex items-center gap-1"><Brain size={10} /> {n.flashcard_count}</span>}
-                {n.quiz_count > 0 && <span className="flex items-center gap-1"><CheckCircle size={10} /> {n.quiz_count}</span>}
-                <span className="ml-auto">{new Date(n.updated_at).toLocaleDateString('id-ID', { day: 'numeric', month: 'short' })}</span>
+              {/* Preview area — captured: light grey bg with mascot in center */}
+              <div className="flex items-center justify-center mb-3 rounded-xl" style={{ background: 'var(--bg-surface)', borderRadius: '16px', height: 140 }}>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src="/pelajarin-assets/img/pai-head.png" alt="" width={64} height={64} style={{ objectFit: 'contain', opacity: 0.7 }} />
               </div>
+              {/* Title — captured: bold 2-line with ellipsis */}
+              <h4 className="text-sm font-semibold leading-snug mb-1" style={{ color: 'var(--text-primary)', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden', minHeight: '2.6em' }}>{n.title}</h4>
+              {/* Date — captured: "Created Nov 22, 2026" */}
+              <p className="text-xs text-muted">Created {new Date(n.updated_at).toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: 'numeric' })}</p>
+              {/* Processing indicator */}
               {n.status === 'processing' && <div className="mt-2 flex items-center gap-1 text-xs" style={{ color: 'var(--accent-orange)' }}><Loader2 size={10} className="animate-spin" /> Processing...</div>}
             </button>
           ))}
