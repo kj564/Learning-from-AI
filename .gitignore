@@ -72,7 +72,6 @@ tests/
 examples/
 .zscripts/
 # Old game assets in public/
-public/assets/
 public/mcpe-wasm/
 public/minecraft.html
 public/voxelcraft-*.js
