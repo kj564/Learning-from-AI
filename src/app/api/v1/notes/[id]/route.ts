@@ -63,7 +63,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   if (note.userId !== user.id) return forbidden('You can only edit your own notes');
 
   const body = await req.json().catch(() => ({}));
-  const { title, description, subject_id, study_mode, tone, is_public, source_language, generation_language } = body as any;
+  const { title, description, subject_id, study_mode, tone, is_public, source_language, generation_language, folder_id } = body as any;
 
   const updated = await db.studyNote.update({
     where: { id },
@@ -76,6 +76,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       ...(is_public !== undefined ? { isPublic: is_public } : {}),
       ...(source_language !== undefined ? { sourceLanguage: source_language } : {}),
       ...(generation_language !== undefined ? { generationLanguage: generation_language } : {}),
+      ...(folder_id !== undefined ? { folderId: folder_id || null } : {}),
     },
   });
 

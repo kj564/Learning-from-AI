@@ -403,6 +403,8 @@ model StudyNote {
   // Subject link
   subjectId          String?
   subject            Subject? @relation(fields: [subjectId], references: [id], onDelete: SetNull)
+  // Folder link (per pelajarin /folders RE)
+  folderId           String?
   // Denormalized counts (for list views, per pelajarin)
   totalChapters      Int      @default(0)
   flashcardCount     Int      @default(0)
@@ -419,6 +421,7 @@ model StudyNote {
 
   @@index([userId])
   @@index([subjectId])
+  @@index([folderId])
   @@index([status])
   @@index([updatedAt])
 }
@@ -566,6 +569,11 @@ model UserStreak {
   currentStreak   Int      @default(0)
   longestStreak   Int      @default(0)
   lastActivityDate DateTime?
+  // Daily study goal (minutes per day) — per /gamification/daily-goal PUT
+  dailyGoalMinutes Int     @default(30)
+  // Today's study minutes (reset daily by heartbeat)
+  todayMinutes    Int      @default(0)
+  todayDate       DateTime?
   updatedAt       DateTime @updatedAt
 }
 
@@ -579,6 +587,103 @@ model XPEvent {
 
   @@index([userId])
   @@index([createdAt])
+}
+
+// === Gamification: Quests (daily/weekly challenges) ===
+// Per pelajarin RE (RECON-DEEP-v4 §2.6): /gamification/quests endpoint
+// returns a list of daily/weekly challenges with progress.
+model Quest {
+  id          String   @id @default(cuid())
+  // Type: daily | weekly | one_time
+  type        String   @default("daily")
+  // Goal definition: e.g. "Complete 3 quizzes", "Review 10 flashcards"
+  title       String
+  description String   @default("")
+  // Goal metric + target
+  metric      String   // quiz_passed | flashcard_reviewed | chat_session | note_created | study_minutes
+  targetCount Int      @default(1)
+  // XP reward on completion
+  xpReward   Int      @default(10)
+  // Period start/end (for daily/weekly)
+  startsAt   DateTime
+  endsAt     DateTime
+  isActive   Boolean  @default(true)
+  createdAt  DateTime @default(now())
+
+  // User progress
+  progress   UserQuestProgress[]
+
+  @@index([type])
+  @@index([isActive])
+  @@index([endsAt])
+}
+
+model UserQuestProgress {
+  id        String   @id @default(cuid())
+  userId    String
+  questId   String
+  progress  Int      @default(0)
+  completed Boolean  @default(false)
+  completedAt DateTime?
+  claimedXp Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  quest Quest @relation(fields: [questId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, questId])
+  @@index([userId])
+}
+
+// === Gamification: Achievements (badges) ===
+// Per pelajarin RE: /gamification/achievements endpoint returns badges
+// unlocked + locked.
+model Achievement {
+  id          String   @id @default(cuid())
+  // Category: streak | notes | quiz | chat | streak_milestone | level
+  category    String
+  // Tier for layered achievements (bronze/silver/gold)
+  tier        String   @default("bronze")
+  title       String
+  description String   @default("")
+  iconKey     String   @default("trophy") // trophy | flame | brain | chat | book | star
+  // Trigger metric + threshold
+  metric      String   // total_notes | total_quizzes | streak_days | total_chats | level
+  threshold   Int      @default(1)
+  xpReward   Int      @default(0)
+  createdAt  DateTime @default(now())
+
+  unlocks     UserAchievement[]
+
+  @@index([category])
+  @@index([metric])
+}
+
+model UserAchievement {
+  id          String   @id @default(cuid())
+  userId      String
+  achievementId String
+  unlockedAt  DateTime @default(now())
+  metadataJson String?
+
+  achievement Achievement @relation(fields: [achievementId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, achievementId])
+  @@index([userId])
+}
+
+// === Folders for note organization ===
+// Per pelajarin RE (RECON-DEEP-v4 §2.3): GET + POST /folders
+model Folder {
+  id        String   @id @default(cuid())
+  userId    String
+  name      String
+  color     String   @default("#f76703")
+  icon      String   @default("folder")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
 }
 
 // === Affiliate program ===

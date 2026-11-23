@@ -47,6 +47,11 @@ import { OnboardingModal, shouldShowOnboarding } from '@/components/librechat/On
 interface User { id: string; name: string; email: string; plan: string; }
 interface Usage { notesUsed: number; chatsUsed: number; notesRemaining: number; chatsRemaining: number; canCreateNote: boolean; canSendChat: boolean; }
 interface Note { id: string; title: string; description: string | null; status: string; flashcard_count: number; quiz_count: number; total_chapters: number; updated_at: string; }
+interface Gamification {
+  total_xp: number; level: number; xp_to_next_level: number;
+  streak: { current: number; longest: number };
+  daily_goal_minutes: number; today_minutes: number;
+}
 
 // Tab definitions (captured from pelajarin sidebar nav)
 const TABS = [
@@ -71,6 +76,7 @@ export function BimoApp() {
   const [activeTab, setActiveTab] = useState<string>('belajar');
   const [pricingOpen, setPricingOpen] = useState(false);
   const [onboardingOpen, setOnboardingOpen] = useState(false);
+  const [gamification, setGamification] = useState<Gamification | null>(null);
 
   // Show onboarding on first visit (once per browser)
   useEffect(() => {
@@ -82,14 +88,16 @@ export function BimoApp() {
 
   const loadData = useCallback(async () => {
     try {
-      const [meRes, subRes, notesRes] = await Promise.all([
+      const [meRes, subRes, notesRes, gameRes] = await Promise.all([
         fetch('/api/v1/me').then(r => r.json()),
         fetch('/api/v1/subscriptions').then(r => r.json()),
         fetch('/api/v1/notes?limit=50').then(r => r.json()),
+        fetch('/api/v1/gamification').then(r => r.json()),
       ]);
       setUser(meRes.data);
       setUsage(subRes.data?.usage);
       setNotes(notesRes.data || []);
+      setGamification(gameRes.data);
     } catch (e) { console.error('load failed', e); }
     finally { setLoading(false); }
   }, []);
@@ -126,13 +134,13 @@ export function BimoApp() {
         <div className="ml-auto flex items-center gap-2">
           {/* Become a Creator — captured: outline pill */}
           <a href="#" className="inline-flex h-9 items-center gap-2 rounded-full px-4 text-sm font-semibold" style={{ padding: '0 16px', height: 36, fontSize: 'var(--text-nav)', border: '2px solid var(--border)', color: 'var(--text-primary)' }}>Become a Creator</a>
-          {/* Streak — captured: yellow bg pill with Flame icon */}
+          {/* Streak — captured: yellow bg pill with Flame icon. Reads real streak from /gamification. */}
           <span className="inline-flex h-9 items-center gap-1.5 rounded-full px-4 text-sm font-semibold" style={{ background: '#fef9c3', color: '#a16207', padding: '0 14px', height: 36, fontSize: 'var(--text-nav)' }}>
-            <Flame size={14} /> Streak {usage && usage.notesUsed > 0 ? 1 : 0}
+            <Flame size={14} /> Streak {gamification?.streak?.current ?? 0}
           </span>
-          {/* Level — captured: blue bg pill with Trophy icon */}
+          {/* Level — captured: blue bg pill with Trophy icon. Reads real level from /gamification. */}
           <span className="inline-flex h-9 items-center gap-1.5 rounded-full px-4 text-sm font-semibold" style={{ background: '#dbeafe', color: '#1d4ed8', padding: '0 14px', height: 36, fontSize: 'var(--text-nav)' }}>
-            <Trophy size={14} /> Level 1
+            <Trophy size={14} /> Level {gamification?.level ?? 1}
           </span>
           {/* Upgrade — captured: orange bg pill with Sparkles icon. Opens PricingModal. */}
           <button onClick={() => setPricingOpen(true)} className="inline-flex h-9 items-center gap-1.5 rounded-full px-4 text-sm font-semibold transition-transform hover:-translate-y-0.5 active:translate-y-0.5" style={{ background: 'var(--accent-orange)', color: '#fff', padding: '0 16px', height: 36, fontSize: 'var(--text-nav)' }}>
