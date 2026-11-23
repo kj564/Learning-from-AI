@@ -40,6 +40,7 @@ import { toast } from 'sonner';
 import Markdown from '@/components/librechat/Markdown';
 import { MindmapView } from '@/components/librechat/MindmapView';
 import { PricingModal } from '@/components/librechat/PricingModal';
+import { OnboardingModal, shouldShowOnboarding } from '@/components/librechat/OnboardingModal';
 
 // Types
 interface User { id: string; name: string; email: string; plan: string; }
@@ -68,6 +69,15 @@ export function BimoApp() {
   const [activeNote, setActiveNote] = useState<Note | null>(null);
   const [activeTab, setActiveTab] = useState<string>('belajar');
   const [pricingOpen, setPricingOpen] = useState(false);
+  const [onboardingOpen, setOnboardingOpen] = useState(false);
+
+  // Show onboarding on first visit (once per browser)
+  useEffect(() => {
+    if (shouldShowOnboarding()) {
+      const t = setTimeout(() => setOnboardingOpen(true), 800);
+      return () => clearTimeout(t);
+    }
+  }, []);
 
   const loadData = useCallback(async () => {
     try {
@@ -132,11 +142,11 @@ export function BimoApp() {
         </div>
       </header>
 
-      {/* Body: sidebar + main */}
+      {/* Body: sidebar (note detail only) + main.
+          Per pelajarin capture: dashboard view has NO left sidebar (full-width
+          main). The 9-tab sidebar only appears inside a note detail. */}
       <div className="flex flex-1">
-        {view === 'dashboard' ? (
-          <DashboardSidebar />
-        ) : (
+        {view === 'note' && (
           <NoteSidebar activeTab={activeTab} onTabChange={setActiveTab} />
         )}
 
@@ -159,6 +169,8 @@ export function BimoApp() {
 
       {/* Pricing modal — triggered by "Upgrade" pill in the header */}
       <PricingModal open={pricingOpen} onOpenChange={setPricingOpen} />
+      {/* Onboarding modal — first-visit welcome carousel */}
+      <OnboardingModal open={onboardingOpen} onOpenChange={setOnboardingOpen} />
     </div>
   );
 }
