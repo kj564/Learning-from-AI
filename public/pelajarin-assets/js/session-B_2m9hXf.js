@@ -1,0 +1,1 @@
+async function e(){let e=await fetch(`/auth/session`,{credentials:`include`});if(e.status===401)return null;if(!e.ok)throw Error(`session request failed: ${e.status}`);return(await e.json()).user}function t(){return{queryKey:[`session`],queryFn:e,staleTime:60*1e3,retry:1}}export{t};

@@ -29,6 +29,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             --font-mono: ${GeistMono.style.fontFamily}, ui-monospace, "Cascadia Code", monospace;
           }
         `}</style>
+        {/* CSS asli pelajarin.ai — copy paste 1:1, semua class names + design tokens asli */}
+        <link rel="stylesheet" href="/pelajarin-assets/css/index-pelajarin.css" />
+        <link rel="stylesheet" href="/pelajarin-assets/css/chapter-editor-DEcVZfaU.css" />
       </head>
       <body>
         <ThemeProvider attribute="class" defaultTheme="light" enableSystem disableTransitionOnChange>

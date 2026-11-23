@@ -1,0 +1,1 @@
+var e=new Set([`too_long`]);function t(t,n,r){let i=t.app.noteErrors;return n&&r&&e.has(n)?r:n&&n in i?i[n]:r}var n=`Menyiapkan catatan…`;function r(e,t){let r=t?.trim();return!r||r===n?e.app.untitledNote:r}export{r as n,t};

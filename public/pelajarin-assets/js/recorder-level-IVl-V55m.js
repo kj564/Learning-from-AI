@@ -1,0 +1,1 @@
+function e(){let e=new Float32Array,t=0,n=0;return{sample(r){e.length!==r.fftSize&&(e=new Float32Array(r.fftSize)),r.getFloatTimeDomainData(e),n+=1;for(let n=0;n<e.length;n+=1){let r=Math.abs(e[n]);r>t&&(t=r)}},nearSilent(e){return n<120||n*1e3<e*2?!1:t===0||20*Math.log10(t)<-60},reset(){t=0,n=0}}}export{e as t};
