@@ -83,6 +83,16 @@ export function BimoApp() {
 
   useEffect(() => { loadData(); }, [loadData]);
 
+  // Auto-refresh while any note is still processing — the LLM generation
+  // runs in the background (POST /notes/generate or upload), so the dashboard
+  // needs to poll until status flips from "processing" → "completed".
+  useEffect(() => {
+    const hasProcessing = notes.some(n => n.status === 'processing');
+    if (!hasProcessing) return;
+    const interval = setInterval(() => { loadData(); }, 5000);
+    return () => clearInterval(interval);
+  }, [notes, loadData]);
+
   if (loading) return <div className="flex min-h-screen items-center justify-center bg-app text-app"><Loader2 size={32} className="animate-spin" style={{ color: 'var(--accent-orange)' }} /></div>;
 
   return (
@@ -188,21 +198,31 @@ function BimoDashboard({ notes, usage, onNoteClick, onNoteCreated }: { notes: No
     setUploading(true);
     try {
       const presignRes = await fetch('/api/v1/documents/presign', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ filename: file.name, content_type: file.type || 'application/octet-stream', size_bytes: file.size }) });
-      const presignData = await presignRes.json();
-      if (!presignData.data) throw new Error('Presign failed');
-      await fetch(presignData.data.upload_url, { method: 'PUT', body: file });
+      const presignData = await presignRes.json().catch(() => ({}));
+      if (!presignData.data) throw new Error(presignData.error?.message || 'Presign gagal');
+      // PUT the raw file. This returns a small JSON ack (or 404 if route missing);
+      // we don't strictly need the body, just a 2xx.
+      const putRes = await fetch(presignData.data.upload_url, { method: 'PUT', body: file });
+      if (!putRes.ok) throw new Error(`Upload file gagal (HTTP ${putRes.status})`);
       const noteRes = await fetch('/api/v1/notes', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title: file.name.replace(/\.[^.]+$/, ''), file_ids: [presignData.data.document_id] }) });
-      const noteData = await noteRes.json();
+      const noteData = await noteRes.json().catch(() => ({}));
       if (noteData.data) { toast.success('Catatan dibuat! Bimo sedang memproses...'); onNoteCreated(); }
+      else throw new Error(noteData.error?.message || 'Gagal membuat catatan');
     } catch (e) { toast.error(`Upload gagal: ${e instanceof Error ? e.message : String(e)}`); }
     finally { setUploading(false); if (fileInputRef.current) fileInputRef.current.value = ''; }
   }
 
   async function handleCreateNote() {
+    const topic = inputText.trim();
+    if (!topic) { toast.error('Ketik topik yang mau dipelajari dulu'); return; }
     try {
-      const res = await fetch('/api/v1/notes', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title: inputText || 'Catatan Baru' }) });
-      const data = await res.json();
-      if (data.data) { toast.success('Catatan dibuat!'); onNoteCreated(); setInputText(''); }
+      // Per pelajarin RE (RECON-DEEP-v4 §2.1): POST /notes/generate takes a
+      // text prompt and runs the full generation pipeline — the LLM writes
+      // the teaching material. This is the primary free-tier entry point.
+      const res = await fetch('/api/v1/notes/generate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prompt: topic }) });
+      const data = await res.json().catch(() => ({}));
+      if (data.data) { toast.success('Bimo lagi belajarin materinya...'); onNoteCreated(); setInputText(''); }
+      else toast.error(data.error?.message || 'Gagal membuat catatan');
     } catch { toast.error('Gagal membuat catatan'); }
   }
 

@@ -60,6 +60,58 @@ Jangan tambahkan teks di luar JSON. Output JSON saja.`;
 }
 
 // ============================================================
+// Notes generation from a text prompt (no uploaded file needed)
+// ============================================================
+
+/**
+ * Generate a full note (chapters + content) from a short user prompt like
+ * "Fotosintesis" or "Sejarah Indonesia kemerdekaan". This powers the
+ * `POST /api/v1/notes/generate` endpoint that pelajarin exposes — the
+ * "What would you like to learn?" textarea fires this instead of creating
+ * an empty placeholder note.
+ *
+ * The LLM acts as a subject-matter expert and writes the teaching material
+ * itself (chapters + key terms), in the same JSON shape as generateNotes
+ * so the downstream pipeline is identical.
+ */
+export async function generateNotesFromPrompt(prompt: string, noteTitle: string): Promise<{ chapters: GeneratedChapter[]; content: string }> {
+  const zai = await ZAI.create();
+  const cleanPrompt = prompt.trim().slice(0, 500);
+
+  const systemPrompt = `Anda adalah Bimo, AI tutor untuk siswa Indonesia. User minta materi belajar tentang: "${noteTitle}".
+
+Prompt user: "${cleanPrompt}"
+
+Tugas: Buat catatan belajar yang lengkap dan terstruktur dalam bahasa Indonesia tentang topik tersebut. Seolah-olah Anda adalah guru yang menjelaskan topik ini dari awal untuk siswa. Bagi materi menjadi 3-5 bab. Setiap bab punya:
+1. Judul bab yang jelas
+2. Isi bab dalam format markdown (200-400 kata per bab) — jelaskan konsep, beri contoh, pakai analogi yang relate ke kehidupan siswa Indonesia
+3. Istilah penting (key terms) dengan definisinya
+
+Pastikan materi akurat, lengkap, dan sesuai kurikulum. Output JSON persis:
+{
+  "chapters": [
+    {
+      "title": "Judul Bab 1",
+      "content": "Isi bab dalam markdown...",
+      "keyTerms": [
+        {"term": "Istilah", "definition": "Definisi singkat"}
+      ]
+    }
+  ]
+}
+
+JSON saja, tanpa teks lain.`;
+
+  const response = await zai.chat.completions.create({
+    model: 'glm-4-flash',
+    messages: [{ role: 'user', content: systemPrompt }],
+  });
+
+  const rawContent = response?.choices?.[0]?.message?.content || '';
+  return parseJSONResponse(rawContent, { chapters: [], content: rawContent });
+}
+
+// ============================================================
 // Flashcard generation — Q/A pairs from text
 // ============================================================
 
