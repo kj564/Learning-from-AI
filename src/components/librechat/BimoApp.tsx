@@ -432,7 +432,7 @@ function BimoNoteDetail({ note, activeTab, usage, onUpgrade, onBack }: { note: N
     <main className="flex min-w-0 flex-1 flex-col" style={{ height: isFullHeight ? 'calc(100vh - 4rem)' : 'auto' }}>
       {/* Tab content */}
       {tab === 'belajar' && <BelajarTab note={noteDetail} onUpgrade={onUpgrade} onBack={onBack} />}
-      {tab === 'catatan' && <CatatanTab note={noteDetail} />}
+      {tab === 'catatan' && <CatatanTab note={noteDetail} noteId={note.id} />}
       {tab === 'mindmap' && <MindmapTab note={noteDetail} />}
       {tab === 'kuis' && <QuizTab noteId={note.id} />}
       {tab === 'flashcard' && <FlashcardTab noteId={note.id} />}
@@ -561,15 +561,53 @@ function BelajarTab({ note, onUpgrade, onBack }: { note: any; onUpgrade: () => v
   );
 }
 
-// === Tab 2: Catatan (Notes) — rich text editor ===
-function CatatanTab({ note }: { note: any }) {
+// === Tab 2: Catatan (Notes) — 70:30 split: editor + AI panel (1:1 from auth capture) ===
+function CatatanTab({ note, noteId }: { note: any; noteId: string }) {
   if (!note) return <Loader2 className="animate-spin text-muted mx-auto" size={24} />;
+  // Inline AI panel state (same as ChatTab but simplified for the right column)
+  const [messages, setMessages] = useState<{ role: string; content: string }[]>([]);
+  const [input, setInput] = useState('');
+  const [streaming, setStreaming] = useState(false);
+  const sessionIdRef = useRef<string>('');
+  useEffect(() => { sessionIdRef.current = crypto.randomUUID(); }, [noteId]);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  useEffect(() => { scrollRef.current?.scrollTo(0, scrollRef.current.scrollHeight); }, [messages]);
+
+  async function send() {
+    if (!input.trim() || streaming) return;
+    const msg = input.trim(); setInput('');
+    setMessages(prev => [...prev, { role: 'user', content: msg }]);
+    setStreaming(true);
+    try {
+      const res = await fetch('/api/v1/chat/completions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ note_id: noteId, session_id: sessionIdRef.current, message: msg }) });
+      if (!res.ok) return;
+      setMessages(prev => [...prev, { role: 'assistant', content: '' }]);
+      const reader = res.body?.getReader(); const decoder = new TextDecoder();
+      let text = ''; let buf = '';
+      while (reader) {
+        const { done, value } = await reader.read(); if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        const events = buf.split('\n\n'); buf = events.pop() || '';
+        for (const evt of events) {
+          const lines = evt.split('\n'); let eventType = ''; let dataStr = '';
+          for (const line of lines) { if (line.startsWith('event:')) eventType = line.slice(6).trim(); if (line.startsWith('data:')) dataStr = line.slice(5).trim(); }
+          if (!dataStr) continue;
+          try { const data = JSON.parse(dataStr); if (eventType === 'text-delta' && data.text) { text += data.text; setMessages(prev => { const c = [...prev]; c[c.length - 1] = { role: 'assistant', content: text }; return c; }); } } catch {}
+        }
+      }
+    } catch {} finally { setStreaming(false); }
+  }
+
   return (
     <div className="flex h-full items-stretch">
-      <div className="flex flex-1 flex-col">
-        {/* Toolbar — captured: Heading 1, Format, Export PDF buttons */}
-        <div className="flex items-center gap-1 border-b border-app p-2">
-          {[Bold, Italic, Underline].map((Icon, i) => <button key={i} className="flex h-8 w-8 items-center justify-center rounded-lg hover:bg-surface" style={{ borderRadius: '16px' }}><Icon size={16} /></button>)}
+      {/* LEFT: Editor (70%) */}
+      <div className="flex flex-1 flex-col" style={{ flex: '7' }}>
+        {/* Toolbar — captured: undo/redo, H1, Format, bold/italic/underline/strikethrough/code/list, Export */}
+        <div className="flex items-center gap-1 border-b border-app p-2 flex-wrap">
+          <button className="flex h-8 w-8 items-center justify-center rounded-lg hover:bg-surface" style={{ borderRadius: '16px' }}><RotateCcw size={14} /></button>
+          <button className="flex h-8 w-8 items-center justify-center rounded-lg hover:bg-surface" style={{ borderRadius: '16px' }}><Bold size={14} /></button>
+          <button className="flex h-8 w-8 items-center justify-center rounded-lg hover:bg-surface" style={{ borderRadius: '16px' }}><Italic size={14} /></button>
+          <button className="flex h-8 w-8 items-center justify-center rounded-lg hover:bg-surface" style={{ borderRadius: '16px' }}><Underline size={14} /></button>
           <div className="w-px h-6 bg-app mx-1" />
           <button className="flex h-8 items-center gap-1 rounded-lg px-2 text-sm hover:bg-surface" style={{ borderRadius: '16px' }}><Type size={14} /> Heading 1</button>
           <button className="flex h-8 items-center gap-1 rounded-lg px-2 text-sm hover:bg-surface" style={{ borderRadius: '16px' }}><AlignLeft size={14} /> Format</button>
@@ -579,6 +617,40 @@ function CatatanTab({ note }: { note: any }) {
         {/* Content */}
         <div className="flex-1 overflow-y-auto p-8">
           {note.content ? <div className="prose prose-sm max-w-none"><Markdown content={note.content} /></div> : <p className="text-muted">Catatan belum diproses.</p>}
+        </div>
+      </div>
+
+      {/* RIGHT: AI panel (30%) — captured: "Percakapan Baru" + Pai mascot + input */}
+      <div className="flex flex-col border-l border-app" style={{ flex: '3', minWidth: 280 }}>
+        {/* AI panel header — captured: "Percakapan Baru" + dropdown + add button */}
+        <div className="flex items-center gap-2 border-b border-app p-3">
+          <button className="flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm" style={{ borderRadius: '16px' }}>Percakapan Baru</button>
+          <button className="flex h-8 w-8 items-center justify-center rounded-lg hover:bg-surface" style={{ borderRadius: '16px' }}><Plus size={16} /></button>
+        </div>
+        {/* Messages */}
+        <div ref={scrollRef} className="flex-1 overflow-y-auto p-4">
+          {messages.length === 0 && (
+            <div className="flex h-full flex-col items-center justify-center text-center">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src="/pelajarin-assets/img/pai-pointing.png" alt="Pai" width={80} height={80} style={{ objectFit: 'contain' }} className="mx-auto mb-3" />
+              <p className="text-sm font-semibold">Hi, I&apos;m Pai!</p>
+              <p className="text-xs text-muted mt-1">I can help you understand these notes and answer any question.</p>
+            </div>
+          )}
+          {messages.map((m, i) => (
+            <div key={i} className={`mb-3 flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+              <div className="max-w-[85%] rounded-2xl px-3 py-2 text-sm" style={{ background: m.role === 'user' ? 'var(--accent-orange)' : 'var(--bg-surface)', color: m.role === 'user' ? '#fff' : 'var(--text-primary)' }}>
+                {m.role === 'assistant' && m.content === '' && streaming ? <Loader2 size={14} className="animate-spin" /> : m.role === 'assistant' ? <div className="prose prose-sm max-w-none"><Markdown content={m.content} /></div> : m.content}
+              </div>
+            </div>
+          ))}
+        </div>
+        {/* Input — captured: grey card with send button */}
+        <div className="p-3 border-t border-app">
+          <div className="flex items-end gap-2 rounded-2xl p-2" style={{ background: 'var(--bg-surface)', borderRadius: '16px' }}>
+            <textarea value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }} placeholder="Ask anything about this material..." rows={1} className="flex-1 resize-none border-none bg-transparent outline-none text-sm" style={{ color: 'var(--text-primary)' }} />
+            <button onClick={send} disabled={streaming || !input.trim()} className="grid place-items-center rounded-full shrink-0" style={{ width: 32, height: 32, background: 'var(--accent-orange)', color: '#fff', borderRadius: '9999px' }}>{streaming ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}</button>
+          </div>
         </div>
       </div>
     </div>
