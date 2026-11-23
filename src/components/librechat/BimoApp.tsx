@@ -765,6 +765,8 @@ function QuizTab({ noteId }: { noteId: string }) {
               </div>
               <div className="flex items-center gap-2">
                 <button onClick={generate} className="inline-flex items-center justify-center gap-2 rounded-full font-semibold transition-all active:translate-y-0.5" style={{ height: 36, padding: '0 16px', fontSize: '14px', background: 'var(--bg-surface)', color: 'var(--text-primary)', boxShadow: '0 4px 0 var(--border)' }}><Plus size={14} /> New Quiz</button>
+                <button onClick={generate} className="inline-flex items-center justify-center gap-2 rounded-full font-semibold transition-all active:translate-y-0.5" style={{ height: 36, padding: '0 16px', fontSize: '14px', background: 'var(--bg-surface)', color: 'var(--text-primary)', boxShadow: '0 4px 0 var(--border)' }}><RefreshCw size={14} /> Repeat Quiz</button>
+                <button className="inline-flex items-center justify-center gap-2 rounded-full font-semibold transition-all active:translate-y-0.5" style={{ height: 36, padding: '0 16px', fontSize: '14px', background: 'var(--bg-surface)', color: 'var(--text-primary)', boxShadow: '0 4px 0 var(--border)' }}><Settings size={14} /> Edit</button>
               </div>
             </div>
 
@@ -904,6 +906,7 @@ function FlashcardTab({ noteId }: { noteId: string }) {
               <div className="flex items-center gap-2">
                 <button onClick={generate} disabled={generating} className="inline-flex items-center justify-center gap-2 rounded-full font-semibold transition-all active:translate-y-0.5 disabled:opacity-50" style={{ height: 36, padding: '0 14px', fontSize: '14px', background: 'var(--bg-surface)', color: 'var(--text-primary)', boxShadow: '0 4px 0 var(--border)' }}>{generating ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />} Regenerate</button>
                 <button onClick={() => { setCurrentCard(0); setFlipped(false); }} className="inline-flex items-center justify-center gap-2 rounded-full font-semibold transition-all active:translate-y-0.5" style={{ height: 36, padding: '0 14px', fontSize: '14px', background: 'var(--bg-surface)', color: 'var(--text-primary)', boxShadow: '0 4px 0 var(--border)' }}><RotateCcw size={14} /> Restart</button>
+                <button className="inline-flex items-center justify-center gap-2 rounded-full font-semibold transition-all active:translate-y-0.5" style={{ height: 36, padding: '0 14px', fontSize: '14px', background: 'var(--bg-surface)', color: 'var(--text-primary)', boxShadow: '0 4px 0 var(--border)' }}><Settings size={14} /> Manage</button>
               </div>
             </div>
 
@@ -1295,17 +1298,23 @@ function PodcastTab({ noteId, noteTitle }: { noteId: string; noteTitle: string }
                 ))}
               </div>
             </section>
-            {/* Duration + language — captured: 167x44, radius 24px */}
+            {/* Duration + language — captured: labels "Length" + "Language" above toggles */}
             <section className="flex flex-col gap-2.5">
-              <div className="flex gap-2">
-                {['3 min', '7 min'].map((d, i) => (
-                  <button key={d} onClick={() => setDuration(i === 0 ? '3' : '7')} className="font-semibold transition-colors" style={{ width: 167, height: 44, borderRadius: '24px', fontSize: '14px', fontWeight: 600, background: duration === (i === 0 ? '3' : '7') ? 'var(--accent-orange)' : 'rgba(255,255,255,0.15)', color: '#fff', border: '2px solid ' + (duration === (i === 0 ? '3' : '7') ? 'var(--accent-orange)' : 'transparent') }}>{d}</button>
-                ))}
+              <div className="flex flex-col gap-2">
+                <label className="font-bold text-white" style={{ fontFamily: 'var(--font-heading)', fontSize: '17px' }}>Length</label>
+                <div className="flex gap-2">
+                  {['3 min', '7 min'].map((d, i) => (
+                    <button key={d} onClick={() => setDuration(i === 0 ? '3' : '7')} className="font-semibold transition-colors" style={{ width: 167, height: 44, borderRadius: '24px', fontSize: '14px', fontWeight: 600, background: duration === (i === 0 ? '3' : '7') ? 'var(--accent-orange)' : 'rgba(255,255,255,0.15)', color: '#fff', border: '2px solid ' + (duration === (i === 0 ? '3' : '7') ? 'var(--accent-orange)' : 'transparent') }}>{d}</button>
+                  ))}
+                </div>
               </div>
-              <div className="flex gap-2">
-                {['Indonesian', 'English'].map((l, i) => (
-                  <button key={l} onClick={() => setLanguage(i === 0 ? 'id' : 'en')} className="font-semibold transition-colors" style={{ width: 167, height: 44, borderRadius: '24px', fontSize: '14px', fontWeight: 600, background: language === (i === 0 ? 'id' : 'en') ? 'var(--accent-orange)' : 'rgba(255,255,255,0.15)', color: '#fff', border: '2px solid ' + (language === (i === 0 ? 'id' : 'en') ? 'var(--accent-orange)' : 'transparent') }}>{l}</button>
-                ))}
+              <div className="flex flex-col gap-2">
+                <label className="font-bold text-white" style={{ fontFamily: 'var(--font-heading)', fontSize: '17px' }}>Language</label>
+                <div className="flex gap-2">
+                  {['Indonesian', 'English'].map((l, i) => (
+                    <button key={l} onClick={() => setLanguage(i === 0 ? 'id' : 'en')} className="font-semibold transition-colors" style={{ width: 167, height: 44, borderRadius: '24px', fontSize: '14px', fontWeight: 600, background: language === (i === 0 ? 'id' : 'en') ? 'var(--accent-orange)' : 'rgba(255,255,255,0.15)', color: '#fff', border: '2px solid ' + (language === (i === 0 ? 'id' : 'en') ? 'var(--accent-orange)' : 'transparent') }}>{l}</button>
+                  ))}
+                </div>
               </div>
             </section>
             {/* Generate button */}
