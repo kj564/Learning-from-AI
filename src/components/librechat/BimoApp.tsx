@@ -39,6 +39,7 @@ import {
 import { toast } from 'sonner';
 import Markdown from '@/components/librechat/Markdown';
 import { MindmapView } from '@/components/librechat/MindmapView';
+import { PricingModal } from '@/components/librechat/PricingModal';
 
 // Types
 interface User { id: string; name: string; email: string; plan: string; }
@@ -66,6 +67,7 @@ export function BimoApp() {
   const [view, setView] = useState<'dashboard' | 'note'>('dashboard');
   const [activeNote, setActiveNote] = useState<Note | null>(null);
   const [activeTab, setActiveTab] = useState<string>('belajar');
+  const [pricingOpen, setPricingOpen] = useState(false);
 
   const loadData = useCallback(async () => {
     try {
@@ -121,10 +123,10 @@ export function BimoApp() {
           <span className="inline-flex h-9 items-center gap-1.5 rounded-full px-4 text-sm font-semibold" style={{ background: '#dbeafe', color: '#1d4ed8', padding: '0 14px', height: 36, fontSize: 'var(--text-nav)' }}>
             <Trophy size={14} /> Level 1
           </span>
-          {/* Upgrade — captured: orange bg pill with Sparkles icon */}
-          <span className="inline-flex h-9 items-center gap-1.5 rounded-full px-4 text-sm font-semibold" style={{ background: 'var(--accent-orange)', color: '#fff', padding: '0 16px', height: 36, fontSize: 'var(--text-nav)' }}>
+          {/* Upgrade — captured: orange bg pill with Sparkles icon. Opens PricingModal. */}
+          <button onClick={() => setPricingOpen(true)} className="inline-flex h-9 items-center gap-1.5 rounded-full px-4 text-sm font-semibold transition-transform hover:-translate-y-0.5 active:translate-y-0.5" style={{ background: 'var(--accent-orange)', color: '#fff', padding: '0 16px', height: 36, fontSize: 'var(--text-nav)' }}>
             <Sparkles size={14} /> Upgrade
-          </span>
+          </button>
           {/* Avatar — captured: 36x36 round with initial */}
           <div className="flex items-center justify-center rounded-full text-sm font-bold" style={{ background: 'var(--bg-surface)', width: 36, height: 36, color: 'var(--text-primary)' }}>{user?.name?.[0] || 'B'}</div>
         </div>
@@ -145,6 +147,7 @@ export function BimoApp() {
         )}
         {view === 'note' && activeNote && (
           <BimoNoteDetail note={activeNote} activeTab={activeTab} usage={usage}
+            onUpgrade={() => setPricingOpen(true)}
             onBack={() => { setView('dashboard'); setActiveNote(null); }} />
         )}
       </div>
@@ -153,6 +156,9 @@ export function BimoApp() {
         <p>Bimo — Teman belajar AI untuk siswa Indonesia. Gratis selamanya, Pro mulai Rp 20 ribu.</p>
         <p className="mt-1">60% lebih murah · 15 catatan/bulan · 50 chat/bulan</p>
       </footer>
+
+      {/* Pricing modal — triggered by "Upgrade" pill in the header */}
+      <PricingModal open={pricingOpen} onOpenChange={setPricingOpen} />
     </div>
   );
 }
@@ -313,7 +319,7 @@ function BimoDashboard({ notes, usage, onNoteClick, onNoteCreated }: { notes: No
 }
 
 // === Note Detail with 9 tabs ===
-function BimoNoteDetail({ note, activeTab, usage, onBack }: { note: Note; activeTab: string; usage: Usage | null; onBack: () => void }) {
+function BimoNoteDetail({ note, activeTab, usage, onUpgrade, onBack }: { note: Note; activeTab: string; usage: Usage | null; onUpgrade: () => void; onBack: () => void }) {
   const [noteDetail, setNoteDetail] = useState<any>(null);
   const [tab, setTab] = useState(activeTab);
 
@@ -330,7 +336,7 @@ function BimoNoteDetail({ note, activeTab, usage, onBack }: { note: Note; active
   return (
     <main className="flex min-w-0 flex-1 flex-col" style={{ height: isFullHeight ? 'calc(100vh - 4rem)' : 'auto' }}>
       {/* Tab content */}
-      {tab === 'belajar' && <BelajarTab note={noteDetail} onBack={onBack} />}
+      {tab === 'belajar' && <BelajarTab note={noteDetail} onUpgrade={onUpgrade} onBack={onBack} />}
       {tab === 'catatan' && <CatatanTab note={noteDetail} />}
       {tab === 'mindmap' && <MindmapTab note={noteDetail} />}
       {tab === 'kuis' && <QuizTab noteId={note.id} />}
@@ -344,7 +350,7 @@ function BimoNoteDetail({ note, activeTab, usage, onBack }: { note: Note; active
 }
 
 // === Tab 1: Belajar (Learn) — chapter list with progress + locked chapters ===
-function BelajarTab({ note, onBack }: { note: any; onBack: () => void }) {
+function BelajarTab({ note, onUpgrade, onBack }: { note: any; onUpgrade: () => void; onBack: () => void }) {
   if (!note) return <Loader2 className="animate-spin text-muted mx-auto" size={24} />;
   const progress = note?.total_chapters > 0 ? Math.round((note?.flashcard_count || 0) * 100 / Math.max(note?.total_chapters, 1)) : 0;
   return (
@@ -353,7 +359,7 @@ function BelajarTab({ note, onBack }: { note: any; onBack: () => void }) {
       <div className="mb-4 flex items-center gap-4">
         <h1 className="text-xl font-bold" style={{ fontFamily: 'var(--font-heading)' }}>{note.title || 'Catatan Baru'}</h1>
         <span className="text-sm text-muted">{progress}%</span>
-        <button className="inline-flex items-center rounded-full font-semibold" style={{ background: 'var(--accent-orange)', color: '#fff', fontSize: '14px', fontWeight: 600, padding: '0 20px', height: 44, borderRadius: '20px' }}>Upgrade to Pro</button>
+        <button onClick={onUpgrade} className="inline-flex items-center rounded-full font-semibold transition-transform hover:-translate-y-0.5 active:translate-y-0.5" style={{ background: 'var(--accent-orange)', color: '#fff', fontSize: '14px', fontWeight: 600, padding: '0 20px', height: 44, borderRadius: '20px' }}>Upgrade to Pro</button>
       </div>
       {/* Chapter list */}
       {note?.chapters && note.chapters.length > 0 ? (
@@ -362,7 +368,7 @@ function BelajarTab({ note, onBack }: { note: any; onBack: () => void }) {
             <div key={c.id} className="flex items-center gap-3 rounded-2xl border-2 border-app p-4" style={{ borderRadius: '24px' }}>
               <div className="flex h-10 w-10 items-center justify-center rounded-full" style={{ background: i === 0 ? 'var(--accent-orange)' : 'var(--bg-surface)', color: i === 0 ? '#fff' : 'var(--text-muted)' }}>{i + 1}</div>
               <div className="flex-1"><h3 className="text-sm font-semibold">{c.title}</h3>{c.content && <p className="text-xs text-muted mt-1 truncate">{c.content.slice(0, 60)}...</p>}</div>
-              {i > 0 && <button className="inline-flex items-center rounded-full font-semibold" style={{ background: 'var(--accent-orange)', color: '#fff', fontSize: '14px', fontWeight: 600, padding: '0 20px', height: 44, borderRadius: '20px' }}>Upgrade to Pro</button>}
+              {i > 0 && <button onClick={onUpgrade} className="inline-flex items-center rounded-full font-semibold transition-transform hover:-translate-y-0.5 active:translate-y-0.5" style={{ background: 'var(--accent-orange)', color: '#fff', fontSize: '14px', fontWeight: 600, padding: '0 20px', height: 44, borderRadius: '20px' }}>Upgrade to Pro</button>}
             </div>
           ))}
         </div>
