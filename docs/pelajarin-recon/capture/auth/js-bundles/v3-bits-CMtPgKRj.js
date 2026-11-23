@@ -1,0 +1,1 @@
+import{t as e}from"./jsx-runtime-BTND-Rlb.js";import{t}from"./utils-mREEcxtO.js";var n=e();function r({className:e}){return(0,n.jsx)(`span`,{className:t(`inline-flex items-center gap-1`,e),"aria-hidden":`true`,children:[0,1,2].map(e=>(0,n.jsx)(`span`,{className:`size-1.5 animate-v3-bob rounded-full bg-current`,style:{animationDelay:`${e*.15}s`}},e))})}export{r as t};

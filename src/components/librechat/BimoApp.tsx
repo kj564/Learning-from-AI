@@ -35,7 +35,7 @@ import {
   Network, FolderOpen, GraduationCap, Plus, Download,
   Bold, Italic, Underline, Type, AlignLeft,
   RotateCcw, Star, Trophy, Crown, Sparkles,
-  MoreHorizontal, Home, Search,
+  MoreHorizontal, Home, Search, Lightbulb, RefreshCw, RotateCw, Settings,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import Markdown from '@/components/librechat/Markdown';
@@ -703,7 +703,10 @@ function QuizTab({ noteId }: { noteId: string }) {
   const [quizzes, setQuizzes] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [generating, setGenerating] = useState(false);
-  const [selectedAnswer, setSelectedAnswer] = useState<Record<string, number>>({});
+  const [selectedAnswer, setSelectedAnswer] = useState<number | null>(null);
+  const [showHint, setShowHint] = useState(false);
+  const [checked, setChecked] = useState(false);
+  const [currentQ, setCurrentQ] = useState(0);
 
   async function loadQuizzes() {
     setLoading(true);
@@ -720,41 +723,135 @@ function QuizTab({ noteId }: { noteId: string }) {
     try {
       const res = await fetch(`/api/v1/notes/${noteId}/quizzes`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ count: 5 }) });
       const d = await res.json();
-      if (d.data) { toast.success(`${d.data.question_count} soal kuis dibuat!`); loadQuizzes(); }
+      if (d.data) { toast.success(`${d.data.question_count} soal kuis dibuat!`); setSelectedAnswer(null); setShowHint(false); setChecked(false); setCurrentQ(0); loadQuizzes(); }
       else toast.error(d.error?.message || 'Gagal generate kuis');
     } catch { toast.error('Gagal generate kuis'); }
     finally { setGenerating(false); }
   }
 
+  // Flatten all questions from all quizzes
+  const allQuestions: any[] = quizzes.flatMap(q => q.questions || []);
+  const total = allQuestions.length;
+
   if (loading) return <div className="mx-auto w-full flex flex-col items-center justify-center py-20" style={{ maxWidth: '1120px' }}><div className="flex h-14 w-14 items-center justify-center rounded-full" style={{ background: 'var(--bg-accent)', borderRadius: '9999px' }}><Loader2 size={24} className="animate-spin" style={{ color: 'var(--accent-orange)' }} /></div><p className="mt-4 text-sm text-muted">Writing questions...</p></div>;
-  if (quizzes.length === 0) return <div className="mx-auto w-full" style={{ maxWidth: '1120px', padding: '0 clamp(28px, 5vw, 72px)' }}><div className="text-center py-12 rounded-2xl border-2 border-app"><CheckCircle size={32} className="mx-auto text-muted mb-2" /><p className="text-sm text-muted mb-4">Belum ada kuis.</p><button onClick={generate} disabled={generating} className="inline-flex items-center gap-2 rounded-full font-semibold" style={{ background: 'var(--accent-orange)', color: '#fff', fontSize: '14px', fontWeight: 600, padding: '0 24px', height: 44, borderRadius: '9999px' }}>{generating ? <Loader2 size={16} className="animate-spin" /> : <Plus size={16} />} Generate Kuis</button></div></div>;
-  return <div className="mx-auto w-full space-y-4" style={{ maxWidth: '1120px', padding: '0 clamp(28px, 5vw, 72px)' }}>
-    {quizzes.map(q => (
-      <div key={q.id} className="card-pjr">
-        <p className="text-sm font-medium mb-3">{q.title || 'Kuis'}</p>
-        {q.questions?.map((qs: any, qi: number) => (
-          <div key={qs.id} className="mb-4 rounded-xl border-2 border-app p-3" style={{ borderRadius: '16px' }}>
-            <p className="text-sm font-medium mb-2">{qi + 1}. {qs.question}</p>
-            {qs.options?.map((opt: string, oi: number) => {
-              const isCorrect = opt === qs.answer;
-              const isSelected = selectedAnswer[qs.id] === oi;
-              return <button key={oi} onClick={() => setSelectedAnswer(prev => ({ ...prev, [qs.id]: oi }))} className="block w-full text-left rounded-lg px-3 py-2 mb-1 text-sm transition-colors" style={{ border: `2px solid ${isSelected ? (isCorrect ? 'var(--accent-green)' : 'var(--accent-red)') : 'var(--border)'}`, borderRadius: '12px', background: isSelected ? (isCorrect ? 'rgba(88,204,2,0.1)' : 'rgba(239,68,68,0.1)') : 'transparent' }}><span className="font-semibold mr-2">{String.fromCharCode(65 + oi)}.</span> {opt}</button>;
-            })}
-            {selectedAnswer[qs.id] !== undefined && <p className="text-xs text-muted mt-2">{qs.explanation}</p>}
-          </div>
-        ))}
+
+  if (total === 0) return (
+    <div className="mx-auto w-full" style={{ maxWidth: '1120px', padding: '0 clamp(28px, 5vw, 72px)' }}>
+      <div className="mx-auto flex min-h-[calc(100dvh-11rem)] w-full flex-col items-center justify-center" style={{ maxWidth: '672px' }}>
+        <div className="text-center">
+          <CheckCircle size={48} className="mx-auto mb-4" style={{ color: 'var(--text-muted)' }} />
+          <p className="text-base font-semibold mb-2" style={{ color: 'var(--text-primary)' }}>Belum ada kuis.</p>
+          <p className="text-sm mb-6" style={{ color: 'var(--text-muted)' }}>Generate kuis dari materi ini untuk mulai berlatih.</p>
+          <button onClick={generate} disabled={generating} className="inline-flex items-center gap-2 rounded-full font-semibold transition-transform active:translate-y-0.5" style={{ background: 'var(--accent-orange)', color: '#fff', fontSize: '15px', fontWeight: 600, padding: '0 28px', height: 48, borderRadius: '9999px', boxShadow: '0 4px 0 #c5520a' }}>{generating ? <Loader2 size={18} className="animate-spin" /> : <Plus size={18} />} Generate Kuis</button>
+        </div>
       </div>
-    ))}
-    <button onClick={generate} disabled={generating} className="inline-flex items-center gap-2 rounded-full font-semibold" style={{ background: 'var(--accent-orange)', color: '#fff', fontSize: '14px', fontWeight: 600, padding: '0 24px', height: 44, borderRadius: '9999px' }}>{generating ? <Loader2 size={16} className="animate-spin" /> : <Plus size={16} />} Generate Lagi</button>
-  </div>;
+    </div>
+  );
+
+  // Single-question-per-screen view (1:1 from auth HTML)
+  const q = allQuestions[currentQ];
+  const options = q.options || [];
+  const isCorrect = selectedAnswer !== null && options[selectedAnswer] === q.answer;
+
+  return (
+    <div className="mx-auto w-full" style={{ maxWidth: '1120px', padding: '8px clamp(28px, 5vw, 72px) 80px' }}>
+      <div className="mx-auto flex min-h-[calc(100dvh-11rem)] w-full flex-col" style={{ maxWidth: '672px', padding: '0 20px 32px' }}>
+        <div className="m-auto w-full">
+          <div className="flex flex-col gap-6">
+            {/* Top bar: counter (N / M) + New Quiz/Repeat/Edit buttons */}
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-medium" style={{ color: 'var(--text-muted)' }}>{currentQ + 1} / {total}</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <button onClick={generate} className="inline-flex items-center justify-center gap-2 rounded-full font-semibold transition-all active:translate-y-0.5" style={{ height: 36, padding: '0 16px', fontSize: '14px', background: 'var(--bg-surface)', color: 'var(--text-primary)', boxShadow: '0 4px 0 var(--border)' }}><Plus size={14} /> New Quiz</button>
+              </div>
+            </div>
+
+            {/* Question content */}
+            <div className="py-2">
+              <div className="flex flex-col gap-5">
+                {/* Question text */}
+                <h2 className="font-bold leading-tight" style={{ fontFamily: 'var(--font-heading)', fontSize: '24px', color: 'var(--text-primary)' }}>{q.question}</h2>
+
+                {/* Show Hint button */}
+                {q.hint && (
+                  <button onClick={() => setShowHint(prev => !prev)} className="inline-flex items-center gap-2 self-start rounded-full font-semibold transition-colors" style={{ height: 36, padding: '0 16px', fontSize: '13px', background: '#fef9c3', color: '#a16207', borderRadius: '9999px' }}>
+                    <Lightbulb size={14} /> Show Hint
+                  </button>
+                )}
+                {showHint && q.hint && (
+                  <div className="rounded-xl p-4" style={{ background: '#fef9c3', borderRadius: '16px', color: '#92400e' }}>
+                    <p className="text-sm">{q.hint}</p>
+                  </div>
+                )}
+
+                {/* Answer options (A/B/C/D) — grid with circle letter */}
+                <div className="grid gap-3">
+                  {options.map((opt: string, oi: number) => {
+                    const isSelected = selectedAnswer === oi;
+                    const showResult = checked && (opt === q.answer || isSelected);
+                    return (
+                      <button key={oi} type="button" onClick={() => !checked && setSelectedAnswer(oi)} disabled={checked}
+                        className="flex items-center gap-3 rounded-2xl p-4 text-left transition-all"
+                        style={{
+                          borderRadius: '16px', padding: '16px',
+                          background: checked && opt === q.answer ? '#e8f5e9' : checked && isSelected && !isCorrect ? '#fee2e2' : isSelected ? 'var(--bg-accent)' : 'var(--bg-surface)',
+                          border: `2px solid ${checked && opt === q.answer ? 'var(--accent-green)' : checked && isSelected && !isCorrect ? 'var(--accent-red)' : isSelected ? 'var(--accent-orange)' : 'transparent'}`,
+                          boxShadow: '0 4px 0 var(--border)',
+                        }}>
+                        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg font-semibold" style={{ background: isSelected || (checked && opt === q.answer) ? 'var(--accent-orange)' : 'var(--bg-primary)', color: isSelected || (checked && opt === q.answer) ? '#fff' : 'var(--text-primary)', border: '2px solid var(--border)' }}>
+                          {String.fromCharCode(65 + oi)}
+                        </div>
+                        <span className="text-sm" style={{ color: 'var(--text-primary)' }}>{opt}</span>
+                        {checked && opt === q.answer && <CheckCircle size={18} className="ml-auto" style={{ color: 'var(--accent-green)' }} />}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {/* Check answer + Previous/Next */}
+                <div className="flex items-center justify-between">
+                  <button type="button" onClick={() => { if (currentQ > 0) { setCurrentQ(prev => prev - 1); setSelectedAnswer(null); setShowHint(false); setChecked(false); } }} disabled={currentQ === 0}
+                    className="inline-flex items-center gap-2 rounded-xl font-heading text-sm font-bold transition-all disabled:opacity-40" style={{ height: 44, padding: '0 12px', color: 'var(--text-primary)' }}>
+                    <ChevronRight size={16} className="rotate-180" /> Previous
+                  </button>
+                  {checked ? (
+                    <button type="button" onClick={() => { if (currentQ < total - 1) { setCurrentQ(prev => prev + 1); setSelectedAnswer(null); setShowHint(false); setChecked(false); } }} disabled={currentQ === total - 1}
+                      className="inline-flex items-center gap-2 rounded-xl font-heading text-sm font-bold transition-all disabled:opacity-40" style={{ height: 44, padding: '0 16px', background: 'var(--accent-orange)', color: '#fff', boxShadow: '0 4px 0 #c5520a' }}>
+                      Next <ChevronRight size={16} />
+                    </button>
+                  ) : (
+                    <button type="button" onClick={() => setChecked(true)} disabled={selectedAnswer === null}
+                      className="inline-flex items-center gap-2 rounded-xl font-heading text-sm font-bold transition-all active:translate-y-0.5 disabled:opacity-40" style={{ height: 44, padding: '0 20px', background: 'var(--accent-orange)', color: '#fff', boxShadow: '0 4px 0 #c5520a', fontSize: '15px' }}>
+                      Check answer <ChevronRight size={16} />
+                    </button>
+                  )}
+                </div>
+
+                {/* Explanation after check */}
+                {checked && q.explanation && (
+                  <div className="rounded-2xl p-4" style={{ background: isCorrect ? '#e8f5e9' : '#fee2e2', borderRadius: '16px' }}>
+                    <p className="text-sm font-semibold mb-1" style={{ color: isCorrect ? 'var(--accent-green)' : 'var(--accent-red)' }}>{isCorrect ? 'Benar!' : 'Belum tepat'}</p>
+                    <p className="text-sm" style={{ color: 'var(--text-primary)' }}>{q.explanation}</p>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
 }
 
-// === Tab 5: Flashcard ===
+// === Tab 5: Flashcard — single-card flip view (1:1 from auth HTML) ===
 function FlashcardTab({ noteId }: { noteId: string }) {
   const [cards, setCards] = useState<any[]>([]);
-  const [flipped, setFlipped] = useState<number | null>(null);
+  const [flipped, setFlipped] = useState(false);
   const [loading, setLoading] = useState(true);
   const [generating, setGenerating] = useState(false);
+  const [currentCard, setCurrentCard] = useState(0);
 
   async function loadCards() {
     setLoading(true);
@@ -769,20 +866,84 @@ function FlashcardTab({ noteId }: { noteId: string }) {
   async function generate() {
     setGenerating(true);
     try {
-      const res = await fetch(`/api/v1/notes/${noteId}/flashcards`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ count: 10 }) });
+      const res = await fetch(`/api/v1/notes/${noteId}/flashcards`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ count: 5 }) });
       const d = await res.json();
-      if (d.data) { toast.success(`${d.data.count} flashcard dibuat!`); loadCards(); }
+      if (d.data) { toast.success(`${d.data.count} flashcard dibuat!`); setFlipped(false); setCurrentCard(0); loadCards(); }
       else toast.error(d.error?.message || 'Gagal generate flashcard');
     } catch { toast.error('Gagal generate flashcard'); }
     finally { setGenerating(false); }
   }
 
   if (loading) return <div className="mx-auto w-full flex flex-col items-center justify-center py-20" style={{ maxWidth: '1120px' }}><div className="flex h-14 w-14 items-center justify-center rounded-full" style={{ background: 'var(--bg-accent)', borderRadius: '9999px' }}><Loader2 size={24} className="animate-spin" style={{ color: 'var(--accent-orange)' }} /></div><p className="mt-4 text-sm text-muted">Making cards...</p></div>;
-  if (cards.length === 0) return <div className="mx-auto w-full" style={{ maxWidth: '1120px', padding: '0 clamp(28px, 5vw, 72px)' }}><div className="text-center py-12 rounded-2xl border-2 border-app"><Brain size={32} className="mx-auto text-muted mb-2" /><p className="text-sm text-muted mb-4">Belum ada flashcard.</p><button onClick={generate} disabled={generating} className="inline-flex items-center gap-2 rounded-full font-semibold" style={{ background: 'var(--accent-orange)', color: '#fff', fontSize: '14px', fontWeight: 600, padding: '0 24px', height: 44, borderRadius: '9999px' }}>{generating ? <Loader2 size={16} className="animate-spin" /> : <Plus size={16} />} Generate Flashcard</button></div></div>;
-  return <div className="mx-auto w-full space-y-3" style={{ maxWidth: '1120px', padding: '0 clamp(28px, 5vw, 72px)' }}>
-    {cards.map((c, i) => (<button key={c.id} onClick={() => setFlipped(flipped === i ? null : i)} className="card-pjr w-full text-left flex items-center" style={{ minHeight: 120 }}>{flipped === i ? <><p className="text-xs text-muted mb-1">JAWABAN</p><p className="text-sm">{c.back}</p></> : <><p className="text-xs text-muted mb-1">PERTANYAAN</p><p className="text-sm">{c.front}</p><p className="text-xs text-muted mt-2">Klik untuk lihat jawaban</p></>}</button>))}
-    <button onClick={generate} disabled={generating} className="inline-flex items-center gap-2 rounded-full font-semibold" style={{ background: 'var(--accent-orange)', color: '#fff', fontSize: '14px', fontWeight: 600, padding: '0 24px', height: 44, borderRadius: '9999px' }}>{generating ? <Loader2 size={16} className="animate-spin" /> : <Plus size={16} />} Generate Lagi</button>
-  </div>;
+
+  if (cards.length === 0) return (
+    <div className="mx-auto w-full" style={{ maxWidth: '1120px', padding: '0 clamp(28px, 5vw, 72px)' }}>
+      <div className="mx-auto flex min-h-[calc(100dvh-11rem)] w-full flex-col items-center justify-center" style={{ maxWidth: '672px' }}>
+        <div className="text-center">
+          <Brain size={48} className="mx-auto mb-4" style={{ color: 'var(--text-muted)' }} />
+          <p className="text-base font-semibold mb-2" style={{ color: 'var(--text-primary)' }}>Belum ada flashcard.</p>
+          <p className="text-sm mb-6" style={{ color: 'var(--text-muted)' }}>Generate flashcard dari materi ini untuk mulai berlatih.</p>
+          <button onClick={generate} disabled={generating} className="inline-flex items-center gap-2 rounded-full font-semibold transition-transform active:translate-y-0.5" style={{ background: 'var(--accent-orange)', color: '#fff', fontSize: '15px', fontWeight: 600, padding: '0 28px', height: 48, borderRadius: '9999px', boxShadow: '0 4px 0 #c5520a' }}>{generating ? <Loader2 size={18} className="animate-spin" /> : <Plus size={18} />} Generate Flashcard</button>
+        </div>
+      </div>
+    </div>
+  );
+
+  // Single-card-per-screen view (1:1 from auth HTML)
+  const card = cards[currentCard];
+  const total = cards.length;
+
+  return (
+    <div className="mx-auto w-full" style={{ maxWidth: '1120px', padding: '8px clamp(28px, 5vw, 72px) 80px' }}>
+      <div className="mx-auto flex min-h-[calc(100dvh-11rem)] w-full flex-col" style={{ maxWidth: '672px', padding: '0 20px 32px' }}>
+        <div className="m-auto w-full">
+          <div className="flex flex-col gap-5">
+            {/* Top bar: counter (N / M) + Regenerate/Restart/Manage buttons */}
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <span className="text-sm font-medium" style={{ color: 'var(--text-muted)' }}>{currentCard + 1} / {total}</span>
+              <div className="flex items-center gap-2">
+                <button onClick={generate} disabled={generating} className="inline-flex items-center justify-center gap-2 rounded-full font-semibold transition-all active:translate-y-0.5 disabled:opacity-50" style={{ height: 36, padding: '0 14px', fontSize: '14px', background: 'var(--bg-surface)', color: 'var(--text-primary)', boxShadow: '0 4px 0 var(--border)' }}>{generating ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />} Regenerate</button>
+                <button onClick={() => { setCurrentCard(0); setFlipped(false); }} className="inline-flex items-center justify-center gap-2 rounded-full font-semibold transition-all active:translate-y-0.5" style={{ height: 36, padding: '0 14px', fontSize: '14px', background: 'var(--bg-surface)', color: 'var(--text-primary)', boxShadow: '0 4px 0 var(--border)' }}><RotateCcw size={14} /> Restart</button>
+              </div>
+            </div>
+
+            {/* Flip card — 1:1 from auth: perspective-[1000px], two faces, rotateY */}
+            <div className="w-full" style={{ perspective: '1000px' }}>
+              <button type="button" onClick={() => setFlipped(prev => !prev)}
+                className="relative w-full cursor-pointer"
+                style={{ minHeight: '22rem', transformStyle: 'preserve-3d', transform: flipped ? 'rotateY(180deg)' : 'rotateY(0deg)', transition: 'transform 0.6s' }}>
+                {/* Question face */}
+                <div className="absolute inset-0 flex flex-col items-center justify-center text-center p-8 rounded-3xl border-2"
+                  style={{ backfaceVisibility: 'hidden', WebkitBackfaceVisibility: 'hidden', background: 'var(--bg-surface)', borderColor: 'var(--border)', boxShadow: '0 4px 0 var(--border)', borderRadius: '24px' }}>
+                  <div className="text-xs font-semibold mb-3" style={{ color: 'var(--text-muted)' }}>Question</div>
+                  <div className="font-bold" style={{ fontFamily: 'var(--font-heading)', fontSize: '22px', color: 'var(--text-primary)' }}>{card.front}</div>
+                  <div className="absolute bottom-6 left-0 right-0 text-center text-xs" style={{ color: 'var(--text-muted)' }}>Click to see the answer</div>
+                </div>
+                {/* Answer face */}
+                <div className="absolute inset-0 flex flex-col items-center justify-center text-center p-8 rounded-3xl border-2"
+                  style={{ backfaceVisibility: 'hidden', WebkitBackfaceVisibility: 'hidden', background: 'var(--bg-accent)', borderColor: 'var(--accent-orange)', boxShadow: '0 4px 0 #c5520a', borderRadius: '24px', transform: 'rotateY(180deg)' }}>
+                  <div className="text-xs font-semibold mb-3" style={{ color: 'var(--text-muted)' }}>Answer</div>
+                  <div className="text-base leading-relaxed" style={{ color: 'var(--text-primary)' }}>{card.back}</div>
+                </div>
+              </button>
+            </div>
+
+            {/* Navigation: Previous / Next */}
+            <div className="flex items-center justify-between">
+              <button type="button" onClick={() => { if (currentCard > 0) { setCurrentCard(prev => prev - 1); setFlipped(false); } }} disabled={currentCard === 0}
+                className="inline-flex items-center gap-2 rounded-xl font-heading text-sm font-bold transition-all disabled:opacity-40" style={{ height: 44, padding: '0 12px', color: 'var(--text-primary)' }}>
+                <ChevronRight size={16} className="rotate-180" /> Previous
+              </button>
+              <button type="button" onClick={() => { if (currentCard < total - 1) { setCurrentCard(prev => prev + 1); setFlipped(false); } }} disabled={currentCard === total - 1}
+                className="inline-flex items-center gap-2 rounded-xl font-heading text-sm font-bold transition-all disabled:opacity-40" style={{ height: 44, padding: '0 12px', color: 'var(--text-primary)' }}>
+                Next <ChevronRight size={16} />
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 // === Tab 6: Sumber (Sources) — file list + per-document chat ===

@@ -1,0 +1,1 @@
+import{Mr as e}from"./icon-y25c3iuB.js";function t(t,n){e.post(`/analytics/track`,{event_type:t,metadata:n}).catch(()=>{})}export{t};

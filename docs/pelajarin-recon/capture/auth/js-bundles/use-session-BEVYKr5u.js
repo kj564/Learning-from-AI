@@ -1,0 +1,1 @@
+import{Fr as e}from"./icon-y25c3iuB.js";import{t}from"./session-B_2m9hXf.js";import{n,r}from"./auth-DZZ_M8S5.js";function i(){let{data:i,isLoading:a}=e(t()),o=i??null;return{session:o,isLoading:a,isAuthenticated:!!o,signIn:()=>n(),signUp:()=>n({prompt:`create`}),signOut:()=>r()}}export{i as t};

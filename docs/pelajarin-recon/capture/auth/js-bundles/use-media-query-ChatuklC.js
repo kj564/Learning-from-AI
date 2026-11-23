@@ -1,0 +1,1 @@
+import{o as e}from"./rolldown-runtime-DAXXjFlN.js";import{n as t}from"./jsx-runtime-BTND-Rlb.js";var n=e(t(),1);function r(e){return(0,n.useSyncExternalStore)((0,n.useCallback)(t=>{let n=window.matchMedia(e);return n.addEventListener(`change`,t),()=>n.removeEventListener(`change`,t)},[e]),()=>window.matchMedia(e).matches,()=>!1)}export{r as t};
