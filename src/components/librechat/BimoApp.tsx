@@ -434,8 +434,8 @@ function BimoNoteDetail({ note, activeTab, usage, onUpgrade, onBack }: { note: N
       {tab === 'belajar' && <BelajarTab note={noteDetail} onUpgrade={onUpgrade} onBack={onBack} />}
       {tab === 'catatan' && <CatatanTab note={noteDetail} noteId={note.id} />}
       {tab === 'mindmap' && <MindmapTab note={noteDetail} />}
-      {tab === 'kuis' && <QuizTab noteId={note.id} />}
-      {tab === 'flashcard' && <FlashcardTab noteId={note.id} />}
+      {tab === 'kuis' && <QuizTab key={`quiz-${note.id}-${tab}`} noteId={note.id} />}
+      {tab === 'flashcard' && <FlashcardTab key={`flash-${note.id}-${tab}`} noteId={note.id} />}
       {tab === 'sumber' && <SourcesTab note={noteDetail} />}
       {tab === 'chat' && <ChatTab noteId={note.id} noteTitle={note.title} usage={usage} />}
       {tab === 'podcast' && <PodcastTab noteId={note.id} noteTitle={note.title} />}
