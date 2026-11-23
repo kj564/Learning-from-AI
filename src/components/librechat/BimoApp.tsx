@@ -122,46 +122,54 @@ export function BimoApp() {
 
   return (
     <div className="min-h-screen bg-app text-app flex flex-col" style={{ fontFamily: 'var(--font-body)', color: 'var(--text-primary)' }}>
-      {/* Header — captured: h-64, glass bg, sticky, pad 0 28px, gap 12px */}
-      <header className="sticky top-0 z-50 flex items-center gap-3 header-glass border-b border-app" style={{ height: 'var(--header-h)', padding: 'var(--header-pad)', gap: 'var(--header-gap)' }}>
-        <a href="/" className="flex items-center" style={{ gap: 8 }}>
-          {/* Real pelajarin.ai logo (64x64 logo.png) — used as-is per "pakai aset asli dulu" */}
+      {/* Header — COPY PASTE 1:1 from pelajarin.ai dashboard.html */}
+      <header data-mode-header="true" className="sticky top-0 z-50 flex h-16 items-center gap-3 bg-[color-mix(in_srgb,var(--color-surface)_82%,transparent)] px-[clamp(16px,3vw,28px)] backdrop-blur-2xl max-lg:gap-2 max-lg:px-4">
+        <a className="flex flex-none items-center gap-2" aria-label="bimo.ai" href="/">
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="/pelajarin-assets/img/logo.png" alt="Bimo logo" width={32} height={32} style={{ objectFit: 'contain' }} />
-          <span className="font-bold" style={{ fontFamily: 'var(--font-heading)', fontSize: 'var(--text-logo)', fontWeight: 700 }}>bimo.ai</span>
+          <img alt="" className="block size-8 object-contain dark:hidden" src="/pelajarin-assets/img/logo-light.png" />
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img alt="" className="hidden size-8 object-contain dark:block" src="/pelajarin-assets/img/logo-dark.png" />
+          <span className="font-heading text-xl font-bold leading-none tracking-tight text-text-primary max-sm:hidden">bimo.ai</span>
         </a>
-        <button className="flex h-8 w-8 items-center justify-center rounded-full border-2 border-app transition-colors hover:border-[var(--accent-orange)]" style={{ fontSize: '11px', color: 'var(--text-muted)' }} aria-label="Toggle mode"><History size={14} /></button>
-        {/* Breadcrumb — captured: home icon + black bold text + › separator + orange active tab */}
-        <nav className="flex items-center gap-2 text-sm font-semibold" style={{ fontSize: 'var(--text-nav)' }} aria-label="Breadcrumb">
+        <button type="button" title="Classic" aria-label="Classic" className="group inline-flex h-8 flex-none items-center rounded-full border border-border px-1.5 font-body text-xs font-semibold text-text-secondary transition-colors hover:border-text-secondary hover:text-text-primary">
+          <History size={18} className="shrink-0" />
+          <span className="grid grid-cols-[0fr] transition-[grid-template-columns] duration-200 ease-out group-hover:grid-cols-[1fr]"><span className="min-w-0 overflow-hidden whitespace-nowrap"><span className="block pl-1.5 pr-1">Classic</span></span></span>
+        </button>
+        <span className="h-6 w-px flex-none bg-border max-sm:hidden" />
+        <nav className="flex min-w-0 items-center gap-2 overflow-hidden whitespace-nowrap text-sm font-medium" aria-label="Breadcrumb">
           {view === 'dashboard' ? (
-            <span className="flex items-center gap-1.5" style={{ color: 'var(--text-primary)' }}><Home size={14} /> Home</span>
+            <a aria-current="page" className="inline-flex flex-none items-center gap-1.5 font-semibold text-text-primary active" href="/"><Home size={18} className="shrink-0" />Home</a>
           ) : (
             <>
-              <a href="/" className="flex items-center gap-1.5" style={{ color: 'var(--text-primary)' }}><Home size={14} /> Home</a>
-              <ChevronRight size={12} className="text-muted" />
-              <span style={{ color: 'var(--text-primary)' }}>{activeNote?.title.slice(0, 30)}</span>
-              <ChevronRight size={12} className="text-muted" />
-              <span style={{ color: 'var(--accent-orange)' }}>{TABS.find(t => t.url === activeTab)?.label}</span>
+              <a className="inline-flex flex-none items-center gap-1.5 font-semibold text-text-primary" href="/"><Home size={18} className="shrink-0" />Home</a>
+              <ChevronRight size={12} className="shrink-0 text-text-muted" />
+              <span className="truncate font-semibold text-text-primary">{activeNote?.title}</span>
+              <ChevronRight size={12} className="shrink-0 text-text-muted" />
+              <span className="font-semibold text-primary">{TABS.find(t => t.url === activeTab)?.label}</span>
             </>
           )}
         </nav>
-        <div className="ml-auto flex items-center gap-2">
-          {/* Become a Creator — captured: gradient orange pill with shadow */}
-          <a href="#" className="inline-flex h-9 items-center gap-2 rounded-full px-4 text-sm font-semibold transition-transform hover:-translate-y-0.5 active:translate-y-0.5" style={{ padding: '0 16px', height: 36, fontSize: 'var(--text-nav)', background: 'linear-gradient(90deg, #f76703, #fa9a3c)', color: '#fff', boxShadow: '0 4px 0 #c45200' }}><Star size={14} /> Become a Creator</a>
-          {/* Streak — captured: yellow bg pill with Flame icon. Click → gamification hub. */}
-          <button onClick={() => setHubOpen(true)} className="inline-flex h-9 items-center gap-1.5 rounded-full px-4 text-sm font-semibold transition-transform hover:-translate-y-0.5 active:translate-y-0.5" style={{ background: '#fef9c3', color: '#a16207', padding: '0 14px', height: 36, fontSize: 'var(--text-nav)' }}>
-            <Flame size={14} /> Streak {gamification?.streak?.current ?? 0}
-          </button>
-          {/* Level — captured: blue bg pill with Trophy icon. Click → gamification hub. */}
-          <button onClick={() => setHubOpen(true)} className="inline-flex h-9 items-center gap-1.5 rounded-full px-4 text-sm font-semibold transition-transform hover:-translate-y-0.5 active:translate-y-0.5" style={{ background: '#dbeafe', color: '#1d4ed8', padding: '0 14px', height: 36, fontSize: 'var(--text-nav)' }}>
-            <Trophy size={14} /> Level {gamification?.level ?? 1}
-          </button>
-          {/* Upgrade — captured: orange bg pill with Sparkles icon. Opens PricingModal. */}
-          <button onClick={() => setPricingOpen(true)} className="inline-flex h-9 items-center gap-1.5 rounded-full px-4 text-sm font-semibold transition-transform hover:-translate-y-0.5 active:translate-y-0.5" style={{ background: 'var(--accent-orange)', color: '#fff', padding: '0 16px', height: 36, fontSize: 'var(--text-nav)' }}>
-            <Sparkles size={14} /> Upgrade
-          </button>
-          {/* Avatar — captured: 36x36 round with initial */}
-          <div className="flex items-center justify-center rounded-full text-sm font-bold" style={{ background: 'var(--bg-surface)', width: 36, height: 36, color: 'var(--text-primary)' }}>{user?.name?.[0] || 'B'}</div>
+        <span className="flex-1" />
+        <a title="Become a Creator" aria-label="Become a Creator" className="relative inline-flex h-9 flex-none items-center justify-center gap-2 overflow-hidden rounded-full px-4 font-body text-sm font-semibold text-text-inverse transition-[box-shadow,transform,background-color] active:translate-y-0.5 max-sm:px-3 bg-[linear-gradient(90deg,var(--color-pill-affiliate-from),var(--color-pill-affiliate-to))] shadow-[0_4px_0_var(--color-pill-affiliate-shadow)] hover:brightness-105 active:shadow-[0_2px_0_var(--color-pill-affiliate-shadow)]" href="#" onClick={(e) => e.preventDefault()}>
+          <Star size={18} className="shrink-0" />
+          <span className="grid text-center whitespace-nowrap max-sm:hidden"><span className="col-start-1 row-start-1 invisible">Affiliate</span><span className="col-start-1 row-start-1">Become a Creator</span></span>
+        </a>
+        <a title="Streak ends at midnight" className="relative inline-flex h-9 flex-none items-center gap-2 rounded-full px-4 font-body text-sm font-semibold transition-[box-shadow,transform] active:translate-y-0.5 bg-[linear-gradient(90deg,var(--color-pill-streak-from),var(--color-pill-streak-to))] text-text-inverse shadow-[0_4px_0_var(--color-pill-streak-shadow)] active:shadow-[0_2px_0_var(--color-pill-streak-shadow)] max-md:hidden" href="#" onClick={(e) => { e.preventDefault(); setHubOpen(true); }}>
+          <Flame size={18} className="shrink-0 motion-safe:animate-pulse" />
+          <span>Streak</span>
+          <span className="font-bold">{gamification?.streak?.current ?? 0}</span>
+        </a>
+        <a title="Level" className="relative inline-flex h-9 flex-none items-center justify-center gap-2 overflow-hidden rounded-full px-4 font-body text-sm font-semibold text-text-inverse transition-[box-shadow,transform,background-color] active:translate-y-0.5 max-sm:px-3 bg-[linear-gradient(90deg,var(--color-pill-level-from),var(--color-pill-level-to))] shadow-[0_4px_0_var(--color-pill-level-shadow)] active:shadow-[0_2px_0_var(--color-pill-level-shadow)] max-md:hidden" href="#" onClick={(e) => { e.preventDefault(); setHubOpen(true); }}>
+          <Trophy size={18} className="shrink-0" />
+          <span>Level</span>
+          <span className="font-bold">{gamification?.level ?? 1}</span>
+        </a>
+        <button onClick={() => setPricingOpen(true)} className="relative inline-flex h-9 flex-none items-center justify-center gap-2 overflow-hidden rounded-full px-4 font-body text-sm font-semibold text-text-inverse transition-[box-shadow,transform,background-color] active:translate-y-0.5 max-sm:px-3 bg-[linear-gradient(135deg,var(--color-primary)_0%,color-mix(in_srgb,var(--color-primary)_55%,var(--color-warning))_100%)] shadow-[0_4px_0_var(--color-primary-dark)] active:shadow-[0_2px_0_var(--color-primary-dark)]">
+          <Sparkles size={18} className="relative z-10 shrink-0" />
+          <span className="relative z-10 max-sm:hidden">Upgrade</span>
+        </button>
+        <div className="relative flex-none">
+          <button type="button" aria-label={user?.name || 'B'} className="grid size-9 translate-y-[2px] place-items-center overflow-hidden rounded-full bg-primary font-heading text-sm font-bold text-text-inverse ring-2 ring-transparent transition hover:ring-border-light">{user?.name?.[0] || 'B'}</button>
         </div>
       </header>
 
