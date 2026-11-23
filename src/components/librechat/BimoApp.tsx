@@ -230,19 +230,16 @@ function DashboardSidebar() {
 // === Note detail sidebar (9 tabs — captured) ===
 function NoteSidebar({ activeTab, onTabChange }: { activeTab: string; onTabChange: (t: string) => void }) {
   return (
-    <aside className="sticky top-16 z-40 hidden flex-col self-start border-r border-app bg-app sm:flex" style={{ width: 'var(--sidebar-w)', height: 'calc(100vh - 4rem)', padding: '20px 8px' }}>
-      <nav className="flex flex-col gap-2" aria-label="Main navigation">
+    <aside className="sticky top-16 z-40 hidden flex-col self-start border-r border-border bg-surface sm:flex" style={{ width: 'var(--sidebar-w, 96px)', height: 'calc(100vh - 4rem)' }}>
+      {/* COPY PASTE 1:1 from pelajarin.ai — nav with 9 tab buttons */}
+      <nav className="flex min-h-0 flex-1 flex-col justify-center-safe gap-3 overflow-y-auto overflow-x-hidden [&::-webkit-scrollbar]:w-0 pb-24" aria-label="Main navigation">
         {TABS.map(tab => (
           <button
             key={tab.id}
             onClick={() => onTabChange(tab.url)}
-            className="flex w-full flex-col items-center gap-1.5 rounded-xl p-1.5 text-center font-semibold transition-colors"
-            style={{
-              fontSize: '12px', fontWeight: 600, borderRadius: '20px',
-              color: activeTab === tab.url ? 'var(--accent-orange)' : 'var(--text-muted)',
-            }}
+            className={`flex w-full flex-col items-center gap-1.5 rounded-xl px-1 py-1.5 text-center font-body text-[12px] font-semibold leading-tight transition-colors ${activeTab === tab.url ? 'text-primary' : 'text-text-secondary hover:text-text-primary'}`}
           >
-            <tab.icon size={20} />
+            <span className="relative"><tab.icon size={26} className="shrink-0" /></span>
             {tab.label}
           </button>
         ))}
