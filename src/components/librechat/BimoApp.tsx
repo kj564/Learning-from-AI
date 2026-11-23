@@ -35,7 +35,7 @@ import {
   Network, FolderOpen, GraduationCap, Plus, Download,
   Bold, Italic, Underline, Type, AlignLeft,
   RotateCcw, Star, Trophy, Crown, Sparkles,
-  MoreHorizontal, Home, Search, Lightbulb, RefreshCw, RotateCw, Settings, History, Star,
+  MoreHorizontal, Home, Search, Lightbulb, RefreshCw, RotateCw, Settings, History,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import Markdown from '@/components/librechat/Markdown';
