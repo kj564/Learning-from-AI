@@ -136,8 +136,8 @@ export function BimoApp() {
           {view === 'note' && <><span className="text-muted">›</span><span style={{ color: 'var(--accent-orange)' }}>{TABS.find(t => t.url === activeTab)?.label}</span></>}
         </nav>
         <div className="ml-auto flex items-center gap-2">
-          {/* Become a Creator — captured: outline pill */}
-          <a href="#" className="inline-flex h-9 items-center gap-2 rounded-full px-4 text-sm font-semibold" style={{ padding: '0 16px', height: 36, fontSize: 'var(--text-nav)', border: '2px solid var(--border)', color: 'var(--text-primary)' }}>Become a Creator</a>
+          {/* Become a Creator — captured: orange solid pill (per VLM, pelajarin uses gradient orange) */}
+          <a href="#" className="inline-flex h-9 items-center gap-2 rounded-full px-4 text-sm font-semibold transition-transform hover:-translate-y-0.5 active:translate-y-0.5" style={{ padding: '0 16px', height: 36, fontSize: 'var(--text-nav)', background: 'var(--accent-orange)', color: '#fff' }}>Become a Creator</a>
           {/* Streak — captured: yellow bg pill with Flame icon. Click → gamification hub. */}
           <button onClick={() => setHubOpen(true)} className="inline-flex h-9 items-center gap-1.5 rounded-full px-4 text-sm font-semibold transition-transform hover:-translate-y-0.5 active:translate-y-0.5" style={{ background: '#fef9c3', color: '#a16207', padding: '0 14px', height: 36, fontSize: 'var(--text-nav)' }}>
             <Flame size={14} /> Streak {gamification?.streak?.current ?? 0}

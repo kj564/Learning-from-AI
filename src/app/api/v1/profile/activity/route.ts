@@ -12,7 +12,7 @@
  */
 
 import { NextRequest } from 'next/server';
-import { ensureDevUser, setDevUserCookie, success, cursorPaginationMeta } from '@/lib/learning';
+import { ensureDevUser, setDevUserCookie, successWithPagination, cursorPaginationMeta } from '@/lib/learning';
 import { db } from '@/lib/db';
 
 export async function GET(req: NextRequest) {
@@ -97,7 +97,7 @@ export async function GET(req: NextRequest) {
   const hasMore = items.length > limit;
   const nextCursor = hasMore ? sliced[sliced.length - 1]?.id : null;
 
-  return setDevUserCookie(success(sliced, cursorPaginationMeta(nextCursor, limit)), user.id);
+  return setDevUserCookie(successWithPagination(sliced, cursorPaginationMeta(nextCursor, limit)), user.id);
 }
 
 function humanizeReason(reason: string): string {

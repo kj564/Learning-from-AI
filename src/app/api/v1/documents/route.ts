@@ -4,7 +4,7 @@
  */
 
 import { NextRequest } from 'next/server';
-import { ensureDevUser, setDevUserCookie, success, cursorPaginationMeta } from '@/lib/learning';
+import { ensureDevUser, setDevUserCookie, successWithPagination, cursorPaginationMeta } from '@/lib/learning';
 import { db } from '@/lib/db';
 
 export async function GET(req: NextRequest) {
@@ -24,7 +24,7 @@ export async function GET(req: NextRequest) {
   const items = hasMore ? docs.slice(0, limit) : docs;
   const nextCursor = hasMore ? items[items.length - 1].id : null;
 
-  return setDevUserCookie(success(
+  return setDevUserCookie(successWithPagination(
     items.map(d => ({
       id: d.id,
       filename: d.filename,
