@@ -330,6 +330,20 @@ function BimoDashboard({ notes, usage, onNoteClick, onNoteCreated }: { notes: No
           <button onClick={handleCreateNote} type="button" aria-label="Send" disabled={uploading} className="grid size-11 flex-none place-items-center rounded-full transition-[transform,box-shadow,background-color] bg-primary-light text-primary"><Send size={20} className="shrink-0" /></button>
         </div>
       </section>
+      {/* Keep learning banner — COPY PASTE 1:1 from pelajarin.ai */}
+      {notes.length > 0 && (
+        <a className="mx-auto mt-6 flex w-max max-w-full items-center gap-3 rounded-full border-2 border-border bg-surface py-2 pl-3 pr-2 text-text-primary" href="#" onClick={(e) => { e.preventDefault(); onNoteClick(notes[0]); }}>
+          {/* Progress ring — SVG with stroke-dashoffset */}
+          <div className="relative flex-none" style={{ width: 32, height: 32 }}>
+            <svg viewBox="0 0 32 32" className="size-full -rotate-90">
+              <circle cx="16" cy="16" r="13" fill="none" stroke="var(--color-surface-tertiary)" strokeWidth="4" />
+              <circle cx="16" cy="16" r="13" fill="none" stroke="var(--color-primary)" strokeWidth="4" strokeLinecap="round" strokeDasharray="81.68" strokeDashoffset={81.68 * (1 - (notes[0].total_chapters > 0 ? Math.min(1, 1 / notes[0].total_chapters) : 0))} className="transition-[stroke-dashoffset] duration-500" />
+            </svg>
+          </div>
+          <span className="truncate text-sm font-semibold">{notes[0].title}</span>
+          <span className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-full bg-primary-light px-4 py-2 text-sm font-semibold text-primary">Keep learning <ChevronRight size={18} className="shrink-0" /></span>
+        </a>
+      )}
       {/* Notes section — COPY PASTE 1:1 from pelajarin.ai dashboard.html */}
       <div className="mb-4 mt-12 flex items-center gap-3">
         <span className="min-w-0 flex-1">
