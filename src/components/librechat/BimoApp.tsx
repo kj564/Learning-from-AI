@@ -141,11 +141,11 @@ export function BimoApp() {
             <a aria-current="page" className="inline-flex flex-none items-center gap-1.5 font-semibold text-text-primary active" href="/"><Home size={18} className="shrink-0" />Home</a>
           ) : (
             <>
-              <a className="inline-flex flex-none items-center gap-1.5 font-semibold text-text-primary" href="/"><Home size={18} className="shrink-0" />Home</a>
-              <ChevronRight size={12} className="shrink-0 text-text-muted" />
-              <span className="truncate font-semibold text-text-primary">{activeNote?.title}</span>
-              <ChevronRight size={12} className="shrink-0 text-text-muted" />
-              <span className="font-semibold text-primary">{TABS.find(t => t.url === activeTab)?.label}</span>
+              <a className="inline-flex flex-none items-center gap-1.5 text-text-secondary hover:text-text-primary" href="/"><Home size={18} className="shrink-0" />Home</a>
+              <span className="text-text-muted">›</span>
+              <a className="max-w-[40vw] truncate text-text-secondary hover:text-text-primary lg:max-w-[28vw]" href="#" onClick={(e) => { e.preventDefault(); setView('dashboard'); setActiveNote(null); }}>{activeNote?.title}</a>
+              <span className="text-text-muted">›</span>
+              <span className="flex-none font-semibold text-text-primary" aria-current="page">{TABS.find(t => t.url === activeTab)?.label}</span>
             </>
           )}
         </nav>
@@ -1393,7 +1393,7 @@ function StickyTab() {
         {filtered.length === 0 && notes.length === 0 ? (
           <div className="mx-auto flex max-w-md flex-col items-center gap-3 py-16 text-center">
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img alt="" aria-hidden="true" className="object-contain size-40" src="/pelajarin-assets/img/write-Bi8IeuzT.webp" />
+            <img alt="" aria-hidden="true" className="object-contain size-40" src="/assets/write-Bi8IeuzT.webp" />
             <h2 className="font-bold" style={{ fontFamily: 'var(--font-heading)', fontSize: '20px', color: 'var(--text-primary)' }}>No sticky notes yet</h2>
             <p className="text-sm leading-relaxed" style={{ color: 'var(--text-muted)' }}>Press + in the top-right to add one, or drag a note off the board to stick it on the page.</p>
           </div>
