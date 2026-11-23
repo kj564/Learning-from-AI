@@ -34,10 +34,11 @@ import {
   BookOpen, Layers, Grid3x3, List, Headphones, StickyNote,
   Network, FolderOpen, GraduationCap, Plus, Download,
   Bold, Italic, Underline, Type, AlignLeft,
-  ZoomIn, ZoomOut, Maximize, RotateCcw,
+  RotateCcw,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import Markdown from '@/components/librechat/Markdown';
+import { MindmapView } from '@/components/librechat/MindmapView';
 
 // Types
 interface User { id: string; name: string; email: string; plan: string; }
@@ -295,7 +296,7 @@ function BimoNoteDetail({ note, activeTab, usage, onBack }: { note: Note; active
       {tab === 'flashcard' && <FlashcardTab noteId={note.id} />}
       {tab === 'sumber' && <SourcesTab note={noteDetail} />}
       {tab === 'chat' && <ChatTab noteId={note.id} noteTitle={note.title} usage={usage} />}
-      {tab === 'podcast' && <PodcastTab noteTitle={note.title} />}
+      {tab === 'podcast' && <PodcastTab noteId={note.id} noteTitle={note.title} />}
       {tab === 'tempel' && <StickyTab />}
     </main>
   );
@@ -355,22 +356,12 @@ function CatatanTab({ note }: { note: any }) {
   );
 }
 
-// === Tab 3: Mindmap — ReactFlow canvas ===
+// === Tab 3: Mindmap — ReactFlow canvas (radial tree from chapters) ===
 function MindmapTab({ note }: { note: any }) {
   return (
     <div className="flex h-full items-stretch">
       <div className="relative flex-1 overflow-hidden" style={{ background: 'var(--bg-surface)' }}>
-        {/* Zoom controls — captured: 26px close, 44px zoom buttons, 56px center */}
-        <div className="absolute bottom-4 left-4 flex flex-col gap-2">
-          <button className="flex h-11 w-11 items-center justify-center rounded-2xl bg-app shadow-md" style={{ borderRadius: '16px' }}><ZoomIn size={18} /></button>
-          <button className="flex h-11 w-11 items-center justify-center rounded-2xl bg-app shadow-md" style={{ borderRadius: '16px' }}><ZoomOut size={18} /></button>
-          <button className="flex h-11 w-11 items-center justify-center rounded-2xl bg-app shadow-md" style={{ borderRadius: '16px' }}><Maximize size={18} /></button>
-        </div>
-        <button className="absolute bottom-4 right-4 flex h-14 w-14 items-center justify-center rounded-full shadow-md" style={{ background: 'var(--accent-orange)', color: '#fff', borderRadius: '9999px' }}><RotateCcw size={20} /></button>
-        {/* Mindmap nodes (placeholder — would be ReactFlow) */}
-        <div className="flex h-full items-center justify-center">
-          <p className="text-sm text-muted">Mindmap akan muncul di sini (ReactFlow)</p>
-        </div>
+        <MindmapView note={note} />
       </div>
     </div>
   );
@@ -564,19 +555,148 @@ function ChatTab({ noteId, noteTitle, usage }: { noteId: string; noteTitle: stri
   );
 }
 
-// === Tab 8: Podcast — 4 AI host personas + style suggestions + 3/7 min ===
-function PodcastTab({ noteTitle }: { noteTitle: string }) {
+// === Tab 8: Podcast — 4 AI host personas + generate + sequential playback ===
+function PodcastTab({ noteId, noteTitle }: { noteId: string; noteTitle: string }) {
   const HOSTS = [
     { name: 'Pai', role: 'Explainer', color: 'var(--accent-orange)' },
     { name: 'Kiko', role: 'The curious one', color: 'var(--accent-blue)' },
     { name: 'Bolu', role: 'Storyteller', color: 'var(--accent-green)' },
     { name: 'Meli', role: 'Exam coach', color: 'var(--accent-red)' },
   ];
-  const SUGGESTIONS = ['Make it funnier', 'Use anime examples', 'Like canteen gossip', 'Focus on exam questions', 'Go slow, I\'m a beginner'];
+  const SUGGESTIONS = ['Make it funnier', 'Use anime examples', 'Like canteen gossip', 'Focus on exam questions', "Go slow, I'm a beginner"];
   const [selected, setSelected] = useState<string[]>(['Pai', 'Kiko']);
   const [duration, setDuration] = useState<'3' | '7'>('3');
   const [language, setLanguage] = useState<'id' | 'en'>('id');
+  const [activeStyle, setActiveStyle] = useState<string | null>(null);
 
+  // Generation + playback state
+  const [generating, setGenerating] = useState(false);
+  const [progress, setProgress] = useState<string>('');
+  const [result, setResult] = useState<{ segments: { speaker: string; text: string; url: string }[] } | null>(null);
+  const [currentSeg, setCurrentSeg] = useState(0);
+  const [playing, setPlaying] = useState(false);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+
+  async function generate() {
+    if (selected.length !== 2) { toast.error('Pilih 2 host dulu'); return; }
+    setGenerating(true);
+    setProgress('Bimo lagi nulis skrip podcast...');
+    try {
+      const res = await fetch(`/api/v1/notes/${noteId}/podcast`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ hosts: selected, duration, language, style: activeStyle || undefined }),
+      });
+      const d = await res.json();
+      if (d.data?.segments?.length > 0) {
+        setResult({ segments: d.data.segments });
+        setCurrentSeg(0);
+        toast.success(`${d.data.total_segments} segmen podcast siap!`);
+      } else {
+        toast.error(d.error?.message || 'Gagal generate podcast');
+      }
+    } catch (e) {
+      toast.error(`Gagal: ${e instanceof Error ? e.message : String(e)}`);
+    } finally { setGenerating(false); setProgress(''); }
+  }
+
+  // Sequential playback — when a segment ends, advance to the next
+  function onEnded() {
+    if (!result) return;
+    if (currentSeg < result.segments.length - 1) {
+      setCurrentSeg(prev => prev + 1);
+      setPlaying(true);
+    } else {
+      setPlaying(false);
+      setCurrentSeg(0);
+    }
+  }
+
+  // Autoplay the next segment when it changes (during sequential play)
+  useEffect(() => {
+    if (playing && audioRef.current && result) {
+      audioRef.current.src = result.segments[currentSeg].url;
+      audioRef.current.play().catch(() => {});
+    }
+  }, [currentSeg, playing, result]);
+
+  function togglePlay() {
+    if (!result) return;
+    if (!playing) { setPlaying(true); }
+    else { setPlaying(false); audioRef.current?.pause(); }
+  }
+
+  function nextSeg() {
+    if (result && currentSeg < result.segments.length - 1) setCurrentSeg(prev => prev + 1);
+  }
+  function prevSeg() {
+    if (currentSeg > 0) setCurrentSeg(prev => prev - 1);
+  }
+
+  // === Result view — player + transcript ===
+  if (result) {
+    const seg = result.segments[currentSeg];
+    const hostColor = HOSTS.find(h => h.name === seg.speaker)?.color || 'var(--accent-orange)';
+    return (
+      <div className="mx-auto flex w-full flex-col" style={{ maxWidth: '760px', padding: '32px clamp(28px, 5vw, 72px)' }}>
+        <div className="mb-4 flex items-center gap-3">
+          <button onClick={() => { setResult(null); setPlaying(false); audioRef.current?.pause(); }} className="inline-flex items-center gap-1 text-sm font-semibold" style={{ color: 'var(--accent-orange)' }}><ArrowLeft size={16} /> Buat ulang</button>
+          <h2 className="text-xl font-bold" style={{ fontFamily: 'var(--font-heading)' }}>{noteTitle}</h2>
+        </div>
+
+        {/* Now playing card */}
+        <div className="mb-6 rounded-2xl border-2 border-app p-5" style={{ borderRadius: '24px' }}>
+          <div className="mb-4 flex items-center gap-3">
+            <div className="flex h-12 w-12 items-center justify-center rounded-full" style={{ background: hostColor, color: '#fff', fontWeight: 700 }}>{seg.speaker[0]}</div>
+            <div className="flex-1">
+              <p className="text-sm font-semibold">{seg.speaker}</p>
+              <p className="text-xs text-muted">Segmen {currentSeg + 1} dari {result.segments.length}</p>
+            </div>
+            <span className="text-xs text-muted">{duration} min</span>
+          </div>
+          <p className="text-sm mb-4" style={{ color: 'var(--text-primary)' }}>{seg.text}</p>
+
+          {/* Audio element (hidden, controlled by buttons) */}
+          <audio ref={audioRef} onEnded={onEnded} preload="auto" className="hidden" />
+
+          {/* Player controls */}
+          <div className="flex items-center justify-center gap-3">
+            <button onClick={prevSeg} disabled={currentSeg === 0} className="flex h-10 w-10 items-center justify-center rounded-full disabled:opacity-30" style={{ background: 'var(--bg-surface)', borderRadius: '9999px' }}>
+              <RotateCcw size={16} />
+            </button>
+            <button onClick={togglePlay} className="flex h-14 w-14 items-center justify-center rounded-full" style={{ background: 'var(--accent-orange)', color: '#fff', borderRadius: '9999px' }}>
+              {playing ? <span style={{ fontSize: 18 }}>❚❚</span> : <span style={{ fontSize: 18, marginLeft: 2 }}>▶</span>}
+            </button>
+            <button onClick={nextSeg} disabled={currentSeg >= result.segments.length - 1} className="flex h-10 w-10 items-center justify-center rounded-full disabled:opacity-30" style={{ background: 'var(--bg-surface)', borderRadius: '9999px' }}>
+              <ChevronRight size={16} />
+            </button>
+          </div>
+          {/* Progress bar */}
+          <div className="mt-4 h-1.5 w-full rounded-full" style={{ background: 'var(--bg-surface)' }}>
+            <div className="h-full rounded-full transition-all" style={{ width: `${((currentSeg + 1) / result.segments.length) * 100}%`, background: 'var(--accent-orange)' }} />
+          </div>
+        </div>
+
+        {/* Transcript */}
+        <p className="text-sm font-semibold mb-3">Transkrip</p>
+        <div className="max-h-96 overflow-y-auto space-y-2 pr-2" style={{ scrollbarWidth: 'thin' }}>
+          {result.segments.map((s, i) => {
+            const c = HOSTS.find(h => h.name === s.speaker)?.color || 'var(--accent-orange)';
+            return (
+              <button key={i} onClick={() => { setCurrentSeg(i); setPlaying(true); }} className="block w-full text-left rounded-xl p-3 transition-colors" style={{ background: i === currentSeg ? 'var(--bg-accent)' : 'transparent', borderRadius: '16px', border: `2px solid ${i === currentSeg ? 'var(--accent-orange)' : 'var(--border)'}` }}>
+                <div className="flex items-center gap-2 mb-1">
+                  <div className="flex h-6 w-6 items-center justify-center rounded-full text-xs font-bold" style={{ background: c, color: '#fff' }}>{s.speaker[0]}</div>
+                  <span className="text-xs font-semibold">{s.speaker}</span>
+                </div>
+                <p className="text-sm" style={{ color: 'var(--text-primary)' }}>{s.text}</p>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    );
+  }
+
+  // === Setup view — pick hosts, style, duration, generate ===
   return (
     <div className="mx-auto flex w-full flex-col" style={{ maxWidth: '1360px', minHeight: 'calc(100svh - 4rem)' }}>
       <div className="mx-auto w-full" style={{ maxWidth: '760px', padding: '32px clamp(28px, 5vw, 72px)' }}>
@@ -598,7 +718,9 @@ function PodcastTab({ noteTitle }: { noteTitle: string }) {
         {/* Style suggestions — captured: pill 13px/600 */}
         <p className="text-sm font-semibold mb-3">What should the chat be like?</p>
         <div className="mb-6 flex flex-wrap gap-2">
-          {SUGGESTIONS.map(s => <button key={s} className="inline-flex items-center rounded-full font-semibold" style={{ background: 'var(--bg-surface)', fontSize: '13px', fontWeight: 600, padding: '6px 16px', borderRadius: '9999px' }}>{s}</button>)}
+          {SUGGESTIONS.map(s => (
+            <button key={s} onClick={() => setActiveStyle(prev => prev === s ? null : s)} className="inline-flex items-center rounded-full font-semibold transition-colors" style={{ background: activeStyle === s ? 'var(--accent-orange)' : 'var(--bg-surface)', color: activeStyle === s ? '#fff' : 'var(--text-primary)', fontSize: '13px', fontWeight: 600, padding: '6px 16px', borderRadius: '9999px' }}>{s}</button>
+          ))}
         </div>
         {/* Duration + language — captured: 167x44, radius 24px */}
         <div className="mb-6 flex gap-2">
@@ -607,8 +729,14 @@ function PodcastTab({ noteTitle }: { noteTitle: string }) {
         <div className="mb-6 flex gap-2">
           {['Indonesian', 'English'].map((l, i) => <button key={l} onClick={() => setLanguage(i === 0 ? 'id' : 'en')} className="font-semibold" style={{ width: 167, height: 44, borderRadius: '24px', fontSize: '14px', fontWeight: 600, border: `2px solid ${language === (i === 0 ? 'id' : 'en') ? 'var(--accent-orange)' : 'var(--border)'}`, background: language === (i === 0 ? 'id' : 'en') ? 'var(--bg-accent)' : 'var(--bg-primary)', color: language === (i === 0 ? 'id' : 'en') ? 'var(--accent-orange)' : 'var(--text-muted)' }}>{l}</button>)}
         </div>
-        {/* Generate button — captured: "Upgrade to Pro" 182x44 radius 9999px */}
-        <button className="inline-flex items-center rounded-full font-semibold" style={{ background: 'var(--accent-orange)', color: '#fff', fontSize: '15px', fontWeight: 600, padding: '0 24px', height: 44, borderRadius: '9999px' }}>Upgrade to Pro</button>
+        {/* Generate button — free users can do 3-min; 7-min shows Pro hint */}
+        <button onClick={generate} disabled={generating || selected.length !== 2} className="inline-flex items-center gap-2 rounded-full font-semibold disabled:opacity-60" style={{ background: 'var(--accent-orange)', color: '#fff', fontSize: '15px', fontWeight: 600, padding: '0 24px', height: 44, borderRadius: '9999px' }}>
+          {generating ? <Loader2 size={16} className="animate-spin" /> : <Headphones size={16} />}
+          {generating ? (progress || 'Generating...') : 'Generate Podcast'}
+        </button>
+        {generating && (
+          <p className="mt-3 text-xs text-muted">Bimo nulis skrip + bikin suara host satu-satu. Biasanya 30-60 detik.</p>
+        )}
       </div>
     </div>
   );
