@@ -458,7 +458,7 @@ function BimoNoteDetail({ note, activeTab, usage, onUpgrade, onBack }: { note: N
       {tab === 'mindmap' && <MindmapTab note={noteDetail} />}
       {tab === 'kuis' && <QuizTab key={`quiz-${note.id}-${tab}`} noteId={note.id} />}
       {tab === 'flashcard' && <FlashcardTab key={`flash-${note.id}-${tab}`} noteId={note.id} />}
-      {tab === 'sumber' && <SourcesTab note={noteDetail} />}
+      {tab === 'sumber' && <SourcesTab note={noteDetail} noteId={note.id} />}
       {tab === 'chat' && <ChatTab noteId={note.id} noteTitle={note.title} usage={usage} />}
       {tab === 'podcast' && <PodcastTab noteId={note.id} noteTitle={note.title} />}
       {tab === 'tempel' && <StickyTab />}
@@ -971,29 +971,55 @@ function FlashcardTab({ noteId }: { noteId: string }) {
   );
 }
 
-// === Tab 6: Sumber (Sources) — file list + per-document chat ===
-function SourcesTab({ note }: { note: any }) {
-  if (!note?.files || note.files.length === 0) return <div className="flex h-full items-center justify-center"><div className="text-center"><FolderOpen size={32} className="mx-auto text-muted mb-2" /><p className="text-sm text-muted">Belum ada sumber. Upload file untuk mulai.</p></div></div>;
+// === Tab 6: Sumber (Sources) — COPY PASTE 1:1 from pelajarin.ai tab-sumber.html ===
+function SourcesTab({ note, noteId }: { note: any; noteId: string }) {
+  if (!note?.files || note.files.length === 0) return <div className="flex h-full items-center justify-center"><div className="text-center"><FolderOpen size={32} className="mx-auto mb-2 text-text-muted" /><p className="text-sm text-text-muted">Belum ada sumber. Upload file untuk mulai.</p></div></div>;
+  const [messages, setMessages] = useState<{ role: string; content: string }[]>([]);
+  const [input, setInput] = useState('');
+  const [streaming, setStreaming] = useState(false);
+  const sessionIdRef = useRef<string>('');
+  useEffect(() => { sessionIdRef.current = crypto.randomUUID(); }, [noteId]);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  useEffect(() => { scrollRef.current?.scrollTo(0, scrollRef.current.scrollHeight); }, [messages]);
+  async function send() {
+    if (!input.trim() || streaming) return;
+    const msg = input.trim(); setInput(''); setMessages(prev => [...prev, { role: 'user', content: msg }]); setStreaming(true);
+    try {
+      const res = await fetch('/api/v1/chat/completions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ note_id: noteId, session_id: sessionIdRef.current, message: msg }) });
+      if (!res.ok) return; setMessages(prev => [...prev, { role: 'assistant', content: '' }]);
+      const reader = res.body?.getReader(); const decoder = new TextDecoder(); let text = ''; let buf = '';
+      while (reader) { const { done, value } = await reader.read(); if (done) break; buf += decoder.decode(value, { stream: true }); const events = buf.split('\n\n'); buf = events.pop() || ''; for (const evt of events) { const lines = evt.split('\n'); let eventType = ''; let dataStr = ''; for (const line of lines) { if (line.startsWith('event:')) eventType = line.slice(6).trim(); if (line.startsWith('data:')) dataStr = line.slice(5).trim(); } if (!dataStr) continue; try { const data = JSON.parse(dataStr); if (eventType === 'text-delta' && data.text) { text += data.text; setMessages(prev => { const c = [...prev]; c[c.length - 1] = { role: 'assistant', content: text }; return c; }); } } catch {} } }
+    } catch {} finally { setStreaming(false); }
+  }
+  const firstFile = note.files[0];
   return (
-    <div className="flex h-full items-stretch">
-      {/* File list */}
-      <div className="flex flex-col gap-2 border-r border-app p-4" style={{ width: '300px' }}>
-        {note.files.map((f: any) => (
-          <div key={f.id} className="flex items-center gap-3 rounded-xl border-2 border-app p-3" style={{ borderRadius: '16px' }}>
-            <div className="flex h-10 w-10 items-center justify-center rounded-lg" style={{ background: 'var(--bg-surface)' }}><FileText size={20} style={{ color: 'var(--accent-red)' }} /></div>
-            <div className="flex-1 min-w-0"><p className="text-sm font-medium truncate">{f.filename}</p><p className="text-xs text-muted">{(f.size_bytes / 1024).toFixed(0)} KB</p></div>
-            <a href="#" className="text-xs font-semibold" style={{ color: 'var(--accent-blue)' }}>Open ↗</a>
-          </div>
-        ))}
-      </div>
-      {/* Per-document chat */}
-      <div className="flex flex-1 flex-col">
-        <div className="border-b border-app p-3"><span className="text-sm font-semibold">Percakapan Baru</span></div>
-        <div className="flex-1 overflow-y-auto p-4">
-          <div className="text-center py-8"><div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-xl" style={{ background: 'var(--bg-accent)' }}><span style={{ color: 'var(--accent-orange)', fontWeight: 700, fontSize: '20px' }}>B</span></div><p className="text-sm font-semibold">Hi, I'm Bimo!</p><p className="text-xs text-muted mt-1">Ask anything about this document</p></div>
+    <div className="flex h-[calc(100vh-4rem)] items-stretch">
+      <section className="flex min-h-0 flex-col overflow-hidden bg-surface-secondary min-w-0 flex-1">
+        <div className="flex h-[52px] flex-none items-center gap-3 bg-surface px-4">
+          <FileText size={28} className="flex-none text-error" />
+          <span className="min-w-0 flex-1 truncate text-sm font-semibold text-text-primary">{firstFile.filename}</span>
+          <a href="#" onClick={(e) => e.preventDefault()} className="flex-none text-[13px] font-semibold text-primary hover:underline">Open ↗</a>
         </div>
-        <div className="flex gap-2 p-3 border-t border-app"><textarea placeholder="Ask..." className="flex-1 resize-none border-none bg-transparent outline-none text-sm" style={{ fontSize: '15px' }} /><button className="grid h-10 w-10 place-items-center rounded-full" style={{ background: 'var(--bg-accent)', color: 'var(--accent-orange)', borderRadius: '9999px' }}><Send size={16} /></button></div>
-      </div>
+        <div className="min-h-0 w-full flex-1 border-0 bg-surface flex items-center justify-center"><div className="text-center"><FileText size={48} className="mx-auto mb-3 text-text-muted" /><p className="text-sm text-text-muted">PDF preview akan muncul di sini</p></div></div>
+      </section>
+      <aside className="relative min-h-0 flex-col overflow-hidden bg-surface lg:flex lg:h-full lg:flex-none" style={{ width: '380px', display: 'flex' }}>
+        <header className="flex items-center gap-2 px-3 pb-3 pt-4">
+          <div className="flex min-w-0 flex-1 items-center gap-1.5">
+            <button type="button" className="flex min-w-0 max-w-full items-center gap-1.5 rounded-lg px-2 py-1 text-left transition-colors hover:bg-surface-secondary"><span className="truncate font-heading text-[15px] font-bold text-text-primary">Percakapan Baru</span><ChevronRight size={16} className="flex-none rotate-90 text-text-muted" /></button>
+            <button type="button" aria-label="New Chat" title="New Chat" className="grid size-8 flex-none place-items-center rounded-lg text-text-secondary transition-colors hover:bg-surface-secondary hover:text-text-primary"><Plus size={18} /></button>
+          </div>
+        </header>
+        <div ref={scrollRef} className="flex flex-1 flex-col items-center justify-center gap-6 px-4 pb-10 overflow-y-auto">
+          {messages.length === 0 && (<div className="max-w-[340px] text-center"><img sizes="88px" alt="" aria-hidden="true" decoding="async" className="object-contain mx-auto mb-3 size-[88px]" src="/assets/idle-Ctcj4aS0.webp" /><h2 className="font-heading font-bold text-text-primary text-[22px]">Hi, I'm Pai!</h2><p className="mt-2 text-sm leading-relaxed text-text-secondary">Ask anything about this document — I have already read it.</p></div>)}
+          {messages.map((m, i) => (<div key={i} className={`w-full max-w-[340px] ${m.role === 'user' ? 'self-end' : 'self-start'}`}><div className="rounded-2xl px-3 py-2 text-sm" style={{ background: m.role === 'user' ? 'var(--color-primary)' : 'var(--color-surface-tertiary)', color: m.role === 'user' ? 'var(--color-text-inverse)' : 'var(--color-text-primary)' }}>{m.role === 'assistant' && m.content === '' && streaming ? <Loader2 size={14} className="animate-spin" /> : m.role === 'assistant' ? <div className="prose prose-sm max-w-none"><Markdown content={m.content} /></div> : m.content}</div></div>))}
+        </div>
+        <div className="w-full max-w-[440px] p-4">
+          <div className="grid min-h-[56px] grid-cols-[1fr_auto] items-center gap-x-1.5 rounded-full bg-surface-tertiary py-0 pl-6 pr-2">
+            <textarea rows={1} value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }} placeholder="Ask anything about this material…" aria-label="Ask anything about this material…" className="col-start-1 row-start-1 m-0 min-w-0 resize-none border-0 bg-transparent p-0 text-[15px] text-text-primary outline-none placeholder:text-text-muted" />
+            <div className="col-start-2 row-start-1 flex items-center gap-1.5 justify-self-end"><button type="button" aria-label="Voice input" title="Voice input" className="grid size-10 flex-none place-items-center rounded-full text-text-secondary transition-colors hover:bg-surface-secondary hover:text-text-primary"><Mic size={18} /></button><button type="button" onClick={send} disabled={streaming || !input.trim()} aria-label="Send" className="grid size-10 flex-none place-items-center rounded-full bg-primary text-text-inverse transition-colors hover:bg-primary-hover disabled:bg-surface-tertiary disabled:text-text-muted"><Send size={18} /></button></div>
+          </div>
+        </div>
+      </aside>
     </div>
   );
 }
