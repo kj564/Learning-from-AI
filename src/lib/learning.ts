@@ -79,9 +79,11 @@ export async function ensureDevUser(req: NextRequest): Promise<LearningUser> {
   let userId = match ? decodeURIComponent(match[1]) : null;
 
   if (!userId) {
-    // Auto-provision: create a new dev user id + set cookie via response.
-    userId = `dev_${randomUUID()}`;
-    // We'll set the cookie on the response; for now just return the user.
+    // Fixed dev fallback: keep ONE stable demo user across sessions so the
+    // demo note ("Fotosintesis 101"), stickies and progress persist. New
+    // browsers without a cookie land here instead of a throwaway user.
+    // (Rebranding/auth swap happens in a separate session.)
+    userId = process.env.DEV_USER_FALLBACK || 'dev_cf9ab0b1-1d0e-4cff-b414-ca4957ea53e9';
   }
 
   let sub = await db.subscription.findUnique({ where: { userId } });

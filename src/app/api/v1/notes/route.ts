@@ -113,6 +113,9 @@ export async function POST(req: NextRequest) {
 }
 
 function noteSummary(n: any) {
+  // File metadata for the card cover (per pelajarin: note cards show the PDF cover)
+  let fileIds: string[] = [];
+  try { fileIds = JSON.parse(n.fileIdsJson || '[]'); } catch {}
   return {
     id: n.id,
     title: n.title,
@@ -126,6 +129,8 @@ function noteSummary(n: any) {
     is_public: n.isPublic,
     created_at: n.createdAt,
     updated_at: n.updatedAt,
+    file_ids: fileIds,
+    has_document: fileIds.length > 0,
   };
 }
 

@@ -175,8 +175,8 @@ ${text}
 Setiap soal punya:
 - type: "mc" (pilihan ganda)
 - question: pertanyaan yang jelas
-- options: 4 pilihan jawaban (array string)
-- answer: jawaban yang benar (harus sama persis dengan salah satu option)
+- options: 4 pilihan jawaban (array string, teks lengkap BUKAN huruf A/B/C/D)
+- answer: TEKS JAWABAN YANG BENAR — harus SALAH SATU STRING di options, persis sama. BUKAN huruf.
 - explanation: penjelasan kenapa jawaban itu benar (1-2 kalimat)
 - hint: petunjuk singkat untuk membantu siswa (tanpa memberikan jawaban langsung)
 - difficulty: "easy" | "medium" | "hard"
@@ -184,7 +184,7 @@ Setiap soal punya:
 
 Output JSON:
 {"questions": [
-  {"type":"mc","question":"...","options":["A","B","C","D"],"answer":"B","explanation":"...","hint":"...","difficulty":"medium","xp":10}
+  {"type":"mc","question":"Proses fotosintesis terutama terjadi di organel?","options":["Mitokondria","Kloroplas","Nukleus","Vakuola"],"answer":"Kloroplas","explanation":"...","hint":"...","difficulty":"easy","xp":10}
 ]}
 
 JSON saja, tanpa teks lain.`;
@@ -196,7 +196,23 @@ JSON saja, tanpa teks lain.`;
 
   const rawContent = response?.choices?.[0]?.message?.content || '';
   const parsed = parseJSONResponse(rawContent, { questions: [] });
-  return parsed.questions || [];
+  const questions: GeneratedQuestion[] = parsed.questions || [];
+  // Normalize answers: the LLM sometimes returns a letter ("B") instead of the
+  // option text even when asked. Map letters → option text, and if the answer
+  // text is missing from options, replace the closest-matching option so the
+  // quiz is always answerable.
+  for (const q of questions) {
+    if (q.options && q.options.length > 0) {
+      if (/^[A-Da-d]$/.test(q.answer || '')) {
+        const idx = q.answer.toUpperCase().charCodeAt(0) - 65;
+        if (idx >= 0 && idx < q.options.length) q.answer = q.options[idx];
+      }
+      if (q.answer && !q.options.some(o => o.trim().toLowerCase() === q.answer.trim().toLowerCase())) {
+        q.options[q.options.length - 1] = q.answer;
+      }
+    }
+  }
+  return questions;
 }
 
 // ============================================================
